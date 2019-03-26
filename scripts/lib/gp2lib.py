@@ -260,9 +260,9 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
     >>> vp_e = {"CLIP_01": 21, "CLIP_02": 15}
     >>> g_list = convert_seqs_to_graphs(seqs_dic, vp_s, vp_e, up_dic=up_dic, vp_lr_ext=5, ext_mode=1, bpp_dic=bpp_dic)
     >>> convert_graph_to_string(g_list[0])
-    '1-2,1-3,2-3,2-7,3-4,4-5,5-6,6-7,7-8,8-9,8-13,9-10,10-11,11-12,12-13,13-14,14-15,14-18,15-16,16-17,17-18,18-19,19-20,20-21,'
+    '0-1,0-2,1-2,1-6,2-3,3-4,4-5,5-6,6-7,7-8,7-12,8-9,9-10,10-11,11-12,12-13,13-14,13-17,14-15,15-16,16-17,17-18,18-19,19-20,'
     >>> convert_graph_to_string(g_list[1])
-    '1-2,2-3,3-4,4-5,5-6,6-7,7-8,7-11,8-9,9-10,10-11,11-12,12-13,13-14,14-15,15-16,16-17,17-18,18-19,19-20,'
+    '0-1,1-2,2-3,3-4,4-5,5-6,6-7,6-10,7-8,8-9,9-10,10-11,11-12,12-13,13-14,14-15,15-16,16-17,17-18,18-19,'
 
     """
     g_list = []
@@ -289,9 +289,8 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
             # Skip if outside region of interest.
             if i < (ex_s-1) or i > (ex_e-1):
                 continue
-            g_i += 1
             # Add nucleotide node.
-            g.add_node(g_i, label=c)
+            g.add_node(g_i, label=c) # zero-based graph node index.
             # Add unpaired probability attribute.
             if up_dic:
                 if not seq_id in up_dic:
@@ -302,8 +301,10 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
                     sys.exit()
                 g.node[g_i]['up'] = up_dic[seq_id][i]
             # Add backbone edge.
-            if g_i > 1:
+            if g_i > 0:
                 g.add_edge(g_i-1, g_i, label = '-',type='backbone')
+            # Increment graph node index.
+            g_i += 1
         # Add base pair edges to graph.
         if bpp_dic:
             if not seq_id in bpp_dic:
@@ -314,8 +315,8 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
                 p1 = int(m.group(1))
                 p2 = int(m.group(2))
                 bpp_value = float(m.group(3))
-                g_p1 = p1 - ex_s + 1 # 1-based base pair pos1.
-                g_p2 = p2 - ex_s + 1 # 1-based base pair pos1.
+                g_p1 = p1 - ex_s # 0-based base pair pos1.
+                g_p2 = p2 - ex_s # 0-based base pair pos2.
                 # Filter.
                 if bpp_value < plfold_bpp_cutoff: continue
                 # Add edge if bpp value >= threshold.

@@ -3,6 +3,7 @@
 import argparse
 import os
 import sys
+import numpy as np
 from lib import gp2lib
 
 
@@ -56,7 +57,7 @@ def main():
 
     # Extract additional annotations.
     if args.use_up:
-        print("Read in .up files ... ")
+        print("Read in .up files ... ") 
         pos_up_dic = gp2lib.read_up_into_dic(pos_up_file)
         neg_up_dic = gp2lib.read_up_into_dic(neg_up_file)
     if args.use_bpp:
@@ -89,7 +90,8 @@ def main():
     # Convert to numpy arrays.
     # Create labels.
     # Submit to training.
-
+    print (np.sum(pos_bppms[0]))
+    
 
 ################################################################################
 
