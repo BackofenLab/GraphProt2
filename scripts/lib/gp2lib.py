@@ -4,6 +4,7 @@ import sys
 import re
 import networkx as nx
 import numpy as np
+import os
 
 """
 GraphProt2 Python3 function library
@@ -12,6 +13,153 @@ Run doctests from base directory:
 python3 -m doctest -v lib/gp2lib.py
 
 """
+
+
+def load_data(data_folder, 
+              use_up=False,
+              disable_bpp=False,
+              bpp_cutoff=0.2,
+              bpp_mode=1,
+              fix_vp_len=True):
+    """
+    Load data from data_folder.
+    Return list of structure graphs, one-hot encoded sequences np array, 
+    and label vector.
+    
+    Function parameters:
+        use_up : if true add unpaired probabilities to graph and one-hot
+        disable_bpp : disables adding of base pair information
+        bpp_cutoff : bp probability threshold when adding bp probs.
+        bpp_mode : see ext_mode in convert_seqs_to_graphs for details
+        fix_vp_len : Use only viewpoint regions with same length (= max length)
+    
+    More parameters to come:
+              use_str_elem_up=False,
+              use_site_feat=False,
+    """
+    # Define upstream + downstream viewpoint extension. (normally set equal to used plfold_L)
+    vp_ext = 100
+    # Input files.
+    pos_fasta_file = "%s/positives.fa" % (data_folder)
+    neg_fasta_file = "%s/negatives.fa" % (data_folder)
+    pos_up_file = "%s/positives.up" % (data_folder)
+    neg_up_file = "%s/negatives.up" % (data_folder)
+    pos_bpp_file = "%s/positives.bpp" % (data_folder)
+    neg_bpp_file = "%s/negatives.bpp" % (data_folder)
+    #pos_str_elem_up_file = "%s/positives.str_elem.up" % (data_folder)
+    #neg_str_elem_up_file = "%s/negatives.str_elem.up" % (data_folder)
+    #pos_site_feat_file = "%s/positives.sf" % (data_folder)
+    #neg_site_feat_file = "%s/negatives.sf" % (data_folder)
+    #pos_con_file = "%s/positives.con" % (data_folder)
+    #neg_con_file = "%s/negatives.con" % (data_folder)
+    #pos_entropy_file = "%s/positives.ent" % (data_folder)
+    #neg_entropy_file = "%s/negatives.ent" % (data_folder)
+
+    # Check inputs.
+    if not os.path.isdir(data_folder):
+        print("INPUT_ERROR: Input data folder \"%s\" not found" % (data_folder))
+        sys.exit()
+    if not os.path.isfile(pos_fasta_file):
+        print("INPUT_ERROR: missing \"%s\"" % (pos_fasta_file))
+        sys.exit()
+    if not os.path.isfile(neg_fasta_file):
+        print("INPUT_ERROR: missing \"%s\"" % (neg_fasta_file))
+        sys.exit()
+    if use_up:
+        if not os.path.isfile(pos_up_file):
+            print("INPUT_ERROR: missing \"%s\"" % (pos_up_file))
+            sys.exit()
+        if not os.path.isfile(neg_up_file):
+            print("INPUT_ERROR: missing \"%s\"" % (neg_up_file))
+            sys.exit()
+    if not disable_bpp:
+        if not os.path.isfile(pos_bpp_file):
+            print("INPUT_ERROR: missing \"%s\"" % (pos_bpp_file))
+            sys.exit()
+        if not os.path.isfile(neg_bpp_file):
+            print("INPUT_ERROR: missing \"%s\"" % (neg_bpp_file))
+            sys.exit()
+
+    # Read in FASTA sequences.
+    pos_seqs_dic = read_fasta_into_dic(pos_fasta_file)
+    neg_seqs_dic = read_fasta_into_dic(neg_fasta_file)
+    # Get viewpoint regions.
+    pos_vp_s, pos_vp_e = extract_viewpoint_regions_from_fasta(pos_seqs_dic)
+    neg_vp_s, neg_vp_e = extract_viewpoint_regions_from_fasta(neg_seqs_dic)
+    # Extract most prominent (max) viewpoint length from data.
+    max_vp_l = 0
+    if fix_vp_len:
+        for seq_id in pos_seqs_dic:
+            vp_l = pos_vp_e[seq_id] - pos_vp_s[seq_id] + 1  # +1 since 1-based.
+            if vp_l > max_vp_l:
+                max_vp_l = vp_l
+        if not max_vp_l:
+            print("ERROR: viewpoint length extraction failed")
+            sys.exit()
+
+    # Init dictionaries.
+    pos_up_dic = False
+    neg_up_dic = False
+    pos_bpp_dic = False
+    neg_bpp_dic = False
+    pos_con_dic = False
+    neg_con_dic = False
+    pos_entropy_dic = False
+    neg_entropy_dic = False
+
+    # Extract additional annotations.
+    if use_up:
+        pos_up_dic = read_up_into_dic(pos_up_file)
+        neg_up_dic = read_up_into_dic(neg_up_file)
+    if not disable_bpp:
+        pos_bpp_dic = read_bpp_into_dic(pos_bpp_file, pos_vp_s, pos_vp_e, 
+                                        vp_lr_ext=vp_ext)
+        neg_bpp_dic = read_bpp_into_dic(neg_bpp_file, neg_vp_s, neg_vp_e, 
+                                        vp_lr_ext=vp_ext)
+    #if args.use_con:
+    #    pos_con_dic = gp2lib.read_con_into_dic(pos_con_file, pos_vp_s, pos_vp_e)
+    #    neg_con_dic = gp2lib.read_con_into_dic(neg_con_file, neg_vp_s, neg_vp_e)
+    #if args.use_entropy:
+    #    pos_entropy_dic = gp2lib.read_entropy_into_dic(pos_entropy_file, pos_vp_s, pos_vp_e)
+    #    neg_entropy_dic = gp2lib.read_entropy_into_dic(neg_entropy_file, neg_vp_s, neg_vp_e)
+
+    # Convert input sequences to one-hot encoding (optionally with unpaired probabilities vector).
+    pos_seq_1h = convert_seqs_to_one_hot(pos_seqs_dic, pos_vp_s, pos_vp_e, 
+                                         up_dic=pos_up_dic, 
+                                         fix_vp_len=max_vp_l)
+    neg_seq_1h = convert_seqs_to_one_hot(neg_seqs_dic, neg_vp_s, neg_vp_e, 
+                                         up_dic=neg_up_dic, 
+                                         fix_vp_len=max_vp_l)
+    # Convert input sequences to sequence or structure graphs.
+    pos_graphs = convert_seqs_to_graphs(pos_seqs_dic, pos_vp_s, pos_vp_e, 
+                                        up_dic=pos_up_dic, 
+                                        bpp_dic=pos_bpp_dic, 
+                                        vp_lr_ext=vp_ext, 
+                                        fix_vp_len=max_vp_l, 
+                                        ext_mode=bpp_mode,
+                                        plfold_bpp_cutoff=bpp_cutoff)
+    neg_graphs = convert_seqs_to_graphs(neg_seqs_dic, neg_vp_s, neg_vp_e, 
+                                        up_dic=neg_up_dic, 
+                                        bpp_dic=neg_bpp_dic, 
+                                        vp_lr_ext=vp_ext, 
+                                        fix_vp_len=max_vp_l, 
+                                        ext_mode=bpp_mode,
+                                        plfold_bpp_cutoff=bpp_cutoff)
+    # Create labels.
+    labels = [1]*len(pos_seq_1h) + [0]*len(neg_seq_1h)
+    # Concatenate pos+neg one-hot lists.
+    seq_1h = pos_seq_1h + neg_seq_1h
+    # Convert 1h list to np array, transpose matrices and make each entry 3d (1,number_of_features,vp_length).
+    new_seq_1h = [] 
+    for idx in range(len(seq_1h)):
+        M = np.array(seq_1h[idx]).transpose()
+        M = np.reshape(M, (1, M.shape[0], M.shape[1]))
+        new_seq_1h.append(M)
+    # Concatenate pos+neg graph lists.
+    graphs = pos_graphs + neg_graphs
+    # Return graphs list, one-hot np.array, and label vector.
+    return graphs, new_seq_1h, labels
+
 
 ################################################################################
 
@@ -236,6 +384,7 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
                            bpp_dic=None,
                            plfold_bpp_cutoff=0.2,
                            vp_lr_ext=100, 
+                           fix_vp_len=False,
                            ext_mode=1):
     """
     Convert dictionary of sequences into list of networkx graphs.
@@ -267,12 +416,18 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
     """
     g_list = []
     for seq_id, seq in sorted(seqs_dic.items()):
+        # Get viewpoint start+end of sequence.
+        vp_s = vp_s_dic[seq_id]
+        vp_e = vp_e_dic[seq_id]
+        l_vp = vp_e - vp_s + 1
+        # If fixed vp length given, only store sites with this vp length.
+        if fix_vp_len:
+            if not l_vp == fix_vp_len:
+                continue
         # Construct the sequence graph.
         g = nx.Graph()
         g.graph["id"] = seq_id
         l_seq = len(seq)
-        vp_s = vp_s_dic[seq_id]
-        vp_e = vp_e_dic[seq_id]
         # Subsequence extraction start + end (1-based).
         ex_s = vp_s
         ex_e = vp_e
@@ -461,7 +616,8 @@ def convert_seqs_to_bppms(seqs_dic, vp_s, vp_e, bpp_dic,
 
 ################################################################################
 
-def convert_seqs_to_one_hot(seqs_dic, vp_s, vp_e,
+def convert_seqs_to_one_hot(seqs_dic, vp_s_dic, vp_e_dic,
+                            fix_vp_len=False,
                             up_dic=False):
     """
     Convert sequence dictionary in list of one-hot encoded sequences.
@@ -483,8 +639,16 @@ def convert_seqs_to_one_hot(seqs_dic, vp_s, vp_e,
     """
     seqs_list_1h = []
     for seq_id, seq in sorted(seqs_dic.items()):
+        # Get viewpoint start+end of sequence.
+        vp_s = vp_s_dic[seq_id]
+        vp_e = vp_e_dic[seq_id]
+        l_vp = vp_e - vp_s + 1
+        # If fixed vp length given, only store sites with this vp length.
+        if fix_vp_len:
+            if not l_vp == fix_vp_len:
+                continue
         # Convert sequence to one-hot-encoding.
-        seq_1h = string_vectorizer(seq, vp_s[seq_id], vp_e[seq_id])
+        seq_1h = string_vectorizer(seq, vp_s, vp_e)
         # If unpaired probabilities given, add to matrix.
         if up_dic:
             if not seq_id in up_dic:
@@ -496,7 +660,7 @@ def convert_seqs_to_one_hot(seqs_dic, vp_s, vp_e,
                 print ("ERROR: length of unpaired probability list != sequence length (\"%s\" != \"%s\")" % (l_seq, l_up_list))
                 sys.exit()
             # Start index of up list.
-            i= vp_s[seq_id] - 1
+            i= vp_s - 1
             # Add unpaired probabilities to one-hot matrix (add row).
             for row in seq_1h:
                 row.append(up_dic[seq_id][i])

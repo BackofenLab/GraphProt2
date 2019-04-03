@@ -7,6 +7,17 @@ import numpy as np
 from lib import gp2lib
 
 
+"""
+
+Beware of list order
+
+Option to add characters all upper case to graph.
+
+Add structural elements information to one-hot matrices.
+
+"""
+
+
 def main():
     # Setup argparse and define available command line arguments.
     parser = setup_argument_parser()
@@ -90,7 +101,7 @@ def main():
     # Convert to numpy arrays.
     # Create labels.
     # Submit to training.
-    print (np.sum(pos_bppms[0]))
+    #print (np.sum(pos_bppms[0]))
     
 
 ################################################################################
