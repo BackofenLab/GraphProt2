@@ -12,11 +12,21 @@ GraphProt2 Python3 function library
 Run doctests from base directory:
 python3 -m doctest -v lib/gp2lib.py
 
+
+Skip headers, for multi-set results files, headers are currently inserted many times
+
+id	AA	AC	AG	AT	CA	CC	CG	CT	GA	GC	GG	GT	TA	TC	TG	TT	dist_k
+random_negative_0021126	361	11	13	23	20	26	29	10	30	12	24	23	25	18	28	29	39	16
+random_negative_0134744	361	33	21	32	21	22	21	2	42	23	18	9	16	29	27	23	21	16
+
 """
 
 
 def load_data(data_folder, 
               use_up=False,
+              use_con=False,
+              use_str_elem_up=False,
+              use_sf=False,
               disable_bpp=False,
               bpp_cutoff=0.2,
               bpp_mode=1,
@@ -28,14 +38,14 @@ def load_data(data_folder,
     
     Function parameters:
         use_up : if true add unpaired probabilities to graph and one-hot
+        use_con : if true add conservation scores to one-hot
+        use_str_elem_up: add str elements unpaired probs to one-hot
+        use_sf: add site features, store in additional vector for each sequence
         disable_bpp : disables adding of base pair information
         bpp_cutoff : bp probability threshold when adding bp probs.
         bpp_mode : see ext_mode in convert_seqs_to_graphs for details
         fix_vp_len : Use only viewpoint regions with same length (= max length)
-    
-    More parameters to come:
-              use_str_elem_up=False,
-              use_site_feat=False,
+
     """
     # Define upstream + downstream viewpoint extension. (normally set equal to used plfold_L)
     vp_ext = 100
@@ -46,12 +56,12 @@ def load_data(data_folder,
     neg_up_file = "%s/negatives.up" % (data_folder)
     pos_bpp_file = "%s/positives.bpp" % (data_folder)
     neg_bpp_file = "%s/negatives.bpp" % (data_folder)
-    #pos_str_elem_up_file = "%s/positives.str_elem.up" % (data_folder)
-    #neg_str_elem_up_file = "%s/negatives.str_elem.up" % (data_folder)
-    #pos_site_feat_file = "%s/positives.sf" % (data_folder)
-    #neg_site_feat_file = "%s/negatives.sf" % (data_folder)
-    #pos_con_file = "%s/positives.con" % (data_folder)
-    #neg_con_file = "%s/negatives.con" % (data_folder)
+    pos_con_file = "%s/positives.con" % (data_folder)
+    neg_con_file = "%s/negatives.con" % (data_folder)
+    pos_str_elem_up_file = "%s/positives.str_elem.up" % (data_folder)
+    neg_str_elem_up_file = "%s/negatives.str_elem.up" % (data_folder)
+    pos_sf_file = "%s/positives.sf" % (data_folder)
+    neg_sf_file = "%s/negatives.sf" % (data_folder)
     #pos_entropy_file = "%s/positives.ent" % (data_folder)
     #neg_entropy_file = "%s/negatives.ent" % (data_folder)
 
@@ -71,6 +81,27 @@ def load_data(data_folder,
             sys.exit()
         if not os.path.isfile(neg_up_file):
             print("INPUT_ERROR: missing \"%s\"" % (neg_up_file))
+            sys.exit()
+    if use_str_elem_up:
+        if not os.path.isfile(pos_str_elem_up_file):
+            print("INPUT_ERROR: missing \"%s\"" % (pos_str_elem_up_file))
+            sys.exit()
+        if not os.path.isfile(neg_str_elem_up_file):
+            print("INPUT_ERROR: missing \"%s\"" % (neg_str_elem_up_file))
+            sys.exit()
+    if use_con:
+        if not os.path.isfile(pos_con_file):
+            print("INPUT_ERROR: missing \"%s\"" % (pos_con_file))
+            sys.exit()
+        if not os.path.isfile(neg_con_file):
+            print("INPUT_ERROR: missing \"%s\"" % (neg_con_file))
+            sys.exit()
+    if use_sf:
+        if not os.path.isfile(pos_sf_file):
+            print("INPUT_ERROR: missing \"%s\"" % (pos_sf_file))
+            sys.exit()
+        if not os.path.isfile(neg_sf_file):
+            print("INPUT_ERROR: missing \"%s\"" % (neg_sf_file))
             sys.exit()
     if not disable_bpp:
         if not os.path.isfile(pos_bpp_file):
@@ -102,10 +133,13 @@ def load_data(data_folder,
     neg_up_dic = False
     pos_bpp_dic = False
     neg_bpp_dic = False
-    pos_con_dic = False
+    # con_dic: seq_id to 2xn matrix (storing both phastcons+phylop)
+    pos_con_dic = False 
     neg_con_dic = False
-    pos_entropy_dic = False
-    neg_entropy_dic = False
+    pos_str_elem_up_dic = False
+    neg_str_elem_up_dic = False
+    pos_sf_dic = False
+    neg_sf_dic = False
 
     # Extract additional annotations.
     if use_up:
@@ -116,6 +150,15 @@ def load_data(data_folder,
                                         vp_lr_ext=vp_ext)
         neg_bpp_dic = read_bpp_into_dic(neg_bpp_file, neg_vp_s, neg_vp_e, 
                                         vp_lr_ext=vp_ext)
+    if use_con:
+        pos_con_dic = read_con_into_dic(pos_con_file)
+        neg_con_dic = read_con_into_dic(neg_con_file)
+    if use_str_elem_up:
+        pos_str_elem_up_dic = read_str_elem_up_into_dic(pos_str_elem_up_file)
+        neg_str_elem_up_dic = read_str_elem_up_into_dic(neg_str_elem_up_file)
+    if use_sf:
+        pos_sf_dic = read_sf_into_dic(pos_sf_file)
+        neg_sf_dic = read_sf_into_dic(neg_sf_file)
     #if args.use_con:
     #    pos_con_dic = gp2lib.read_con_into_dic(pos_con_file, pos_vp_s, pos_vp_e)
     #    neg_con_dic = gp2lib.read_con_into_dic(neg_con_file, neg_vp_s, neg_vp_e)
@@ -125,10 +168,14 @@ def load_data(data_folder,
 
     # Convert input sequences to one-hot encoding (optionally with unpaired probabilities vector).
     pos_seq_1h = convert_seqs_to_one_hot(pos_seqs_dic, pos_vp_s, pos_vp_e, 
-                                         up_dic=pos_up_dic, 
+                                         up_dic=pos_up_dic,
+                                         con_dic=pos_con_dic,
+                                         str_elem_up_dic=pos_str_elem_up_dic,
                                          fix_vp_len=max_vp_l)
     neg_seq_1h = convert_seqs_to_one_hot(neg_seqs_dic, neg_vp_s, neg_vp_e, 
                                          up_dic=neg_up_dic, 
+                                         con_dic=neg_con_dic,
+                                         str_elem_up_dic=neg_str_elem_up_dic,
                                          fix_vp_len=max_vp_l)
     # Convert input sequences to sequence or structure graphs.
     pos_graphs = convert_seqs_to_graphs(pos_seqs_dic, pos_vp_s, pos_vp_e, 
@@ -150,7 +197,7 @@ def load_data(data_folder,
     # Concatenate pos+neg one-hot lists.
     seq_1h = pos_seq_1h + neg_seq_1h
     # Convert 1h list to np array, transpose matrices and make each entry 3d (1,number_of_features,vp_length).
-    new_seq_1h = [] 
+    new_seq_1h = []
     for idx in range(len(seq_1h)):
         M = np.array(seq_1h[idx]).transpose()
         M = np.reshape(M, (1, M.shape[0], M.shape[1]))
@@ -275,6 +322,81 @@ def extract_viewpoint_regions_from_fasta(seqs_dic):
 
 ################################################################################
 
+def read_str_elem_up_into_dic(str_elem_up_file):
+
+    """
+    Read in structural elements unpaired probabilities for each sequence 
+    position. Available structural elements:
+    p_unpaired, p_external, p_hairpin, p_internal, p_multiloop, p_paired
+    Input Format:
+    >sequence_id
+    pos(1-based)<t>p_unpaired<t>p_external<t>p_hairpin<t>p_internal<t>p_multiloop<t>p_paired
+    Extract: p_external, p_hairpin, p_internal, p_multiloop
+    thus getting 4xn matrix for sequence with length n
+    Return dictionary with matrix for each sequence.
+    (key: sequence id, value: ups matrix)
+
+    >>> str_elem_up_test = "test_data/test.str_elem.up"
+    >>> read_str_elem_up_into_dic(str_elem_up_test)
+    {'CLIP_01': [[0.1, 0.2], [0.2, 0.3], [0.3, 0.2], [0.3, 0.1]]}
+
+    """
+    str_elem_up_dic = {}
+    seq_id = ""
+    # Go through .str_elem.up file, extract p_external, p_hairpin, p_internal, p_multiloop.
+    with open(str_elem_up_file) as f:
+        for line in f:
+            if re.search(">.+", line):
+                m = re.search(">(.+)", line)
+                seq_id = m.group(1)
+                str_elem_up_dic[seq_id] = [[],[],[],[]]
+            else:
+                m = re.search("\d+\t.+?\t(.+?)\t(.+?)\t(.+?)\t(.+?)\t", line)
+                p_external = float(m.group(1))
+                p_hairpin = float(m.group(2))
+                p_internal = float(m.group(3))
+                p_multiloop = float(m.group(4))
+                str_elem_up_dic[seq_id][0].append(p_external)
+                str_elem_up_dic[seq_id][1].append(p_hairpin)
+                str_elem_up_dic[seq_id][2].append(p_internal)
+                str_elem_up_dic[seq_id][3].append(p_multiloop)
+    f.closed
+    return str_elem_up_dic
+
+
+################################################################################
+
+def read_sf_into_dic(sf_file):
+
+    """
+    Read site features into dictionary.
+    (key: sequence id, value: vector of site feature values)
+
+    >>> sf_test = "test_data/test.sf"
+    >>> read_sf_into_dic(sf_test)
+    {'CLIP_01': [0.2, 0.3, 0.3, 0.2], 'CLIP_02': [0.1, 0.2, 0.4, 0.3]}
+
+    """
+    sf_dic = {}
+    seq_id = ""
+    # Go through .up file, extract unpaired probs for each position.
+    with open(sf_file) as f:
+        for line in f:
+            f_list = line.strip().split("\t")
+            # Skip header line(s).
+            if f_list[0] == "id":
+                continue
+            seq_id = f_list[0]
+            f_list.pop(0)
+            sf_dic[seq_id] = []
+            for i in f_list:
+                sf_dic[seq_id].append(float(i))
+    f.closed
+    return sf_dic
+
+
+################################################################################
+
 def read_up_into_dic(up_file):
 
     """
@@ -294,7 +416,7 @@ def read_up_into_dic(up_file):
     """
     up_dic = {}
     seq_id = ""
-    # Go through .up file, extract sequences.
+    # Go through .up file, extract unpaired probs for each position.
     with open(up_file) as f:
         for line in f:
             if re.search(">.+", line):
@@ -307,6 +429,41 @@ def read_up_into_dic(up_file):
                 up_dic[seq_id].append(up)
     f.closed
     return up_dic
+
+
+################################################################################
+
+def read_con_into_dic(con_file):
+
+    """
+    Read in conservation scores (phastCons+phyloP) and store scores as 
+    2xn matrix for sequence with length n. 
+    Return dictionary with matrix for each sequence
+    (key: sequence id, value: scores matrix)
+    Entry format: [[1,2,3],[4,5,6]] : 2x3 format (2 rows, 3 columns)
+
+    >>> con_test = "test_data/test.con"
+    >>> read_con_into_dic(con_test)
+    {'CLIP_01': [[0.1, 0.2], [0.3, -0.4]], 'CLIP_02': [[0.4, 0.5], [0.6, 0.7]]}
+
+    """
+    con_dic = {}
+    seq_id = ""
+    # Go through .con file, extract phastCons, phyloP scores for each position.
+    with open(con_file) as f:
+        for line in f:
+            if re.search(">.+", line):
+                m = re.search(">(.+)", line)
+                seq_id = m.group(1)
+                con_dic[seq_id] = [[],[]]
+            else:
+                m = re.search("\d+\t(.+?)\t(.+)", line)
+                phastcons_sc = float(m.group(1))
+                phylop_sc = float(m.group(2))
+                con_dic[seq_id][0].append(phastcons_sc)
+                con_dic[seq_id][1].append(phylop_sc)
+    f.closed
+    return con_dic
 
 
 ################################################################################
@@ -618,7 +775,9 @@ def convert_seqs_to_bppms(seqs_dic, vp_s, vp_e, bpp_dic,
 
 def convert_seqs_to_one_hot(seqs_dic, vp_s_dic, vp_e_dic,
                             fix_vp_len=False,
-                            up_dic=False):
+                            up_dic=False,
+                            str_elem_up_dic=False,
+                            con_dic=False):
     """
     Convert sequence dictionary in list of one-hot encoded sequences.
     Each dictionary element (sequence id = key) contains 2d list of one-hot 
@@ -627,6 +786,8 @@ def convert_seqs_to_one_hot(seqs_dic, vp_s_dic, vp_e_dic,
 
     >>> seqs_dic = {"CLIP_01" : "guAUCGgu"}
     >>> up_dic = {"CLIP_01" : [0.5]*8}
+    >>> con_dic = {"CLIP_01" : [[0.4]*8,[0.6]*8]}
+    >>> str_elem_up_dic = {"CLIP_01" : [[0.1]*8,[0.2]*8,[0.3]*8,[0.2]*8]}
     >>> vp_s = {"CLIP_01": 3}
     >>> vp_e = {"CLIP_01": 6}
     >>> seqs_list_1h = convert_seqs_to_one_hot(seqs_dic, vp_s, vp_e)
@@ -635,6 +796,12 @@ def convert_seqs_to_one_hot(seqs_dic, vp_s_dic, vp_e_dic,
     >>> seqs_list_1h = convert_seqs_to_one_hot(seqs_dic, vp_s, vp_e, up_dic=up_dic)
     >>> print(seqs_list_1h[0])
     [[1, 0, 0, 0, 0.5], [0, 0, 0, 1, 0.5], [0, 1, 0, 0, 0.5], [0, 0, 1, 0, 0.5]]
+    >>> seqs_list_1h = convert_seqs_to_one_hot(seqs_dic, vp_s, vp_e, con_dic=con_dic)
+    >>> print(seqs_list_1h[0])
+    [[1, 0, 0, 0, 0.4, 0.6], [0, 0, 0, 1, 0.4, 0.6], [0, 1, 0, 0, 0.4, 0.6], [0, 0, 1, 0, 0.4, 0.6]]
+    >>> seqs_list_1h = convert_seqs_to_one_hot(seqs_dic, vp_s, vp_e, str_elem_up_dic=str_elem_up_dic)
+    >>> print(seqs_list_1h[0])
+    [[1, 0, 0, 0, 0.1, 0.2, 0.3, 0.2], [0, 0, 0, 1, 0.1, 0.2, 0.3, 0.2], [0, 1, 0, 0, 0.1, 0.2, 0.3, 0.2], [0, 0, 1, 0, 0.1, 0.2, 0.3, 0.2]]
 
     """
     seqs_list_1h = []
@@ -664,6 +831,32 @@ def convert_seqs_to_one_hot(seqs_dic, vp_s_dic, vp_e_dic,
             # Add unpaired probabilities to one-hot matrix (add row).
             for row in seq_1h:
                 row.append(up_dic[seq_id][i])
+                i += 1
+        # If conservation scores (phastCons, phyloP) given, add to matrix.
+        if con_dic:
+            if not seq_id in con_dic:
+                print ("ERROR: seq_id \"%s\" not in con_dic" % (seq_id))
+                sys.exit()
+            # Start index of up list.
+            i= vp_s - 1
+            # Add unpaired probabilities to one-hot matrix (add row).
+            for row in seq_1h:
+                row.append(con_dic[seq_id][0][i])
+                row.append(con_dic[seq_id][1][i])
+                i += 1
+        # If str elements unpaired probs given, add to matrix.
+        if str_elem_up_dic:
+            if not seq_id in str_elem_up_dic:
+                print ("ERROR: seq_id \"%s\" not in str_elem_up_dic" % (seq_id))
+                sys.exit()
+            # Start index of up list.
+            i= vp_s - 1
+            # Add unpaired probabilities to one-hot matrix (add row).
+            for row in seq_1h:
+                row.append(str_elem_up_dic[seq_id][0][i])
+                row.append(str_elem_up_dic[seq_id][1][i])
+                row.append(str_elem_up_dic[seq_id][2][i])
+                row.append(str_elem_up_dic[seq_id][3][i])
                 i += 1
         # Append one-hot encoded input to inputs list.
         seqs_list_1h.append(seq_1h)

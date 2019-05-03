@@ -7,4 +7,5 @@ data_folder = "test_data"
 
 graphs, seqs_1h, labels = gp2lib.load_data(data_folder,
                                            use_up=True, 
+                                           use_con=False,
                                            bpp_cutoff=0.2)
