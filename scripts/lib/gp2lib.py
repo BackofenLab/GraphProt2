@@ -12,19 +12,12 @@ GraphProt2 Python3 function library
 Run doctests from base directory:
 python3 -m doctest -v lib/gp2lib.py
 
-
-Skip headers, for multi-set results files, headers are currently inserted many times
-
-id	AA	AC	AG	AT	CA	CC	CG	CT	GA	GC	GG	GT	TA	TC	TG	TT	dist_k
-random_negative_0021126	361	11	13	23	20	26	29	10	30	12	24	23	25	18	28	29	39	16
-random_negative_0134744	361	33	21	32	21	22	21	2	42	23	18	9	16	29	27	23	21	16
-
 """
-
 
 def load_data(data_folder, 
               use_up=False,
               use_con=False,
+              use_entr=False,
               use_str_elem_up=False,
               use_sf=False,
               disable_bpp=False,
@@ -41,6 +34,7 @@ def load_data(data_folder,
         use_con : if true add conservation scores to one-hot
         use_str_elem_up: add str elements unpaired probs to one-hot
         use_sf: add site features, store in additional vector for each sequence
+        use_entr: use RBP occupancy / entropy features for each sequence
         disable_bpp : disables adding of base pair information
         bpp_cutoff : bp probability threshold when adding bp probs.
         bpp_mode : see ext_mode in convert_seqs_to_graphs for details
@@ -62,8 +56,8 @@ def load_data(data_folder,
     neg_str_elem_up_file = "%s/negatives.str_elem.up" % (data_folder)
     pos_sf_file = "%s/positives.sf" % (data_folder)
     neg_sf_file = "%s/negatives.sf" % (data_folder)
-    #pos_entropy_file = "%s/positives.ent" % (data_folder)
-    #neg_entropy_file = "%s/negatives.ent" % (data_folder)
+    pos_entr_file = "%s/positives.entr" % (data_folder)
+    neg_entr_file = "%s/negatives.entr" % (data_folder)
 
     # Check inputs.
     if not os.path.isdir(data_folder):
@@ -95,6 +89,13 @@ def load_data(data_folder,
             sys.exit()
         if not os.path.isfile(neg_con_file):
             print("INPUT_ERROR: missing \"%s\"" % (neg_con_file))
+            sys.exit()
+    if use_entr:
+        if not os.path.isfile(pos_entr_file):
+            print("INPUT_ERROR: missing \"%s\"" % (pos_entr_file))
+            sys.exit()
+        if not os.path.isfile(neg_entr_file):
+            print("INPUT_ERROR: missing \"%s\"" % (neg_entr_file))
             sys.exit()
     if use_sf:
         if not os.path.isfile(pos_sf_file):
@@ -138,6 +139,8 @@ def load_data(data_folder,
     neg_con_dic = False
     pos_str_elem_up_dic = False
     neg_str_elem_up_dic = False
+    # Site features dictionary also includes RNP occupancy / entropy features.
+    # Each site gets a vector of feature values.
     pos_sf_dic = False
     neg_sf_dic = False
 
@@ -162,9 +165,9 @@ def load_data(data_folder,
     #if args.use_con:
     #    pos_con_dic = gp2lib.read_con_into_dic(pos_con_file, pos_vp_s, pos_vp_e)
     #    neg_con_dic = gp2lib.read_con_into_dic(neg_con_file, neg_vp_s, neg_vp_e)
-    #if args.use_entropy:
-    #    pos_entropy_dic = gp2lib.read_entropy_into_dic(pos_entropy_file, pos_vp_s, pos_vp_e)
-    #    neg_entropy_dic = gp2lib.read_entropy_into_dic(neg_entropy_file, neg_vp_s, neg_vp_e)
+    if use_entr:
+        pos_sf_dic = read_entr_into_dic(pos_entr_file)
+        neg_sf_dic = read_entr_into_dic(neg_entr_file)
 
     # Convert input sequences to one-hot encoding (optionally with unpaired probabilities vector).
     pos_seq_1h = convert_seqs_to_one_hot(pos_seqs_dic, pos_vp_s, pos_vp_e, 
@@ -180,6 +183,8 @@ def load_data(data_folder,
     # Convert input sequences to sequence or structure graphs.
     pos_graphs = convert_seqs_to_graphs(pos_seqs_dic, pos_vp_s, pos_vp_e, 
                                         up_dic=pos_up_dic, 
+                                        con_dic=pos_con_dic, 
+                                        str_elem_up_dic=pos_str_elem_up_dic, 
                                         bpp_dic=pos_bpp_dic, 
                                         vp_lr_ext=vp_ext, 
                                         fix_vp_len=max_vp_l, 
@@ -187,6 +192,8 @@ def load_data(data_folder,
                                         plfold_bpp_cutoff=bpp_cutoff)
     neg_graphs = convert_seqs_to_graphs(neg_seqs_dic, neg_vp_s, neg_vp_e, 
                                         up_dic=neg_up_dic, 
+                                        con_dic=neg_con_dic, 
+                                        str_elem_up_dic=neg_str_elem_up_dic, 
                                         bpp_dic=neg_bpp_dic, 
                                         vp_lr_ext=vp_ext, 
                                         fix_vp_len=max_vp_l, 
@@ -364,6 +371,61 @@ def read_str_elem_up_into_dic(str_elem_up_file):
     return str_elem_up_dic
 
 
+
+################################################################################
+
+def read_entr_into_dic(entr_file):
+
+    """
+    Read RBP occupancy+entropy scores for each sequence into dictionary.
+    RBP occupancy+entropy scores are calculated for viewpoint regions only.
+    
+    (key: sequence id, value: vector of feature values)
+
+    test.entr file content:
+    id	avg_rbpc	avg_cov	entr
+    CLIP_01	0.03	6.05	3.18
+    CLIP_02	0.02	4.37	3.27
+
+    Features:
+    avg_rbpc : average dataset overlap count for viewpoint region
+               i.e. how many binding sites (for each dataset only 
+               counted once) overlap with this region, divided by 
+               total number of datasets
+    avg_cov:   Average crosslink count or fold change associated with 
+               this region. If several binding sites overlap with 
+               region in one dataset, average fold change of sites 
+               or sum of crosslink counts is taken. Then sum up 
+               these counts/changes for all overlapping datasets, 
+               and average by total number of datasets
+    entr:      Entropy of the viewpoint region, calculated based on 
+               coverage values for each dataset. 
+
+    >>> entr_test = "test_data/test.entr"
+    >>> read_entr_into_dic(entr_test)
+    {'CLIP_01': [0.03, 6.05, 3.18], 'CLIP_02': [0.02, 4.37, 3.27]}
+
+    """
+    entr_dic = {}
+    seq_id = ""
+    # Go through .up file, extract unpaired probs for each position.
+    with open(entr_file) as f:
+        for line in f:
+            f_list = line.strip().split("\t")
+            # Skip header line(s).
+            if f_list[0] == "id":
+                continue
+            seq_id = f_list[0]
+            f_list.pop(0)
+            if not seq_id in entr_dic:
+                entr_dic[seq_id] = []
+            for i in f_list:
+                entr_dic[seq_id].append(float(i))
+    f.closed
+    return entr_dic
+
+
+
 ################################################################################
 
 def read_sf_into_dic(sf_file):
@@ -388,11 +450,13 @@ def read_sf_into_dic(sf_file):
                 continue
             seq_id = f_list[0]
             f_list.pop(0)
-            sf_dic[seq_id] = []
+            if not seq_id in sf_dic:
+                sf_dic[seq_id] = []
             for i in f_list:
                 sf_dic[seq_id].append(float(i))
     f.closed
     return sf_dic
+
 
 
 ################################################################################
@@ -429,6 +493,7 @@ def read_up_into_dic(up_file):
                 up_dic[seq_id].append(up)
     f.closed
     return up_dic
+
 
 
 ################################################################################
@@ -539,6 +604,8 @@ def read_bpp_into_dic(bpp_file, vp_s, vp_e,
 def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic, 
                            up_dic=None,
                            bpp_dic=None,
+                           con_dic=None,
+                           str_elem_up_dic=None,
                            plfold_bpp_cutoff=0.2,
                            vp_lr_ext=100, 
                            fix_vp_len=False,
@@ -569,6 +636,17 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
     '0-1,0-2,1-2,1-6,2-3,3-4,4-5,5-6,6-7,7-8,7-12,8-9,9-10,10-11,11-12,12-13,13-14,13-17,14-15,15-16,16-17,17-18,18-19,19-20,'
     >>> convert_graph_to_string(g_list[1])
     '0-1,1-2,2-3,3-4,4-5,5-6,6-7,6-10,7-8,8-9,9-10,10-11,11-12,12-13,13-14,14-15,15-16,16-17,17-18,18-19,'
+    >>> seqs_dic2 = {"CLIP_01" : "aCGt"}
+    >>> up_dic2 = {"CLIP_01" : [0.8]*4}
+    >>> vp_s2 = {"CLIP_01" : 2}
+    >>> vp_e2 = {"CLIP_01" : 3}
+    >>> con_dic2 = {"CLIP_01" : [[0.3, 0.5, 0.7, 0.2], [0.2, 0.8, 0.9, 0.1]]}
+    >>> str_elem_up_dic2 = {"CLIP_01": [[0.1]*4, [0.3]*4, [0.4]*4, [0.2]*4]}
+    >>> g_list2 = convert_seqs_to_graphs(seqs_dic2, vp_s2, vp_e2, up_dic=up_dic2, con_dic=con_dic2, str_elem_up_dic=str_elem_up_dic2)
+    >>> g_list2[0].node[0]['feat_vector']
+    [0.8, 0.1, 0.3, 0.4, 0.2, 0.5, 0.8]
+    >>> g_list2[0].node[1]['feat_vector']
+    [0.8, 0.1, 0.3, 0.4, 0.2, 0.7, 0.9]
 
     """
     g_list = []
@@ -590,12 +668,40 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
         ex_e = vp_e
         # If base pair probabilities given, adjust extraction s+e.
         if bpp_dic:
+            if not seq_id in bpp_dic:
+                print ("ERROR: seq_id \"%s\" not in bpp_dic" % (seq_id))
+                sys.exit()
             ex_s = ex_s-vp_lr_ext
             if ex_s < 1:
                 ex_s = 1
             ex_e = ex_e+vp_lr_ext
             if ex_e > l_seq:
                 ex_e = l_seq
+        # Check up_dic.
+        if up_dic:
+            if not seq_id in up_dic:
+                print ("ERROR: seq_id \"%s\" not in up_dic" % (seq_id))
+                sys.exit()
+            if len(up_dic[seq_id]) != l_seq:
+                print ("ERROR: up_dic[seq_id] length != sequence length for seq_id \"%s\"" % (seq_id))
+                sys.exit()
+        # Check str_elem_up_dic:
+        if str_elem_up_dic:
+            if not seq_id in str_elem_up_dic:
+                print ("ERROR: seq_id \"%s\" not in str_elem_up_dic" % (seq_id))
+                sys.exit()
+            if len(str_elem_up_dic[seq_id][0]) != l_seq:
+                print ("ERROR: str_elem_up_dic[seq_id] length != sequence length for seq_id \"%s\"" % (seq_id))
+                sys.exit()
+        # Check con_dic.
+        if con_dic:
+            if not seq_id in con_dic:
+                print ("ERROR: seq_id \"%s\" not in con_dic" % (seq_id))
+                sys.exit()
+            if len(con_dic[seq_id][0]) != l_seq:
+                print ("ERROR: con_dic[seq_id] length != sequence length for seq_id \"%s\"" % (seq_id))
+                sys.exit()
+        # Add feature values per position.
         g_i = 0
         for i,c in enumerate(seq): # i from 0.. l-1
             # Skip if outside region of interest.
@@ -603,15 +709,24 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
                 continue
             # Add nucleotide node.
             g.add_node(g_i, label=c) # zero-based graph node index.
-            # Add unpaired probability attribute.
-            if up_dic:
-                if not seq_id in up_dic:
-                    print ("ERROR: seq_id \"%s\" not in up_dic" % (seq_id))
-                    sys.exit()
-                if len(up_dic[seq_id]) != l_seq:
-                    print ("ERROR: up_dic[seq_id] length != sequence length for seq_id \"%s\"" % (seq_id))
-                    sys.exit()
-                g.node[g_i]['up'] = up_dic[seq_id][i]
+            # Make feature vector for each graph node.
+            if up_dic or str_elem_up_dic or con_dic:
+                feat_vector = []
+                if up_dic:
+                    feat_vector.append(up_dic[seq_id][i])
+                if str_elem_up_dic:
+                    feat_vector.append(str_elem_up_dic[seq_id][0][i])
+                    feat_vector.append(str_elem_up_dic[seq_id][1][i])
+                    feat_vector.append(str_elem_up_dic[seq_id][2][i])
+                    feat_vector.append(str_elem_up_dic[seq_id][3][i])
+                if con_dic:
+                    feat_vector.append(con_dic[seq_id][0][i])
+                    feat_vector.append(con_dic[seq_id][1][i])
+
+                """
+
+                """
+                g.node[g_i]['feat_vector'] = feat_vector
             # Add backbone edge.
             if g_i > 0:
                 g.add_edge(g_i-1, g_i, label = '-',type='backbone')
@@ -619,9 +734,6 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
             g_i += 1
         # Add base pair edges to graph.
         if bpp_dic:
-            if not seq_id in bpp_dic:
-                print ("ERROR: seq_id \"%s\" not in bpp_dic" % (seq_id))
-                sys.exit()
             for entry in bpp_dic[seq_id]:
                 m = re.search("(\d+)-(\d+),(.+)", entry)
                 p1 = int(m.group(1))
