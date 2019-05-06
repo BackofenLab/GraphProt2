@@ -12,6 +12,13 @@ GraphProt2 Python3 function library
 Run doctests from base directory:
 python3 -m doctest -v lib/gp2lib.py
 
+
+fix_vp_len potentially leads to discarding some sequences
+
+convert_seqs_to_one_hot
+convert_seqs_to_graphs
+
+
 """
 
 def load_data(data_folder, 
@@ -23,6 +30,7 @@ def load_data(data_folder,
               disable_bpp=False,
               bpp_cutoff=0.2,
               bpp_mode=1,
+              vp_ext = 100,
               fix_vp_len=True):
     """
     Load data from data_folder.
@@ -38,6 +46,8 @@ def load_data(data_folder,
         disable_bpp : disables adding of base pair information
         bpp_cutoff : bp probability threshold when adding bp probs.
         bpp_mode : see ext_mode in convert_seqs_to_graphs for details
+        vp_ext : Define upstream + downstream viewpoint extension
+                 Usually set equal to used plfold_L (default: 100)
         fix_vp_len : Use only viewpoint regions with same length (= max length)
 
     """
@@ -129,6 +139,11 @@ def load_data(data_folder,
             print("ERROR: viewpoint length extraction failed")
             sys.exit()
 
+    # Remove sequences that do not pass fix_vp_len.
+    if fix_vp_len:
+        filter_seq_dic_fixed_vp_len(pos_seqs_dic, pos_vp_s, pos_vp_e, max_vp_l)
+        filter_seq_dic_fixed_vp_len(neg_seqs_dic, neg_vp_s, neg_vp_e, max_vp_l)
+
     # Init dictionaries.
     pos_up_dic = False
     neg_up_dic = False
@@ -162,24 +177,22 @@ def load_data(data_folder,
     if use_sf:
         pos_sf_dic = read_sf_into_dic(pos_sf_file)
         neg_sf_dic = read_sf_into_dic(neg_sf_file)
-    #if args.use_con:
-    #    pos_con_dic = gp2lib.read_con_into_dic(pos_con_file, pos_vp_s, pos_vp_e)
-    #    neg_con_dic = gp2lib.read_con_into_dic(neg_con_file, neg_vp_s, neg_vp_e)
     if use_entr:
         pos_sf_dic = read_entr_into_dic(pos_entr_file)
         neg_sf_dic = read_entr_into_dic(neg_entr_file)
+
+    # Filter sequence dictionary.
+
 
     # Convert input sequences to one-hot encoding (optionally with unpaired probabilities vector).
     pos_seq_1h = convert_seqs_to_one_hot(pos_seqs_dic, pos_vp_s, pos_vp_e, 
                                          up_dic=pos_up_dic,
                                          con_dic=pos_con_dic,
-                                         str_elem_up_dic=pos_str_elem_up_dic,
-                                         fix_vp_len=max_vp_l)
+                                         str_elem_up_dic=pos_str_elem_up_dic)
     neg_seq_1h = convert_seqs_to_one_hot(neg_seqs_dic, neg_vp_s, neg_vp_e, 
                                          up_dic=neg_up_dic, 
                                          con_dic=neg_con_dic,
-                                         str_elem_up_dic=neg_str_elem_up_dic,
-                                         fix_vp_len=max_vp_l)
+                                         str_elem_up_dic=neg_str_elem_up_dic)
     # Convert input sequences to sequence or structure graphs.
     pos_graphs = convert_seqs_to_graphs(pos_seqs_dic, pos_vp_s, pos_vp_e, 
                                         up_dic=pos_up_dic, 
@@ -187,7 +200,6 @@ def load_data(data_folder,
                                         str_elem_up_dic=pos_str_elem_up_dic, 
                                         bpp_dic=pos_bpp_dic, 
                                         vp_lr_ext=vp_ext, 
-                                        fix_vp_len=max_vp_l, 
                                         ext_mode=bpp_mode,
                                         plfold_bpp_cutoff=bpp_cutoff)
     neg_graphs = convert_seqs_to_graphs(neg_seqs_dic, neg_vp_s, neg_vp_e, 
@@ -195,8 +207,7 @@ def load_data(data_folder,
                                         con_dic=neg_con_dic, 
                                         str_elem_up_dic=neg_str_elem_up_dic, 
                                         bpp_dic=neg_bpp_dic, 
-                                        vp_lr_ext=vp_ext, 
-                                        fix_vp_len=max_vp_l, 
+                                        vp_lr_ext=vp_ext,  
                                         ext_mode=bpp_mode,
                                         plfold_bpp_cutoff=bpp_cutoff)
     # Create labels.
@@ -211,8 +222,30 @@ def load_data(data_folder,
         new_seq_1h.append(M)
     # Concatenate pos+neg graph lists.
     graphs = pos_graphs + neg_graphs
+    # From site feature dictionaries to list of site feature vectors.
+    site_feat_v = []
+    for site_id, site_v in sorted(pos_sf_dic.items()):
+        if site_id in pos_seqs_dic:
+            site_feat_v.append(site_v)
+    for site_id, site_v in sorted(neg_sf_dic.items()):
+        if site_id in neg_seqs_dic:
+            site_feat_v.append(site_v)
+    # Check for equal lengths of graphs, new_seq_1h and site_feat_v.
+    l_g = len(graphs)
+    l_1h = len(new_seq_1h)
+    l_sfv = len(site_feat_v)
+    l_lbl = len(labels)
+    if l_g != l_1h:
+        print("ERROR: graphs list length != one-hot list length (%i != %i)" % (l_g, l_1h))
+        sys.exit()
+    if l_1h != l_sfv:
+        print("ERROR: one-hot list length != site feature vector list length (%i != %i)" % (l_1h, l_sfv))
+        sys.exit()
+    if l_sfv != l_lbl:
+        print("ERROR: site feature vector list length != labels list length (%i != %i)" % (l_sfv, l_lbl))
+        sys.exit()
     # Return graphs list, one-hot np.array, and label vector.
-    return graphs, new_seq_1h, labels
+    return graphs, new_seq_1h, site_feat_v, labels
 
 
 ################################################################################
@@ -289,6 +322,26 @@ def string_vectorizer(seq,
             sys.exit()
         vector = vector[s-1:e]
     return vector
+
+
+
+################################################################################
+
+def filter_seq_dic_fixed_vp_len(seqs_dic, vp_s_dic, vp_e_dic, vp_l):
+    """
+    Remove sequences from sequence dictionary that do have a viewpoint 
+    length != given vp_l.
+    """
+    seqs2del = {}
+    for seq_id in seqs_dic:
+        # Get viewpoint start+end of sequence.
+        vp_s = vp_s_dic[seq_id]
+        vp_e = vp_e_dic[seq_id]
+        l_vp = vp_e - vp_s + 1
+        if vp_l != l_vp:
+            seqs2del[seq_id] = 1
+    for seq_id in seqs2del:
+        del seqs_dic[seq_id]
 
 
 ################################################################################
@@ -602,10 +655,10 @@ def read_bpp_into_dic(bpp_file, vp_s, vp_e,
 ################################################################################
 
 def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic, 
-                           up_dic=None,
-                           bpp_dic=None,
-                           con_dic=None,
-                           str_elem_up_dic=None,
+                           up_dic=False,
+                           bpp_dic=False,
+                           con_dic=False,
+                           str_elem_up_dic=False,
                            plfold_bpp_cutoff=0.2,
                            vp_lr_ext=100, 
                            fix_vp_len=False,
@@ -722,10 +775,6 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
                 if con_dic:
                     feat_vector.append(con_dic[seq_id][0][i])
                     feat_vector.append(con_dic[seq_id][1][i])
-
-                """
-
-                """
                 g.node[g_i]['feat_vector'] = feat_vector
             # Add backbone edge.
             if g_i > 0:
