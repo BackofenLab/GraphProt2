@@ -51,8 +51,6 @@ def load_data(data_folder,
         fix_vp_len : Use only viewpoint regions with same length (= max length)
 
     """
-    # Define upstream + downstream viewpoint extension. (normally set equal to used plfold_L)
-    vp_ext = 100
     # Input files.
     pos_fasta_file = "%s/positives.fa" % (data_folder)
     neg_fasta_file = "%s/negatives.fa" % (data_folder)
@@ -180,9 +178,6 @@ def load_data(data_folder,
     if use_entr:
         pos_sf_dic = read_entr_into_dic(pos_entr_file)
         neg_sf_dic = read_entr_into_dic(neg_entr_file)
-
-    # Filter sequence dictionary.
-
 
     # Convert input sequences to one-hot encoding (optionally with unpaired probabilities vector).
     pos_seq_1h = convert_seqs_to_one_hot(pos_seqs_dic, pos_vp_s, pos_vp_e, 
@@ -331,6 +326,14 @@ def filter_seq_dic_fixed_vp_len(seqs_dic, vp_s_dic, vp_e_dic, vp_l):
     """
     Remove sequences from sequence dictionary that do have a viewpoint 
     length != given vp_l.
+    
+    >>> seqs_dic = {"CLIP_01" : "acgtACGTacgt", "CLIP_02" : "aaaCCCggg"}
+    >>> vp_s_dic = {"CLIP_01" : 5, "CLIP_02" : 4}
+    >>> vp_e_dic = {"CLIP_01" : 8, "CLIP_02" : 6}
+    >>> filter_seq_dic_fixed_vp_len(seqs_dic, vp_s_dic, vp_e_dic, 4)
+    >>> seqs_dic
+    {'CLIP_01': 'acgtACGTacgt'}
+
     """
     seqs2del = {}
     for seq_id in seqs_dic:
