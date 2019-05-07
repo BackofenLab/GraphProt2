@@ -5,6 +5,7 @@ from lib import gp2lib
 # Input data folder to load data from.
 data_folder = "test_data"
 
+# Use_sf and use_entr are parameters corresponding to site features, be careful when using use_entr since they are biased
 graphs, seqs_1h, sfv_list, labels = gp2lib.load_data(data_folder,
                                            use_up=True,
                                            use_con=True,
