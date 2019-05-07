@@ -120,6 +120,8 @@ def load_data(data_folder,
             print("INPUT_ERROR: missing \"%s\"" % (neg_bpp_file))
             sys.exit()
 
+    #print("Read in sequences ... ")
+
     # Read in FASTA sequences.
     pos_seqs_dic = read_fasta_into_dic(pos_fasta_file)
     neg_seqs_dic = read_fasta_into_dic(neg_fasta_file)
@@ -157,6 +159,8 @@ def load_data(data_folder,
     pos_sf_dic = False
     neg_sf_dic = False
 
+    #print("Read in features into dictionaries ... ")
+
     # Extract additional annotations.
     if use_up:
         pos_up_dic = read_up_into_dic(pos_up_file)
@@ -179,6 +183,8 @@ def load_data(data_folder,
         pos_sf_dic = read_entr_into_dic(pos_entr_file)
         neg_sf_dic = read_entr_into_dic(neg_entr_file)
 
+    #print("Generate one-hot lists ... ")
+
     # Convert input sequences to one-hot encoding (optionally with unpaired probabilities vector).
     pos_seq_1h = convert_seqs_to_one_hot(pos_seqs_dic, pos_vp_s, pos_vp_e, 
                                          up_dic=pos_up_dic,
@@ -188,6 +194,10 @@ def load_data(data_folder,
                                          up_dic=neg_up_dic, 
                                          con_dic=neg_con_dic,
                                          str_elem_up_dic=neg_str_elem_up_dic)
+
+
+    #print("Generate graph lists ... ")
+
     # Convert input sequences to sequence or structure graphs.
     pos_graphs = convert_seqs_to_graphs(pos_seqs_dic, pos_vp_s, pos_vp_e, 
                                         up_dic=pos_up_dic, 
@@ -205,6 +215,9 @@ def load_data(data_folder,
                                         vp_lr_ext=vp_ext,  
                                         ext_mode=bpp_mode,
                                         plfold_bpp_cutoff=bpp_cutoff)
+
+    #print("Prepare lists ... ")
+
     # Create labels.
     labels = [1]*len(pos_seq_1h) + [0]*len(neg_seq_1h)
     # Concatenate pos+neg one-hot lists.
