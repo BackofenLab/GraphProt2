@@ -159,8 +159,6 @@ def load_data(data_folder,
     pos_sf_dic = False
     neg_sf_dic = False
 
-    #print("Read in features into dictionaries ... ")
-
     # Extract additional annotations.
     if use_up:
         pos_up_dic = read_up_into_dic(pos_up_file)
@@ -177,13 +175,11 @@ def load_data(data_folder,
         pos_str_elem_up_dic = read_str_elem_up_into_dic(pos_str_elem_up_file)
         neg_str_elem_up_dic = read_str_elem_up_into_dic(neg_str_elem_up_file)
     if use_sf:
-        pos_sf_dic = read_sf_into_dic(pos_sf_file)
-        neg_sf_dic = read_sf_into_dic(neg_sf_file)
+        pos_sf_dic = read_sf_into_dic(pos_sf_file, sf_dic=pos_sf_dic)
+        neg_sf_dic = read_sf_into_dic(neg_sf_file, sf_dic=neg_sf_dic)
     if use_entr:
-        pos_sf_dic = read_entr_into_dic(pos_entr_file)
-        neg_sf_dic = read_entr_into_dic(neg_entr_file)
-
-    #print("Generate one-hot lists ... ")
+        pos_sf_dic = read_entr_into_dic(pos_entr_file, entr_dic=pos_sf_dic)
+        neg_sf_dic = read_entr_into_dic(neg_entr_file, entr_dic=neg_sf_dic)
 
     # Convert input sequences to one-hot encoding (optionally with unpaired probabilities vector).
     pos_seq_1h = convert_seqs_to_one_hot(pos_seqs_dic, pos_vp_s, pos_vp_e, 
@@ -194,9 +190,6 @@ def load_data(data_folder,
                                          up_dic=neg_up_dic, 
                                          con_dic=neg_con_dic,
                                          str_elem_up_dic=neg_str_elem_up_dic)
-
-
-    #print("Generate graph lists ... ")
 
     # Convert input sequences to sequence or structure graphs.
     pos_graphs = convert_seqs_to_graphs(pos_seqs_dic, pos_vp_s, pos_vp_e, 
@@ -216,8 +209,6 @@ def load_data(data_folder,
                                         ext_mode=bpp_mode,
                                         plfold_bpp_cutoff=bpp_cutoff)
 
-    #print("Prepare lists ... ")
-
     # Create labels.
     labels = [1]*len(pos_seq_1h) + [0]*len(neg_seq_1h)
     # Concatenate pos+neg one-hot lists.
@@ -232,12 +223,20 @@ def load_data(data_folder,
     graphs = pos_graphs + neg_graphs
     # From site feature dictionaries to list of site feature vectors.
     site_feat_v = []
-    for site_id, site_v in sorted(pos_sf_dic.items()):
-        if site_id in pos_seqs_dic:
-            site_feat_v.append(site_v)
-    for site_id, site_v in sorted(neg_sf_dic.items()):
-        if site_id in neg_seqs_dic:
-            site_feat_v.append(site_v)
+    if pos_sf_dic:
+        for site_id, site_v in sorted(pos_sf_dic.items()):
+            if site_id in pos_seqs_dic:
+                site_feat_v.append(site_v)
+    else:
+        for l in [0]*len(pos_seq_1h):
+            site_feat_v.append([0])
+    if neg_sf_dic:
+        for site_id, site_v in sorted(neg_sf_dic.items()):
+            if site_id in neg_seqs_dic:
+                site_feat_v.append(site_v)
+    else:
+        for l in [0]*len(neg_seq_1h):
+            site_feat_v.append([0])
     # Check for equal lengths of graphs, new_seq_1h and site_feat_v.
     l_g = len(graphs)
     l_1h = len(new_seq_1h)
@@ -443,7 +442,8 @@ def read_str_elem_up_into_dic(str_elem_up_file):
 
 ################################################################################
 
-def read_entr_into_dic(entr_file):
+def read_entr_into_dic(entr_file,
+                       entr_dic=False):
 
     """
     Read RBP occupancy+entropy scores for each sequence into dictionary.
@@ -475,7 +475,8 @@ def read_entr_into_dic(entr_file):
     {'CLIP_01': [0.03, 6.05, 3.18], 'CLIP_02': [0.02, 4.37, 3.27]}
 
     """
-    entr_dic = {}
+    if not entr_dic:
+        entr_dic = {}
     seq_id = ""
     # Go through .up file, extract unpaired probs for each position.
     with open(entr_file) as f:
@@ -497,7 +498,8 @@ def read_entr_into_dic(entr_file):
 
 ################################################################################
 
-def read_sf_into_dic(sf_file):
+def read_sf_into_dic(sf_file,
+                     sf_dic=False):
 
     """
     Read site features into dictionary.
@@ -508,7 +510,8 @@ def read_sf_into_dic(sf_file):
     {'CLIP_01': [0.2, 0.3, 0.3, 0.2], 'CLIP_02': [0.1, 0.2, 0.4, 0.3]}
 
     """
-    sf_dic = {}
+    if not sf_dic:
+        sf_dic = {}
     seq_id = ""
     # Go through .up file, extract unpaired probs for each position.
     with open(sf_file) as f:
