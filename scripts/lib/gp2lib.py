@@ -21,6 +21,212 @@ convert_seqs_to_graphs
 
 """
 
+def load_ml_data(data_folder, 
+              use_up=False,
+              use_con=False,
+              use_entr=False,
+              use_str_elem_up=False,
+              use_sf=False,
+              disable_bpp=False,
+              bpp_cutoff=0.2,
+              bpp_mode=1,
+              vp_ext = 100,
+              fix_vp_len=True):
+    """
+    Load multi label data from folder.
+    Loop over all files, load data in.
+    NOTE that file names are assumed to be the labels, 
+    e.g. file name: DGCR8.bed, thus label: DGCR8
+
+    Function parameters:
+        use_up : if true add unpaired probabilities to graph + one-hot
+        use_con : if true add conservation scores to graph + one-hot
+        use_str_elem_up: add str elements unpaired probs to graph + one-hot
+        use_sf: add site features, store in additional vector for each sequence
+        use_entr: use RBP occupancy / entropy features for each sequence
+        disable_bpp : disables adding of base pair information
+        bpp_cutoff : bp probability threshold when adding bp probs.
+        bpp_mode : see ext_mode in convert_seqs_to_graphs for details
+        vp_ext : Define upstream + downstream viewpoint extension
+                 Usually set equal to used plfold_L (default: 100)
+        fix_vp_len : Use only viewpoint regions with same length (= max length)
+
+    """
+
+    # Check input.
+    if not os.path.isdir(data_folder):
+        print("INPUT_ERROR: Input data folder \"%s\" not found" % (data_folder))
+        sys.exit()
+    # Sequences dictionary.
+    seqs_dic = {}
+    # Viewpoint coordinate dictionaries.
+    vp_s_dic = {}
+    vp_e_dic = {}
+    # Feature dictionaries.
+    up_dic = False
+    bpp_dic = False
+    con_dic = False 
+    str_elem_up_dic = False
+    neg_str_elem_up_dic = False
+    sf_dic = False
+    max_vp_l = 0
+    seq_1h_list = False
+    graphs_list = False
+    # Label to index dictionary.
+    l2i_dic = {}
+    # Label index.
+    li = 0
+    # Get dataset IDs.
+    cmd = "ls " + data_folder + "/*.fa | sort"
+    set_list = os.popen(cmd).readlines()
+    # Go over datasets.
+    l_sl = len(set_list)
+    for l in set_list:
+        m = re.search(".+\/(.+?)\.fa", l.strip())
+        data_id = m.group(1)
+        l2i_dic[data_id] = li
+        li += 1
+        # Input files for dataset.
+        fasta_file = "%s/%s.fa" % (data_folder, data_id)
+        up_file = "%s/%s.up" % (data_folder, data_id)
+        bpp_file = "%s/%s.bpp" % (data_folder, data_id)
+        con_file = "%s/%s.con" % (data_folder, data_id)
+        str_elem_up_file = "%s/%s.up" % (data_folder, data_id)
+        sf_file = "%s/%.sf" % (data_folder, data_id)
+        entr_file = "%s/%.entr" % (data_folder, data_id)
+        # Check if files exist.
+        if use_up:
+            if not os.path.isfile(up_file):
+                print("INPUT_ERROR: missing \"%s\"" % (up_file))
+                sys.exit()
+        if use_str_elem_up:
+            if not os.path.isfile(str_elem_up_file):
+                print("INPUT_ERROR: missing \"%s\"" % (str_elem_up_file))
+                sys.exit()
+        if use_con:
+            if not os.path.isfile(con_file):
+                print("INPUT_ERROR: missing \"%s\"" % (con_file))
+                sys.exit()
+        if use_entr:
+            if not os.path.isfile(entr_file):
+                print("INPUT_ERROR: missing \"%s\"" % (entr_file))
+                sys.exit()
+        if use_sf:
+            if not os.path.isfile(sf_file):
+                print("INPUT_ERROR: missing \"%s\"" % (sf_file))
+                sys.exit()
+        if not disable_bpp:
+            if not os.path.isfile(bpp_file):
+                print("INPUT_ERROR: missing \"%s\"" % (bpp_file))
+                sys.exit()
+
+        # Read in FASTA sequences.
+        seqs_dic = read_fasta_into_dic(fasta_file, seqs_dic=seqs_dic)
+        # Get viewpoint regions.
+        vp_s_dic, vp_e_dic = extract_viewpoint_regions_from_fasta(seqs_dic)
+
+        # Extract most prominent (max) viewpoint length from data.
+        if not max_vp_l: # extract only first dataset.
+            if fix_vp_len:
+                for seq_id in seqs_dic:
+                    vp_l = vp_e_dic[seq_id] - vp_s_dic[seq_id] + 1  # +1 since 1-based.
+                    if vp_l > max_vp_l:
+                        max_vp_l = vp_l
+                if not max_vp_l:
+                    print("ERROR: viewpoint length extraction failed")
+                    sys.exit()
+
+        # Remove sequences that do not pass fix_vp_len.
+        if fix_vp_len:
+            filter_seq_dic_fixed_vp_len(seqs_dic, vp_s_dic, vp_e_dic, max_vp_l)
+
+        # Extract additional annotations.
+        if use_up:
+            up_dic = read_up_into_dic(up_file, up_dic=up_dic)
+        if not disable_bpp:
+            bpp_dic = read_bpp_into_dic(bpp_file, vp_s_dic, vp_e_dic, 
+                                        bpp_dic=bpp_dic, 
+                                        vp_lr_ext=vp_ext)
+        if use_con:
+            con_dic = read_con_into_dic(con_file, con_dic=con_dic)
+
+        if use_str_elem_up:
+            str_elem_up_dic = read_str_elem_up_into_dic(str_elem_up_file, 
+                                                        str_elem_up_dic=str_elem_up_dic)
+        if use_sf:
+            sf_dic = read_sf_into_dic(sf_file, sf_dic=sf_dic)
+        if use_entr:
+            sf_dic = read_entr_into_dic(entr_file, entr_dic=sf_dic)
+
+        # Create / extend one-hot encoding list.
+        seq_1h_list = convert_seqs_to_one_hot(seqs_dic, vp_s_dic, vp_e_dic,
+                                         seqs_list_1h=seq_1h_list,
+                                         up_dic=up_dic,
+                                         con_dic=con_dic,
+                                         str_elem_up_dic=str_elem_up_dic)
+        # Create / extend graphs list.
+        graphs_list = convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic, 
+                                             g_list=graphs_list,
+                                             up_dic=up_dic, 
+                                             con_dic=con_dic, 
+                                             str_elem_up_dic=str_elem_up_dic, 
+                                             bpp_dic=bpp_dic, 
+                                             vp_lr_ext=vp_ext, 
+                                             ext_mode=bpp_mode,
+                                             plfold_bpp_cutoff=bpp_cutoff)
+
+    # Check.
+    if li != l_sl:
+        print("ERROR: li != l_sl (%i != %i)" % (li, l_sl))
+        sys.exit()
+
+    # Label vectors list, in sorted seqs_dic order like other lists.
+    label_vect_list = []
+    # Site-level feature vectors list.
+    site_feat_vect_list = []
+    for seq_id, seq in sorted(seqs_dic.items()):
+        # Generate site label vectors.
+        m = re.search(".+;(.+),", seq_id)
+        labels = m.group(1).split(",")
+        label_list = [0]*li
+        # For each label from binding site.
+        for l in labels:
+            i = l2i_dic[l] # get index of label.
+            label_list[i] = 1
+        label_vect_list.append(label_list)
+        # Generate site-level feature vectors.
+        if sf_dic:
+            site_feat_vect_list.append(sf_dic[seq_id])
+        else:
+            site_feat_vect_list.append([0])
+
+    # Convert 1h list to np array, transpose matrices and make each entry 3d (1,number_of_features,vp_length).
+    new_seq_1h_list = []
+    for i in range(len(seq_1h_list)):
+        M = np.array(seq_1h_list[i]).transpose()
+        M = np.reshape(M, (1, M.shape[0], M.shape[1]))
+        new_seq_1h.append(M)
+
+    # Check for equal lengths of graphs, new_seq_1h and site_feat_v.
+    l_g = len(graphs_list)
+    l_1h = len(new_seq_1h_list)
+    l_sfv = len(site_feat_vect_list)
+    l_lbl = len(label_vect_list)
+    if l_g != l_1h:
+        print("ERROR: graphs list length != one-hot list length (%i != %i)" % (l_g, l_1h))
+        sys.exit()
+    if l_1h != l_sfv:
+        print("ERROR: one-hot list length != site feature vector list length (%i != %i)" % (l_1h, l_sfv))
+        sys.exit()
+    if l_sfv != l_lbl:
+        print("ERROR: site feature vector list length != labels list length (%i != %i)" % (l_sfv, l_lbl))
+        sys.exit()
+    # Return graphs list, one-hot np.array, and label vector.
+    return graphs_list, new_seq_1h_list, site_feat_vect_list, label_vect_list
+
+
+################################################################################
+
 def load_data(data_folder, 
               use_up=False,
               use_con=False,
@@ -38,9 +244,9 @@ def load_data(data_folder,
     and label vector.
     
     Function parameters:
-        use_up : if true add unpaired probabilities to graph and one-hot
-        use_con : if true add conservation scores to one-hot
-        use_str_elem_up: add str elements unpaired probs to one-hot
+        use_up : if true add unpaired probabilities to graph + one-hot
+        use_con : if true add conservation scores to graph + one-hot
+        use_str_elem_up: add str elements unpaired probs to graph + one-hot
         use_sf: add site features, store in additional vector for each sequence
         use_entr: use RBP occupancy / entropy features for each sequence
         disable_bpp : disables adding of base pair information
@@ -258,6 +464,7 @@ def load_data(data_folder,
 ################################################################################
 
 def read_fasta_into_dic(fasta_file,
+                        seqs_dic=False,
                         skip_n_seqs=True):
     """
     Read in FASTA sequences, store in dictionary and return dictionary.
@@ -272,7 +479,8 @@ def read_fasta_into_dic(fasta_file,
     {}
 
     """
-    seqs_dic = {}
+    if not seqs_dic:
+        seqs_dic = {}
     seq_id = ""
     seq = ""
     # Go through FASTA file, extract sequences.
@@ -361,7 +569,9 @@ def filter_seq_dic_fixed_vp_len(seqs_dic, vp_s_dic, vp_e_dic, vp_l):
 
 ################################################################################
 
-def extract_viewpoint_regions_from_fasta(seqs_dic):
+def extract_viewpoint_regions_from_fasta(seqs_dic,
+                                         vp_s_dic=False,
+                                         vp_e_dic=False):
     """
     Extract viewpoint start end end positions from FASTA dictionary.
     Return dictionaries for start+end (1-based indices, key:fasta_id).
@@ -378,8 +588,10 @@ def extract_viewpoint_regions_from_fasta(seqs_dic):
     True
 
     """
-    vp_s_dic = {}
-    vp_e_dic = {}
+    if not vp_s_dic:
+        vp_s_dic = {}
+    if not vp_e_dic:
+        vp_e_dic = {}
     for seq_id, seq in sorted(seqs_dic.items()):
         m = re.search("([acgun]*)([ACGUN]+)", seq)
         if m:
@@ -397,7 +609,8 @@ def extract_viewpoint_regions_from_fasta(seqs_dic):
 
 ################################################################################
 
-def read_str_elem_up_into_dic(str_elem_up_file):
+def read_str_elem_up_into_dic(str_elem_up_file,
+                              str_elem_up_dic=False):
 
     """
     Read in structural elements unpaired probabilities for each sequence 
@@ -416,7 +629,8 @@ def read_str_elem_up_into_dic(str_elem_up_file):
     {'CLIP_01': [[0.1, 0.2], [0.2, 0.3], [0.3, 0.2], [0.3, 0.1]]}
 
     """
-    str_elem_up_dic = {}
+    if not str_elem_up_dic:
+        str_elem_up_dic = {}
     seq_id = ""
     # Go through .str_elem.up file, extract p_external, p_hairpin, p_internal, p_multiloop.
     with open(str_elem_up_file) as f:
@@ -533,7 +747,8 @@ def read_sf_into_dic(sf_file,
 
 ################################################################################
 
-def read_up_into_dic(up_file):
+def read_up_into_dic(up_file,
+                     up_dic=False):
 
     """
     Read in unpaired probabilities and store probability value list for 
@@ -550,7 +765,8 @@ def read_up_into_dic(up_file):
     {}
 
     """
-    up_dic = {}
+    if not up_dic:
+        up_dic = {}
     seq_id = ""
     # Go through .up file, extract unpaired probs for each position.
     with open(up_file) as f:
@@ -570,7 +786,8 @@ def read_up_into_dic(up_file):
 
 ################################################################################
 
-def read_con_into_dic(con_file):
+def read_con_into_dic(con_file,
+                      con_dic=False):
 
     """
     Read in conservation scores (phastCons+phyloP) and store scores as 
@@ -584,7 +801,8 @@ def read_con_into_dic(con_file):
     {'CLIP_01': [[0.1, 0.2], [0.3, -0.4]], 'CLIP_02': [[0.4, 0.5], [0.6, 0.7]]}
 
     """
-    con_dic = {}
+    if not con_dic:
+        con_dic = {}
     seq_id = ""
     # Go through .con file, extract phastCons, phyloP scores for each position.
     with open(con_file) as f:
@@ -606,6 +824,7 @@ def read_con_into_dic(con_file):
 ################################################################################
 
 def read_bpp_into_dic(bpp_file, vp_s, vp_e,
+                      bpp_dic=False,
                       vp_lr_ext=100,
                       ext_mode=1):
     """
@@ -637,7 +856,8 @@ def read_bpp_into_dic(bpp_file, vp_s, vp_e,
     {}
 
     """
-    bpp_dic = {}
+    if not bpp_dic:
+        bpp_dic = {}
     seq_id = ""
     # Go through FASTA file, extract sequences.
     with open(bpp_file) as f:
@@ -674,6 +894,7 @@ def read_bpp_into_dic(bpp_file, vp_s, vp_e,
 ################################################################################
 
 def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic, 
+                           g_list=False,
                            up_dic=False,
                            bpp_dic=False,
                            con_dic=False,
@@ -721,7 +942,8 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
     [0.8, 0.1, 0.3, 0.4, 0.2, 0.7, 0.9]
 
     """
-    g_list = []
+    if not g_list:
+        g_list = []
     for seq_id, seq in sorted(seqs_dic.items()):
         # Get viewpoint start+end of sequence.
         vp_s = vp_s_dic[seq_id]
@@ -954,6 +1176,7 @@ def convert_seqs_to_bppms(seqs_dic, vp_s, vp_e, bpp_dic,
 ################################################################################
 
 def convert_seqs_to_one_hot(seqs_dic, vp_s_dic, vp_e_dic,
+                            seqs_list_1h=False,
                             fix_vp_len=False,
                             up_dic=False,
                             str_elem_up_dic=False,
@@ -984,7 +1207,8 @@ def convert_seqs_to_one_hot(seqs_dic, vp_s_dic, vp_e_dic,
     [[1, 0, 0, 0, 0.1, 0.2, 0.3, 0.2], [0, 0, 0, 1, 0.1, 0.2, 0.3, 0.2], [0, 1, 0, 0, 0.1, 0.2, 0.3, 0.2], [0, 0, 1, 0, 0.1, 0.2, 0.3, 0.2]]
 
     """
-    seqs_list_1h = []
+    if not seqs_list_1h:
+        seqs_list_1h = []
     for seq_id, seq in sorted(seqs_dic.items()):
         # Get viewpoint start+end of sequence.
         vp_s = vp_s_dic[seq_id]
