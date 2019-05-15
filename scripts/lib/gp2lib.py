@@ -21,6 +21,7 @@ convert_seqs_to_graphs
 
 """
 
+
 def load_ml_data(data_folder, 
               use_up=False,
               use_con=False,
@@ -58,7 +59,7 @@ def load_ml_data(data_folder,
         print("INPUT_ERROR: Input data folder \"%s\" not found" % (data_folder))
         sys.exit()
     # Sequences dictionary.
-    seqs_dic = {}
+    total_seqs_dic = {}
     # Viewpoint coordinate dictionaries.
     vp_s_dic = {}
     vp_e_dic = {}
@@ -76,6 +77,9 @@ def load_ml_data(data_folder,
     l2i_dic = {}
     # Label index.
     li = 0
+    
+    print("Read in datasets ... ")
+    
     # Get dataset IDs.
     cmd = "ls " + data_folder + "/*.fa | sort"
     set_list = os.popen(cmd).readlines()
@@ -91,9 +95,9 @@ def load_ml_data(data_folder,
         up_file = "%s/%s.up" % (data_folder, data_id)
         bpp_file = "%s/%s.bpp" % (data_folder, data_id)
         con_file = "%s/%s.con" % (data_folder, data_id)
-        str_elem_up_file = "%s/%s.up" % (data_folder, data_id)
-        sf_file = "%s/%.sf" % (data_folder, data_id)
-        entr_file = "%s/%.entr" % (data_folder, data_id)
+        str_elem_up_file = "%s/%s.str_elem.up" % (data_folder, data_id)
+        sf_file = "%s/%s.sf" % (data_folder, data_id)
+        entr_file = "%s/%s.entr" % (data_folder, data_id)
         # Check if files exist.
         if use_up:
             if not os.path.isfile(up_file):
@@ -120,8 +124,12 @@ def load_ml_data(data_folder,
                 print("INPUT_ERROR: missing \"%s\"" % (bpp_file))
                 sys.exit()
 
-        # Read in FASTA sequences.
-        seqs_dic = read_fasta_into_dic(fasta_file, seqs_dic=seqs_dic)
+        print("Read in dataset %s dictionaries ... " % (data_id))
+
+        # Read in FASTA sequences, add to seqs_dic.
+        # seqs_dic = read_fasta_into_dic(fasta_file, seqs_dic=seqs_dic)
+        # Read in FASTA sequences for this round only.
+        seqs_dic = read_fasta_into_dic(fasta_file)
         # Get viewpoint regions.
         vp_s_dic, vp_e_dic = extract_viewpoint_regions_from_fasta(seqs_dic)
 
@@ -158,12 +166,18 @@ def load_ml_data(data_folder,
         if use_entr:
             sf_dic = read_entr_into_dic(entr_file, entr_dic=sf_dic)
 
+        print("Generate one-hot encodings ... ")
+
         # Create / extend one-hot encoding list.
         seq_1h_list = convert_seqs_to_one_hot(seqs_dic, vp_s_dic, vp_e_dic,
                                          seqs_list_1h=seq_1h_list,
                                          up_dic=up_dic,
                                          con_dic=con_dic,
                                          str_elem_up_dic=str_elem_up_dic)
+
+        #print("Length seq_1h_list: %i" % (len(seq_1h_list)))
+        print("Generate graphs ... ")
+        
         # Create / extend graphs list.
         graphs_list = convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic, 
                                              g_list=graphs_list,
@@ -174,6 +188,9 @@ def load_ml_data(data_folder,
                                              vp_lr_ext=vp_ext, 
                                              ext_mode=bpp_mode,
                                              plfold_bpp_cutoff=bpp_cutoff)
+        #print("Length graphs_list: %i" % (len(graphs_list)))
+        # Merge to total seqs dic.
+        total_seqs_dic = add_dic2_to_dic1(total_seqs_dic, seqs_dic)
 
     # Check.
     if li != l_sl:
@@ -184,7 +201,7 @@ def load_ml_data(data_folder,
     label_vect_list = []
     # Site-level feature vectors list.
     site_feat_vect_list = []
-    for seq_id, seq in sorted(seqs_dic.items()):
+    for seq_id, seq in sorted(total_seqs_dic.items()):
         # Generate site label vectors.
         m = re.search(".+;(.+),", seq_id)
         labels = m.group(1).split(",")
@@ -205,7 +222,7 @@ def load_ml_data(data_folder,
     for i in range(len(seq_1h_list)):
         M = np.array(seq_1h_list[i]).transpose()
         M = np.reshape(M, (1, M.shape[0], M.shape[1]))
-        new_seq_1h.append(M)
+        new_seq_1h_list.append(M)
 
     # Check for equal lengths of graphs, new_seq_1h and site_feat_v.
     l_g = len(graphs_list)
@@ -223,6 +240,17 @@ def load_ml_data(data_folder,
         sys.exit()
     # Return graphs list, one-hot np.array, and label vector.
     return graphs_list, new_seq_1h_list, site_feat_vect_list, label_vect_list
+
+
+################################################################################
+
+def add_dic2_to_dic1(dic1, dic2):
+    """
+    Add dictionary 1 to dictionary 2.
+    """
+    for dic2_k, dic2_v in dic2.items():
+        dic1[dic2_k] = dic2_v
+    return dic1
 
 
 ################################################################################
@@ -652,6 +680,49 @@ def read_str_elem_up_into_dic(str_elem_up_file,
     f.closed
     return str_elem_up_dic
 
+
+################################################################################
+
+def read_str_elem_up_into_dic2(str_elem_up_file, str_elem_up_dic):
+
+    """
+    Read in structural elements unpaired probabilities for each sequence 
+    position. Available structural elements:
+    p_unpaired, p_external, p_hairpin, p_internal, p_multiloop, p_paired
+    Input Format:
+    >sequence_id
+    pos(1-based)<t>p_unpaired<t>p_external<t>p_hairpin<t>p_internal<t>p_multiloop<t>p_paired
+    Extract: p_external, p_hairpin, p_internal, p_multiloop
+    thus getting 4xn matrix for sequence with length n
+    Return dictionary with matrix for each sequence.
+    (key: sequence id, value: ups matrix)
+
+    >>> str_elem_up_test = "test_data/test.str_elem.up"
+    >>> read_str_elem_up_into_dic(str_elem_up_test)
+    {'CLIP_01': [[0.1, 0.2], [0.2, 0.3], [0.3, 0.2], [0.3, 0.1]]}
+
+    """
+    if not str_elem_up_dic:
+        str_elem_up_dic = {}
+    seq_id = ""
+    # Go through .str_elem.up file, extract p_external, p_hairpin, p_internal, p_multiloop.
+    with open(str_elem_up_file) as f:
+        for line in f:
+            if re.search(">.+", line):
+                m = re.search(">(.+)", line)
+                seq_id = m.group(1)
+                str_elem_up_dic[seq_id] = [[],[],[],[]]
+            else:
+                m = re.search("\d+\t.+?\t(.+?)\t(.+?)\t(.+?)\t(.+?)\t", line)
+                p_external = float(m.group(1))
+                p_hairpin = float(m.group(2))
+                p_internal = float(m.group(3))
+                p_multiloop = float(m.group(4))
+                str_elem_up_dic[seq_id][0].append(p_external)
+                str_elem_up_dic[seq_id][1].append(p_hairpin)
+                str_elem_up_dic[seq_id][2].append(p_internal)
+                str_elem_up_dic[seq_id][3].append(p_multiloop)
+    f.closed
 
 
 ################################################################################
