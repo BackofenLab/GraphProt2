@@ -12,15 +12,7 @@ GraphProt2 Python3 function library
 Run doctests from base directory:
 python3 -m doctest -v lib/gp2lib.py
 
-
-fix_vp_len potentially leads to discarding some sequences
-
-convert_seqs_to_one_hot
-convert_seqs_to_graphs
-
-
 """
-
 
 def load_ml_data(data_folder, 
               use_up=False,
@@ -31,12 +23,17 @@ def load_ml_data(data_folder,
               disable_bpp=False,
               bpp_cutoff=0.2,
               bpp_mode=1,
+              mean_norm=False,
               vp_ext = 100,
+              add_1h_to_g=False,
+              onehot2d=False,
               fix_vp_len=True):
     """
     Load multi label data from folder.
     Loop over all files, load data in.
-    NOTE that file names are assumed to be the labels, 
+    After looping, construct one-hot-lists and graphs from 
+    feature dictionaries.
+    NOTE that file names are treated as labels, 
     e.g. file name: DGCR8.bed, thus label: DGCR8
 
     Function parameters:
@@ -48,8 +45,11 @@ def load_ml_data(data_folder,
         disable_bpp : disables adding of base pair information
         bpp_cutoff : bp probability threshold when adding bp probs.
         bpp_mode : see ext_mode in convert_seqs_to_graphs for details
+        onehot2d : Do not convert one-hot to 3d
+        mean_norm : Do mean normalization of values which are in need of
         vp_ext : Define upstream + downstream viewpoint extension
                  Usually set equal to used plfold_L (default: 100)
+        add_1h_to_g : add one-hot encodings to graph node vectors
         fix_vp_len : Use only viewpoint regions with same length (= max length)
 
     """
@@ -126,13 +126,12 @@ def load_ml_data(data_folder,
 
         print("Read in dataset %s dictionaries ... " % (data_id))
 
-        # Read in FASTA sequences, add to seqs_dic.
-        # seqs_dic = read_fasta_into_dic(fasta_file, seqs_dic=seqs_dic)
         # Read in FASTA sequences for this round only.
         seqs_dic = read_fasta_into_dic(fasta_file)
         # Get viewpoint regions.
-        vp_s_dic, vp_e_dic = extract_viewpoint_regions_from_fasta(seqs_dic)
-
+        vp_s_dic, vp_e_dic = extract_viewpoint_regions_from_fasta(seqs_dic,
+                                                                  vp_s_dic=vp_s_dic,
+                                                                  vp_e_dic=vp_e_dic)
         # Extract most prominent (max) viewpoint length from data.
         if not max_vp_l: # extract only first dataset.
             if fix_vp_len:
@@ -153,44 +152,56 @@ def load_ml_data(data_folder,
             up_dic = read_up_into_dic(up_file, up_dic=up_dic)
         if not disable_bpp:
             bpp_dic = read_bpp_into_dic(bpp_file, vp_s_dic, vp_e_dic, 
-                                        bpp_dic=bpp_dic, 
+                                        bpp_dic=bpp_dic,
                                         vp_lr_ext=vp_ext)
         if use_con:
-            con_dic = read_con_into_dic(con_file, con_dic=con_dic)
-
+            con_dic = read_con_into_dic(con_file, 
+                                        con_dic=con_dic)
         if use_str_elem_up:
-            str_elem_up_dic = read_str_elem_up_into_dic(str_elem_up_file, 
+            str_elem_up_dic = read_str_elem_up_into_dic(str_elem_up_file,
                                                         str_elem_up_dic=str_elem_up_dic)
         if use_sf:
-            sf_dic = read_sf_into_dic(sf_file, sf_dic=sf_dic)
+            sf_dic = read_sf_into_dic(sf_file,
+                                      sf_dic=sf_dic)
         if use_entr:
-            sf_dic = read_entr_into_dic(entr_file, entr_dic=sf_dic)
-
-        print("Generate one-hot encodings ... ")
-
-        # Create / extend one-hot encoding list.
-        seq_1h_list = convert_seqs_to_one_hot(seqs_dic, vp_s_dic, vp_e_dic,
-                                         seqs_list_1h=seq_1h_list,
-                                         up_dic=up_dic,
-                                         con_dic=con_dic,
-                                         str_elem_up_dic=str_elem_up_dic)
-
-        #print("Length seq_1h_list: %i" % (len(seq_1h_list)))
-        print("Generate graphs ... ")
-        
-        # Create / extend graphs list.
-        graphs_list = convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic, 
-                                             g_list=graphs_list,
-                                             up_dic=up_dic, 
-                                             con_dic=con_dic, 
-                                             str_elem_up_dic=str_elem_up_dic, 
-                                             bpp_dic=bpp_dic, 
-                                             vp_lr_ext=vp_ext, 
-                                             ext_mode=bpp_mode,
-                                             plfold_bpp_cutoff=bpp_cutoff)
-        #print("Length graphs_list: %i" % (len(graphs_list)))
+            sf_dic = read_entr_into_dic(entr_file,
+                                        entr_dic=sf_dic)
         # Merge to total seqs dic.
         total_seqs_dic = add_dic2_to_dic1(total_seqs_dic, seqs_dic)
+
+    # Error if not data was read in.
+    if not total_seqs_dic:
+        print("INPUT_ERROR: empty total_seqs_dic")
+        sys.exit()
+
+    # Normalize combined sf_dic.
+    if mean_norm:
+        print("Normalizing values ... ")
+        if use_sf or use_entr:
+            sf_dic = normalize_sf_dic(sf_dic)
+        if use_con:
+            con_dic = normalize_con_dic(con_dic)
+
+    print("Generate one-hot encodings ... ")
+
+    # Create / extend one-hot encoding list.
+    seq_1h_list = convert_seqs_to_one_hot(total_seqs_dic, vp_s_dic, vp_e_dic,
+                                          up_dic=up_dic,
+                                          con_dic=con_dic,
+                                          str_elem_up_dic=str_elem_up_dic)
+
+    print("Generate graphs ... ")
+
+    # Create / extend graphs list.
+    graphs_list = convert_seqs_to_graphs(total_seqs_dic, vp_s_dic, vp_e_dic, 
+                                         up_dic=up_dic, 
+                                         con_dic=con_dic, 
+                                         str_elem_up_dic=str_elem_up_dic, 
+                                         bpp_dic=bpp_dic, 
+                                         vp_lr_ext=vp_ext, 
+                                         ext_mode=bpp_mode,
+                                         add_1h_to_g=add_1h_to_g,
+                                         plfold_bpp_cutoff=bpp_cutoff)
 
     # Check.
     if li != l_sl:
@@ -221,7 +232,8 @@ def load_ml_data(data_folder,
     new_seq_1h_list = []
     for i in range(len(seq_1h_list)):
         M = np.array(seq_1h_list[i]).transpose()
-        M = np.reshape(M, (1, M.shape[0], M.shape[1]))
+        if not onehot2d:
+            M = np.reshape(M, (1, M.shape[0], M.shape[1]))
         new_seq_1h_list.append(M)
 
     # Check for equal lengths of graphs, new_seq_1h and site_feat_v.
@@ -567,6 +579,33 @@ def string_vectorizer(seq,
     return vector
 
 
+################################################################################
+
+def char_vectorizer(char):
+    """
+    Vectorize given nucleotide character. Convert to uppercase before 
+    vectorizing.
+
+    >>> char_vectorizer("C")
+    [0, 1, 0, 0]
+    >>> char_vectorizer("g")
+    [0, 0, 1, 0]
+
+    """
+    alphabet=['A','C','G','U']
+    char = char.upper()
+    l = len(char)
+    vector = []
+    if not l == 1:
+        print ("ERROR: given char length != 1 (given char: \"%s\")" % (l))
+        sys.exit()
+    for c in alphabet:
+        if c == char:
+            vector.append(1)
+        else:
+            vector.append(0)
+    return vector
+
 
 ################################################################################
 
@@ -683,52 +722,9 @@ def read_str_elem_up_into_dic(str_elem_up_file,
 
 ################################################################################
 
-def read_str_elem_up_into_dic2(str_elem_up_file, str_elem_up_dic):
-
-    """
-    Read in structural elements unpaired probabilities for each sequence 
-    position. Available structural elements:
-    p_unpaired, p_external, p_hairpin, p_internal, p_multiloop, p_paired
-    Input Format:
-    >sequence_id
-    pos(1-based)<t>p_unpaired<t>p_external<t>p_hairpin<t>p_internal<t>p_multiloop<t>p_paired
-    Extract: p_external, p_hairpin, p_internal, p_multiloop
-    thus getting 4xn matrix for sequence with length n
-    Return dictionary with matrix for each sequence.
-    (key: sequence id, value: ups matrix)
-
-    >>> str_elem_up_test = "test_data/test.str_elem.up"
-    >>> read_str_elem_up_into_dic(str_elem_up_test)
-    {'CLIP_01': [[0.1, 0.2], [0.2, 0.3], [0.3, 0.2], [0.3, 0.1]]}
-
-    """
-    if not str_elem_up_dic:
-        str_elem_up_dic = {}
-    seq_id = ""
-    # Go through .str_elem.up file, extract p_external, p_hairpin, p_internal, p_multiloop.
-    with open(str_elem_up_file) as f:
-        for line in f:
-            if re.search(">.+", line):
-                m = re.search(">(.+)", line)
-                seq_id = m.group(1)
-                str_elem_up_dic[seq_id] = [[],[],[],[]]
-            else:
-                m = re.search("\d+\t.+?\t(.+?)\t(.+?)\t(.+?)\t(.+?)\t", line)
-                p_external = float(m.group(1))
-                p_hairpin = float(m.group(2))
-                p_internal = float(m.group(3))
-                p_multiloop = float(m.group(4))
-                str_elem_up_dic[seq_id][0].append(p_external)
-                str_elem_up_dic[seq_id][1].append(p_hairpin)
-                str_elem_up_dic[seq_id][2].append(p_internal)
-                str_elem_up_dic[seq_id][3].append(p_multiloop)
-    f.closed
-
-
-################################################################################
-
 def read_entr_into_dic(entr_file,
-                       entr_dic=False):
+                       entr_dic=False,
+                       mean_norm=False):
 
     """
     Read RBP occupancy+entropy scores for each sequence into dictionary.
@@ -763,6 +759,9 @@ def read_entr_into_dic(entr_file,
     if not entr_dic:
         entr_dic = {}
     seq_id = ""
+    max_v = [-1000, -1000, -1000]
+    min_v = [1000, 1000, 1000]
+    avg_v = [0, 0, 0]
     # Go through .up file, extract unpaired probs for each position.
     with open(entr_file) as f:
         for line in f:
@@ -774,17 +773,29 @@ def read_entr_into_dic(entr_file,
             f_list.pop(0)
             if not seq_id in entr_dic:
                 entr_dic[seq_id] = []
-            for i in f_list:
-                entr_dic[seq_id].append(float(i))
+            for i,v in enumerate(f_list):
+                v = float(v)
+                if v > max_v[i]:
+                    max_v[i] = v
+                if v < min_v[i]:
+                    min_v[i] = v
+                avg_v[i] += v
+                entr_dic[seq_id].append(v)
     f.closed
+    if mean_norm:
+        for i,v in enumerate(avg_v):
+            avg_v[i] = avg_v[i] / len(entr_dic)
+        for seq_id in entr_dic:
+            for i in range(len(entr_dic[seq_id])):
+                entr_dic[seq_id][i] = mean_normalize(entr_dic[seq_id][i], avg_v[i], max_v[i], min_v[i])
     return entr_dic
-
 
 
 ################################################################################
 
 def read_sf_into_dic(sf_file,
-                     sf_dic=False):
+                     sf_dic=False,
+                     mean_norm=False):
 
     """
     Read site features into dictionary.
@@ -798,10 +809,18 @@ def read_sf_into_dic(sf_file,
     if not sf_dic:
         sf_dic = {}
     seq_id = ""
+    max_v = False
+    min_v = False
+    avg_v = False
     # Go through .up file, extract unpaired probs for each position.
     with open(sf_file) as f:
         for line in f:
             f_list = line.strip().split("\t")
+            # Init min, max, avg lists.
+            if not max_v:
+                max_v = [-1000]*(len(f_list)-1)
+                min_v = [1000]*(len(f_list)-1)
+                avg_v = [0]*(len(f_list)-1)
             # Skip header line(s).
             if f_list[0] == "id":
                 continue
@@ -809,11 +828,59 @@ def read_sf_into_dic(sf_file,
             f_list.pop(0)
             if not seq_id in sf_dic:
                 sf_dic[seq_id] = []
-            for i in f_list:
-                sf_dic[seq_id].append(float(i))
+            for i,v in enumerate(f_list):
+                v = float(v)
+                if v > max_v[i]:
+                    max_v[i] = v
+                if v < min_v[i]:
+                    min_v[i] = v
+                avg_v[i] += v
+                sf_dic[seq_id].append(v)
     f.closed
+    if mean_norm:
+        for i,v in enumerate(avg_v):
+            avg_v[i] = avg_v[i] / len(sf_dic)
+        for seq_id in sf_dic:
+            for i in range(len(sf_dic[seq_id])):
+                sf_dic[seq_id][i] = mean_normalize(sf_dic[seq_id][i], avg_v[i], max_v[i], min_v[i])
     return sf_dic
 
+
+################################################################################
+
+def normalize_sf_dic(sf_dic):
+    """
+    Mean normalize sf_dic values or any dictinary with value=vector of feature 
+    values.
+    
+    >>> test_dic = {"id1": [0.5, 2.5], "id2": [1, 3], "id3": [1.5, 3.5]}
+    >>> normalize_sf_dic(test_dic)
+    {'id1': [-0.5, -0.5], 'id2': [0.0, 0.0], 'id3': [0.5, 0.5]}
+
+    """
+    max_v = False
+    min_v = False
+    avg_v = False
+    # Get min, max, averaging sum for each feature.
+    for seq_id in sf_dic:
+        l_v = len(sf_dic[seq_id])
+        if not max_v:
+            max_v = [-1000]*l_v
+            min_v = [1000]*l_v
+            avg_v = [0]*l_v
+        for i,v in enumerate(sf_dic[seq_id]):
+            if v > max_v[i]:
+                max_v[i] = v
+            if v < min_v[i]:
+                min_v[i] = v
+            avg_v[i] += v
+    # Mean normalize.
+    for i,v in enumerate(avg_v):
+        avg_v[i] = avg_v[i] / len(sf_dic)
+    for seq_id in sf_dic:
+        for i in range(len(sf_dic[seq_id])):
+            sf_dic[seq_id][i] = mean_normalize(sf_dic[seq_id][i], avg_v[i], max_v[i], min_v[i])
+    return sf_dic
 
 
 ################################################################################
@@ -854,11 +921,43 @@ def read_up_into_dic(up_file,
     return up_dic
 
 
+################################################################################
+
+def normalize_con_dic(con_dic):
+    """
+    Mean normalize con_dic values (only phyloP scores).
+
+    >>> test_dic = {"id1": [[0.5, 1, 1.5], [2.5, 3, 3.5]], "id2": [[0.5, 1, 1.5], [2.5, 3, 3.5]]}
+    >>> normalize_con_dic(test_dic)
+    {'id1': [[0.5, 1, 1.5], [-0.5, 0.0, 0.5]], 'id2': [[0.5, 1, 1.5], [-0.5, 0.0, 0.5]]}
+
+    """
+    # Mean normalization for phyloP scores.
+    pp_max = -1000
+    pp_min = 1000
+    pp_sum = 0
+    pp_c = 0
+    # Get min, max, averaging sum for each feature.
+    for seq_id in con_dic:
+        for i,v in enumerate(con_dic[seq_id][1]):
+            if v > pp_max:
+                pp_max = v
+            if v < pp_min:
+                pp_min = v
+            pp_sum += v
+            pp_c += 1
+    pp_mean = pp_sum / pp_c
+    for seq_id in con_dic:
+        for i in range(len(con_dic[seq_id][1])):
+            con_dic[seq_id][1][i] = mean_normalize(con_dic[seq_id][1][i], pp_mean, pp_max, pp_min)
+    return con_dic
+
 
 ################################################################################
 
 def read_con_into_dic(con_file,
-                      con_dic=False):
+                      con_dic=False,
+                      mean_norm=False):
 
     """
     Read in conservation scores (phastCons+phyloP) and store scores as 
@@ -866,6 +965,8 @@ def read_con_into_dic(con_file,
     Return dictionary with matrix for each sequence
     (key: sequence id, value: scores matrix)
     Entry format: [[1,2,3],[4,5,6]] : 2x3 format (2 rows, 3 columns)
+    mean_norm  :  mean normalize phyloP scores.
+    phastCons scores already normalized since probabilities 0 .. 1
 
     >>> con_test = "test_data/test.con"
     >>> read_con_into_dic(con_test)
@@ -875,6 +976,11 @@ def read_con_into_dic(con_file,
     if not con_dic:
         con_dic = {}
     seq_id = ""
+    # Mean normalization for phyloP scores.
+    pp_max = -1000
+    pp_min = 1000
+    pp_sum = 0
+    pp_c = 0
     # Go through .con file, extract phastCons, phyloP scores for each position.
     with open(con_file) as f:
         for line in f:
@@ -888,8 +994,34 @@ def read_con_into_dic(con_file,
                 phylop_sc = float(m.group(2))
                 con_dic[seq_id][0].append(phastcons_sc)
                 con_dic[seq_id][1].append(phylop_sc)
+                pp_c += 1
+                pp_sum += phylop_sc
+                if phylop_sc > pp_max:
+                    pp_max = phylop_sc
+                if phylop_sc < pp_min:
+                    pp_min = phylop_sc
     f.closed
+    # Mean normalize phylop scores.
+    if mean_norm:
+        pp_mean = pp_sum / pp_c
+        for seq_id in con_dic:
+            for i in range(len(con_dic[seq_id][1])):
+                con_dic[seq_id][1][i] = mean_normalize(con_dic[seq_id][1][i], pp_mean, pp_max, pp_min)
     return con_dic
+
+
+################################################################################
+
+def mean_normalize(x, mean_x, max_x, min_x):
+    """
+    Mean normalization of input x, given mean, max, min of dataset x too.
+    
+    >>> mean_normalize(10, 10, 15, 5)
+    0.0
+    >>> mean_normalize(15, 20, 30, 10)
+    -0.25
+    """
+    return ( (x-mean_x) / (max_x - min_x) )
 
 
 ################################################################################
@@ -973,6 +1105,7 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
                            plfold_bpp_cutoff=0.2,
                            vp_lr_ext=100, 
                            fix_vp_len=False,
+                           add_1h_to_g=False,
                            ext_mode=1):
     """
     Convert dictionary of sequences into list of networkx graphs.
@@ -1077,6 +1210,8 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
             # Make feature vector for each graph node.
             if up_dic or str_elem_up_dic or con_dic:
                 feat_vector = []
+                if add_1h_to_g:
+                    feat_vector = char_vectorizer(c)
                 if up_dic:
                     feat_vector.append(up_dic[seq_id][i])
                 if str_elem_up_dic:
