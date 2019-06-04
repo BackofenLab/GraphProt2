@@ -277,6 +277,9 @@ def load_data(data_folder,
               bpp_cutoff=0.2,
               bpp_mode=1,
               vp_ext = 100,
+              mean_norm=False,
+              add_1h_to_g=False,
+              onehot2d=False,
               fix_vp_len=True):
     """
     Load data from data_folder.
@@ -294,6 +297,9 @@ def load_data(data_folder,
         bpp_mode : see ext_mode in convert_seqs_to_graphs for details
         vp_ext : Define upstream + downstream viewpoint extension
                  Usually set equal to used plfold_L (default: 100)
+        onehot2d : Do not convert one-hot to 3d
+        mean_norm : Do mean normalization of values which are in need of
+        add_1h_to_g : add one-hot encodings to graph node vectors
         fix_vp_len : Use only viewpoint regions with same length (= max length)
 
     """
@@ -405,6 +411,8 @@ def load_data(data_folder,
     pos_sf_dic = False
     neg_sf_dic = False
 
+    print("Read in dataset dictionaries ... ")
+
     # Extract additional annotations.
     if use_up:
         pos_up_dic = read_up_into_dic(pos_up_file)
@@ -427,6 +435,16 @@ def load_data(data_folder,
         pos_sf_dic = read_entr_into_dic(pos_entr_file, entr_dic=pos_sf_dic)
         neg_sf_dic = read_entr_into_dic(neg_entr_file, entr_dic=neg_sf_dic)
 
+    # Normalize con+sf_dics.
+    if mean_norm:
+        print("Normalizing values ... ")
+        if use_sf or use_entr:
+            pos_sf_dic, neg_sf_dic = normalize_pos_neg_sf_dic(pos_sf_dic, neg_sf_dic)
+        if use_con:
+            pos_con_dic, neg_con_dic = normalize_pos_neg_con_dic(pos_con_dic, neg_con_dic)
+
+    print("Generate one-hot encodings ... ")
+
     # Convert input sequences to one-hot encoding (optionally with unpaired probabilities vector).
     pos_seq_1h = convert_seqs_to_one_hot(pos_seqs_dic, pos_vp_s, pos_vp_e, 
                                          up_dic=pos_up_dic,
@@ -437,6 +455,8 @@ def load_data(data_folder,
                                          con_dic=neg_con_dic,
                                          str_elem_up_dic=neg_str_elem_up_dic)
 
+    print("Generate graphs ... ")
+
     # Convert input sequences to sequence or structure graphs.
     pos_graphs = convert_seqs_to_graphs(pos_seqs_dic, pos_vp_s, pos_vp_e, 
                                         up_dic=pos_up_dic, 
@@ -445,6 +465,7 @@ def load_data(data_folder,
                                         bpp_dic=pos_bpp_dic, 
                                         vp_lr_ext=vp_ext, 
                                         ext_mode=bpp_mode,
+                                        add_1h_to_g=add_1h_to_g,
                                         plfold_bpp_cutoff=bpp_cutoff)
     neg_graphs = convert_seqs_to_graphs(neg_seqs_dic, neg_vp_s, neg_vp_e, 
                                         up_dic=neg_up_dic, 
@@ -453,6 +474,7 @@ def load_data(data_folder,
                                         bpp_dic=neg_bpp_dic, 
                                         vp_lr_ext=vp_ext,  
                                         ext_mode=bpp_mode,
+                                        add_1h_to_g=add_1h_to_g,
                                         plfold_bpp_cutoff=bpp_cutoff)
 
     # Create labels.
@@ -463,7 +485,8 @@ def load_data(data_folder,
     new_seq_1h = []
     for idx in range(len(seq_1h)):
         M = np.array(seq_1h[idx]).transpose()
-        M = np.reshape(M, (1, M.shape[0], M.shape[1]))
+        if not onehot2d:
+            M = np.reshape(M, (1, M.shape[0], M.shape[1]))
         new_seq_1h.append(M)
     # Concatenate pos+neg graph lists.
     graphs = pos_graphs + neg_graphs
@@ -885,6 +908,50 @@ def normalize_sf_dic(sf_dic):
 
 ################################################################################
 
+def normalize_pos_neg_sf_dic(pos_sf_dic, neg_sf_dic):
+    """
+    Mean normalize pos+neg sf_dic values.
+    """
+    max_v = False
+    min_v = False
+    avg_v = False
+    # Get min, max, averaging sum for each feature, positives.
+    for seq_id in pos_sf_dic:
+        l_v = len(pos_sf_dic[seq_id])
+        if not max_v:
+            max_v = [-1000]*l_v
+            min_v = [1000]*l_v
+            avg_v = [0]*l_v
+        for i,v in enumerate(pos_sf_dic[seq_id]):
+            if v > max_v[i]:
+                max_v[i] = v
+            if v < min_v[i]:
+                min_v[i] = v
+            avg_v[i] += v
+    # Negatives.
+    for seq_id in neg_sf_dic:
+        for i,v in enumerate(neg_sf_dic[seq_id]):
+            if v > max_v[i]:
+                max_v[i] = v
+            if v < min_v[i]:
+                min_v[i] = v
+            avg_v[i] += v
+    # Number of pos+neg instances.
+    c_v = len(pos_sf_dic) + len(neg_sf_dic)
+    # Mean normalize.
+    for i,v in enumerate(avg_v):
+        avg_v[i] = avg_v[i] / c_v
+    for seq_id in pos_sf_dic:
+        for i in range(len(pos_sf_dic[seq_id])):
+            pos_sf_dic[seq_id][i] = mean_normalize(pos_sf_dic[seq_id][i], avg_v[i], max_v[i], min_v[i])
+    for seq_id in neg_sf_dic:
+        for i in range(len(neg_sf_dic[seq_id])):
+            neg_sf_dic[seq_id][i] = mean_normalize(neg_sf_dic[seq_id][i], avg_v[i], max_v[i], min_v[i])
+    return pos_sf_dic, neg_sf_dic
+
+
+################################################################################
+
 def read_up_into_dic(up_file,
                      up_dic=False):
 
@@ -951,6 +1018,46 @@ def normalize_con_dic(con_dic):
         for i in range(len(con_dic[seq_id][1])):
             con_dic[seq_id][1][i] = mean_normalize(con_dic[seq_id][1][i], pp_mean, pp_max, pp_min)
     return con_dic
+
+
+################################################################################
+
+def normalize_pos_neg_con_dic(pos_con_dic, neg_con_dic):
+    """
+    Mean normalize pos+neg con_dic values (only phyloP scores).
+    """
+    # Mean normalization for phyloP scores.
+    pp_max = -1000
+    pp_min = 1000
+    pp_sum = 0
+    pp_c = 0
+    # Get min, max, averaging sum for each feature.
+    for seq_id in pos_con_dic:
+        for i,v in enumerate(pos_con_dic[seq_id][1]):
+            if v > pp_max:
+                pp_max = v
+            if v < pp_min:
+                pp_min = v
+            pp_sum += v
+            pp_c += 1
+    # Negatives.
+    for seq_id in neg_con_dic:
+        for i,v in enumerate(neg_con_dic[seq_id][1]):
+            if v > pp_max:
+                pp_max = v
+            if v < pp_min:
+                pp_min = v
+            pp_sum += v
+            pp_c += 1
+    # Mean.
+    pp_mean = pp_sum / pp_c
+    for seq_id in pos_con_dic:
+        for i in range(len(pos_con_dic[seq_id][1])):
+            pos_con_dic[seq_id][1][i] = mean_normalize(pos_con_dic[seq_id][1][i], pp_mean, pp_max, pp_min)
+    for seq_id in neg_con_dic:
+        for i in range(len(neg_con_dic[seq_id][1])):
+            neg_con_dic[seq_id][1][i] = mean_normalize(neg_con_dic[seq_id][1][i], pp_mean, pp_max, pp_min)
+    return pos_con_dic, neg_con_dic
 
 
 ################################################################################
