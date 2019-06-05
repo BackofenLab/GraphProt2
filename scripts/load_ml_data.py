@@ -5,16 +5,16 @@ from lib import gp2lib
 # Input data folder to load data from.
 data_folder = "K562_eCLIP_rep1_hg38_rbp_names_test5_centerpos_extlr30_thr3.5_strctovlp0.6_maxnoovlp4000_extlr30_conext150_out"
 
-graphs, seqs_1h, sfv_list, labels = gp2lib.load_ml_data(data_folder,
-                                           use_up=True,
-                                           use_con=True,
-                                           use_sf=True,
-                                           use_entr=True,
-                                           onehot2d=False,
-                                           mean_norm=True,
-                                           add_1h_to_g=True,
-                                           use_str_elem_up=True,
-                                           bpp_cutoff=0.2)
+graphs, seqs_1h, sfv_list, labels, labels_1h = gp2lib.load_ml_data(data_folder,
+                                               use_up=True,
+                                               use_con=True,
+                                               use_sf=True,
+                                               use_entr=True,
+                                               onehot2d=False,
+                                               mean_norm=True,
+                                               add_1h_to_g=True,
+                                               use_str_elem_up=True,
+                                               bpp_cutoff=0.2)
 
 
 """

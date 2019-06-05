@@ -75,6 +75,8 @@ def load_ml_data(data_folder,
     graphs_list = False
     # Label to index dictionary.
     l2i_dic = {}
+    # Site ID to protein dictionary.
+    id2l_dic = {}
     # Label index.
     li = 0
     
@@ -128,6 +130,9 @@ def load_ml_data(data_folder,
 
         # Read in FASTA sequences for this round only.
         seqs_dic = read_fasta_into_dic(fasta_file)
+        # Assign site IDs to dataset label.
+        for seq_id in seqs_dic:
+            id2l_dic[seq_id] = data_id
         # Get viewpoint regions.
         vp_s_dic, vp_e_dic = extract_viewpoint_regions_from_fasta(seqs_dic,
                                                                   vp_s_dic=vp_s_dic,
@@ -210,9 +215,16 @@ def load_ml_data(data_folder,
 
     # Label vectors list, in sorted seqs_dic order like other lists.
     label_vect_list = []
+    # Label vectors list, where only main binding site gets "1".
+    label_1h_vect_list = []
     # Site-level feature vectors list.
     site_feat_vect_list = []
     for seq_id, seq in sorted(total_seqs_dic.items()):
+        # Get data_id of seq_id.
+        data_id = id2l_dic[seq_id]
+        label_1h_list = [0]*li
+        data_id_i = l2i_dic[data_id]
+        label_1h_list[data_id_i] = 1
         # Generate site label vectors.
         m = re.search(".+;(.+),", seq_id)
         labels = m.group(1).split(",")
@@ -222,6 +234,7 @@ def load_ml_data(data_folder,
             i = l2i_dic[l] # get index of label.
             label_list[i] = 1
         label_vect_list.append(label_list)
+        label_1h_vect_list.append(label_1h_list)
         # Generate site-level feature vectors.
         if sf_dic:
             site_feat_vect_list.append(sf_dic[seq_id])
@@ -251,7 +264,7 @@ def load_ml_data(data_folder,
         print("ERROR: site feature vector list length != labels list length (%i != %i)" % (l_sfv, l_lbl))
         sys.exit()
     # Return graphs list, one-hot np.array, and label vector.
-    return graphs_list, new_seq_1h_list, site_feat_vect_list, label_vect_list
+    return graphs_list, new_seq_1h_list, site_feat_vect_list, label_vect_list, label_1h_vect_list
 
 
 ################################################################################
