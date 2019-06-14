@@ -3,27 +3,32 @@
 from lib import gp2lib
 
 # Input data folder to load data from.
-data_folder = "K562_eCLIP_rep1_hg38_rbp_names_test5_centerpos_extlr30_thr3.5_strctovlp0.6_maxnoovlp4000_extlr30_conext150_out"
+data_folder = "test10_generic_set_extlr30_extcon150_thr2_m0_out"
 
-graphs, seqs_1h, sfv_list, labels, labels_1h = gp2lib.load_ml_data(data_folder,
-                                               use_up=True,
-                                               use_con=True,
-                                               use_sf=True,
-                                               use_entr=True,
-                                               onehot2d=False,
-                                               mean_norm=True,
-                                               add_1h_to_g=True,
-                                               use_str_elem_up=True,
-                                               bpp_cutoff=0.2)
+graphs, seqs_1h, sfv_list, labels = gp2lib.load_data(data_folder,
+                                           use_up=True,
+                                           use_con=True,
+                                           use_sf=True,
+                                           use_entr=False,
+                                           gm_data=True,
+                                           onehot2d=False,
+                                           mean_norm=True,
+                                           add_1h_to_g=True,
+                                           use_str_elem_up=True,
+                                           bpp_cutoff=0.2)
 
 
 """
 graphs: list of graphs
 seqs_1h : list of one-hot matrices plus additional position-wise features
 sfv_list : list of site feature vectors
-labels : list of label vectors (= multi label labels)
-labels_1h : list of label one-hot vectors, 
-            i.e. no overlap information (= simple multi class labels)
+labels : list of site labels (0 : negatives, 1-n : protein labels for n proteins)
+
+IMPORTANT:
+For generic model data, use gm_data=True, i.e. function will assign labels to 
+each site based on first part of site ID (before first underscore). So 
+e.g. id1_001 would be interpreted as belonging to class "id1" and so on.
+
 Position-wise features:
 4 from nucleotide sequences (one-hot)
 1 unpaired probability from RNAplfold

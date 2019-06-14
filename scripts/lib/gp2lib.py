@@ -289,6 +289,7 @@ def load_data(data_folder,
               disable_bpp=False,
               bpp_cutoff=0.2,
               bpp_mode=1,
+              gm_data=False,
               vp_ext = 100,
               mean_norm=False,
               add_1h_to_g=False,
@@ -311,6 +312,7 @@ def load_data(data_folder,
         vp_ext : Define upstream + downstream viewpoint extension
                  Usually set equal to used plfold_L (default: 100)
         onehot2d : Do not convert one-hot to 3d
+        gm_data : If data is in format for generic model generation
         mean_norm : Do mean normalization of values which are in need of
         add_1h_to_g : add one-hot encodings to graph node vectors
         fix_vp_len : Use only viewpoint regions with same length (= max length)
@@ -492,6 +494,37 @@ def load_data(data_folder,
 
     # Create labels.
     labels = [1]*len(pos_seq_1h) + [0]*len(neg_seq_1h)
+    # If data is generic model data, use n labels for n proteins, 
+    # + "0" label for negatives.
+    if gm_data:
+        # Seen labels dictionary.
+        label_dic = {}
+        # Site ID to label dictionary.
+        id2l_dic = {}
+        # Label index.
+        li = 0
+        for seq_id, seq in sorted(pos_seqs_dic.items()):
+            # Get RBP ID from seq_id.
+                m = re.search("(.+?)_", seq_id)
+                if m:
+                    label = m.group(1)
+                    if not label in label_dic:
+                        li += 1
+                    label_dic[label] = li
+                    id2l_dic[seq_id] = li
+                else:
+                    print ("ERROR: viewpoint extraction failed for \"%s\"" % (seq_id))
+                    sys.exit()
+        # Construct positives label vector.
+        labels = []
+        for g in pos_graphs:
+            seq_id = g.graph["id"]
+            label = id2l_dic[seq_id]
+            labels.append(label)
+        # Add negatives to label vector.
+        labels = labels + [0]*len(neg_seq_1h)
+    # Concatenate pos+neg graph lists.
+    graphs = pos_graphs + neg_graphs
     # Concatenate pos+neg one-hot lists.
     seq_1h = pos_seq_1h + neg_seq_1h
     # Convert 1h list to np array, transpose matrices and make each entry 3d (1,number_of_features,vp_length).
@@ -501,8 +534,6 @@ def load_data(data_folder,
         if not onehot2d:
             M = np.reshape(M, (1, M.shape[0], M.shape[1]))
         new_seq_1h.append(M)
-    # Concatenate pos+neg graph lists.
-    graphs = pos_graphs + neg_graphs
     # From site feature dictionaries to list of site feature vectors.
     site_feat_v = []
     if pos_sf_dic:
