@@ -18,6 +18,15 @@ graphs, seqs_1h, sfv_list, labels = gp2lib.load_data(data_folder,
                                            bpp_cutoff=0.2)
 
 
+# Get RBP label to numeric label ID (stored in labels list) mapping.
+label_dic = {}
+for i,g in enumerate(graphs):
+    m = re.search("(.+?)_", g.graph["id"])
+    label_dic[m.group(1)] = labels[i]
+print ("RBP label to label ID mapping:")
+for label_id, label_idx in sorted(label_dic.items()):
+    print("%s -> %i" %(label_id, label_idx))
+
 """
 graphs: list of graphs
 seqs_1h : list of one-hot matrices plus additional position-wise features
