@@ -20,6 +20,8 @@ def load_ml_data(data_folder,
               use_entr=False,
               use_str_elem_up=False,
               use_sf=False,
+              use_str_elem_1h=False,
+              use_us_ds_labels=False,
               disable_bpp=False,
               bpp_cutoff=0.2,
               bpp_mode=1,
@@ -42,6 +44,10 @@ def load_ml_data(data_folder,
         use_str_elem_up: add str elements unpaired probs to graph + one-hot
         use_sf: add site features, store in additional vector for each sequence
         use_entr: use RBP occupancy / entropy features for each sequence
+        use_str_elem_1h: use structural elements chars as 1h (in 1h + graph)
+                         instead of probabilities
+        use_us_ds_labels: add upstream downstream labeling for context 
+                          regions in graph (node labels)
         disable_bpp : disables adding of base pair information
         bpp_cutoff : bp probability threshold when adding bp probs.
         bpp_mode : see ext_mode in convert_seqs_to_graphs for details
@@ -193,6 +199,7 @@ def load_ml_data(data_folder,
     seq_1h_list = convert_seqs_to_one_hot(total_seqs_dic, vp_s_dic, vp_e_dic,
                                           up_dic=up_dic,
                                           con_dic=con_dic,
+                                          use_str_elem_1h=use_str_elem_1h,
                                           str_elem_up_dic=str_elem_up_dic)
 
     print("Generate graphs ... ")
@@ -201,6 +208,8 @@ def load_ml_data(data_folder,
     graphs_list = convert_seqs_to_graphs(total_seqs_dic, vp_s_dic, vp_e_dic, 
                                          up_dic=up_dic, 
                                          con_dic=con_dic, 
+                                         use_str_elem_1h=use_str_elem_1h,
+                                         use_us_ds_labels=use_us_ds_labels,
                                          str_elem_up_dic=str_elem_up_dic, 
                                          bpp_dic=bpp_dic, 
                                          vp_lr_ext=vp_ext, 

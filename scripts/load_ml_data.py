@@ -12,10 +12,11 @@ graphs, seqs_1h, sfv_list, labels, labels_1h = gp2lib.load_ml_data(data_folder,
                                                use_entr=True,
                                                onehot2d=False,
                                                mean_norm=True,
-                                               add_1h_to_g=True,
+                                               add_1h_to_g=False,
                                                use_str_elem_up=True,
+                                               use_str_elem_1h=False,
+                                               use_us_ds_labels=False,
                                                bpp_cutoff=0.2)
-
 
 """
 graphs: list of graphs
@@ -24,6 +25,35 @@ sfv_list : list of site feature vectors
 labels : list of label vectors (= multi label labels)
 labels_1h : list of label one-hot vectors, 
             i.e. no overlap information (= simple multi class labels)
+
+Options:
+
+use_up            Add position-wise total unpaired probabilities to one-hot 
+                  matrix and graph node feature vectors
+                  NOTE that this feature will not be added if use_str_elem_up=True
+use_str_elem_up   Add position-wise probabilities for structural elements 
+                  (E, H, I, M, S)
+use_con           Add position-wise conservation scores to one-hot matrix and 
+                  graph node feature vectors
+use_sf            Use site features (one feature vector per binding site)
+use_entr          Use entropy features (see below), added to site feature vector
+                  Advised not to use for binary classification with random 
+                  negatives (naturally biased towards RBP binding sites)
+onehot2d          Keep one-matrix 2D
+mean_norm         Do mean normalization of all feature values not normalized by 
+                  default
+bpp_cutoff        Base pair probability threshold for adding base pairs to graph 
+                  base pairs with prob. >= bpp_cutoff will be added
+add_1h_to_g       Add sequence one-hot encoding to graph node feature vectors
+use_str_elem_1h   use one-hot encoding of structural elements (E,H,I,M,S) 
+                  instead of probabilities (use_str_elem_up)
+                  To use probabilities: use_str_elem_1h=False, use_str_elem_up=True
+                  To use one-hot encodings: use_str_elem_1h=True, use_str_elem_up=True
+use_us_ds_labels  add upstream downstream labeling for context regions in graph (node labels)
+                  e.g. upstream "a" becomes "ua", downstream "g" becomes "dg", 
+                  while viewpoint region nucleotide labels stay same
+
+
 Position-wise features:
 4 from nucleotide sequences (one-hot)
 1 unpaired probability from RNAplfold
@@ -56,6 +86,13 @@ These are calculated based on the viewpoint region sequence.
     -lct          Calculate linguistic complexity (Trifonov)
                   This makes use of -word-size,
                   word-sizes 1,2,3 are used
+    -mfe          MFE of extended viewpoint region 
+                  (currently 121 nt for vp_len=61 nt)
+    -fmfe         Frequency of the MFE
+    -ed           Ensemble diversity of extended viewpoint region
+    -zsc          Thermodynamic z-score of extended viewpoint region
+    -pv           p-value of -zsc
+
 
 Entropy /RBP occupancy features (part of site feature vector):
 
