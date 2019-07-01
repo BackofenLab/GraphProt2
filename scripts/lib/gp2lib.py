@@ -286,6 +286,8 @@ def load_data(data_folder,
               use_entr=False,
               use_str_elem_up=False,
               use_sf=False,
+              use_str_elem_1h=False,
+              use_us_ds_labels=False,
               disable_bpp=False,
               bpp_cutoff=0.2,
               bpp_mode=1,
@@ -306,6 +308,10 @@ def load_data(data_folder,
         use_str_elem_up: add str elements unpaired probs to graph + one-hot
         use_sf: add site features, store in additional vector for each sequence
         use_entr: use RBP occupancy / entropy features for each sequence
+        use_str_elem_1h: use structural elements chars as 1h (in 1h + graph)
+                         instead of probabilities
+        use_us_ds_labels: add upstream downstream labeling for context 
+                          regions in graph (node labels)
         disable_bpp : disables adding of base pair information
         bpp_cutoff : bp probability threshold when adding bp probs.
         bpp_mode : see ext_mode in convert_seqs_to_graphs for details
@@ -464,10 +470,12 @@ def load_data(data_folder,
     pos_seq_1h = convert_seqs_to_one_hot(pos_seqs_dic, pos_vp_s, pos_vp_e, 
                                          up_dic=pos_up_dic,
                                          con_dic=pos_con_dic,
+                                         use_str_elem_1h=use_str_elem_1h,
                                          str_elem_up_dic=pos_str_elem_up_dic)
     neg_seq_1h = convert_seqs_to_one_hot(neg_seqs_dic, neg_vp_s, neg_vp_e, 
                                          up_dic=neg_up_dic, 
                                          con_dic=neg_con_dic,
+                                         use_str_elem_1h=use_str_elem_1h,
                                          str_elem_up_dic=neg_str_elem_up_dic)
 
     print("Generate graphs ... ")
@@ -476,7 +484,9 @@ def load_data(data_folder,
     pos_graphs = convert_seqs_to_graphs(pos_seqs_dic, pos_vp_s, pos_vp_e, 
                                         up_dic=pos_up_dic, 
                                         con_dic=pos_con_dic, 
+                                        use_str_elem_1h=use_str_elem_1h,
                                         str_elem_up_dic=pos_str_elem_up_dic, 
+                                        use_us_ds_labels=use_us_ds_labels,
                                         bpp_dic=pos_bpp_dic, 
                                         vp_lr_ext=vp_ext, 
                                         ext_mode=bpp_mode,
@@ -485,7 +495,9 @@ def load_data(data_folder,
     neg_graphs = convert_seqs_to_graphs(neg_seqs_dic, neg_vp_s, neg_vp_e, 
                                         up_dic=neg_up_dic, 
                                         con_dic=neg_con_dic, 
+                                        use_str_elem_1h=use_str_elem_1h,
                                         str_elem_up_dic=neg_str_elem_up_dic, 
+                                        use_us_ds_labels=use_us_ds_labels,
                                         bpp_dic=neg_bpp_dic, 
                                         vp_lr_ext=vp_ext,  
                                         ext_mode=bpp_mode,
@@ -619,8 +631,9 @@ def read_fasta_into_dic(fasta_file,
 ################################################################################
 
 def string_vectorizer(seq, 
-                      s=None,
-                      e=None):
+                      s=False,
+                      e=False,
+                      custom_alphabet=False):
     """
     Take string sequence, look at each letter and convert to one-hot-encoded
     vector. Optionally define start and end index (1-based) for extracting 
@@ -636,6 +649,8 @@ def string_vectorizer(seq,
 
     """
     alphabet=['A','C','G','U']
+    if custom_alphabet:
+        alphabet = custom_alphabet
     seq_l = len(seq)
     vector = [[1 if char == letter else 0 for char in alphabet] for letter in seq]
     if s and e:
@@ -648,7 +663,8 @@ def string_vectorizer(seq,
 
 ################################################################################
 
-def char_vectorizer(char):
+def char_vectorizer(char,
+                    custom_alphabet=False):
     """
     Vectorize given nucleotide character. Convert to uppercase before 
     vectorizing.
@@ -657,9 +673,13 @@ def char_vectorizer(char):
     [0, 1, 0, 0]
     >>> char_vectorizer("g")
     [0, 0, 1, 0]
+    >>> char_vectorizer("M", ['E', 'H', 'I', 'M', 'S'])
+    [0, 0, 0, 1, 0]
 
     """
-    alphabet=['A','C','G','U']
+    alphabet = ['A','C','G','U']
+    if custom_alphabet:
+        alphabet = custom_alphabet
     char = char.upper()
     l = len(char)
     vector = []
@@ -760,7 +780,7 @@ def read_str_elem_up_into_dic(str_elem_up_file,
 
     >>> str_elem_up_test = "test_data/test.str_elem.up"
     >>> read_str_elem_up_into_dic(str_elem_up_test)
-    {'CLIP_01': [[0.1, 0.2], [0.2, 0.3], [0.3, 0.2], [0.3, 0.1]]}
+    {'CLIP_01': [[0.1, 0.2], [0.2, 0.3], [0.4, 0.2], [0.2, 0.1], [0.1, 0.2]]}
 
     """
     if not str_elem_up_dic:
@@ -772,17 +792,19 @@ def read_str_elem_up_into_dic(str_elem_up_file,
             if re.search(">.+", line):
                 m = re.search(">(.+)", line)
                 seq_id = m.group(1)
-                str_elem_up_dic[seq_id] = [[],[],[],[]]
+                str_elem_up_dic[seq_id] = [[],[],[],[],[]]
             else:
-                m = re.search("\d+\t.+?\t(.+?)\t(.+?)\t(.+?)\t(.+?)\t", line)
+                m = re.search("\d+\t.+?\t(.+?)\t(.+?)\t(.+?)\t(.+?)\t(.+?)\n", line)
                 p_external = float(m.group(1))
                 p_hairpin = float(m.group(2))
                 p_internal = float(m.group(3))
                 p_multiloop = float(m.group(4))
+                p_stack = float(m.group(5))
                 str_elem_up_dic[seq_id][0].append(p_external)
                 str_elem_up_dic[seq_id][1].append(p_hairpin)
                 str_elem_up_dic[seq_id][2].append(p_internal)
                 str_elem_up_dic[seq_id][3].append(p_multiloop)
+                str_elem_up_dic[seq_id][4].append(p_stack)
     f.closed
     return str_elem_up_dic
 
@@ -1253,6 +1275,8 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
                            bpp_dic=False,
                            con_dic=False,
                            str_elem_up_dic=False,
+                           use_str_elem_1h=False,
+                           use_us_ds_labels=False,
                            plfold_bpp_cutoff=0.2,
                            vp_lr_ext=100, 
                            fix_vp_len=False,
@@ -1284,17 +1308,29 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
     '0-1,0-2,1-2,1-6,2-3,3-4,4-5,5-6,6-7,7-8,7-12,8-9,9-10,10-11,11-12,12-13,13-14,13-17,14-15,15-16,16-17,17-18,18-19,19-20,'
     >>> convert_graph_to_string(g_list[1])
     '0-1,1-2,2-3,3-4,4-5,5-6,6-7,6-10,7-8,8-9,9-10,10-11,11-12,12-13,13-14,14-15,15-16,16-17,17-18,18-19,'
-    >>> seqs_dic2 = {"CLIP_01" : "aCGt"}
-    >>> up_dic2 = {"CLIP_01" : [0.8]*4}
-    >>> vp_s2 = {"CLIP_01" : 2}
-    >>> vp_e2 = {"CLIP_01" : 3}
-    >>> con_dic2 = {"CLIP_01" : [[0.3, 0.5, 0.7, 0.2], [0.2, 0.8, 0.9, 0.1]]}
-    >>> str_elem_up_dic2 = {"CLIP_01": [[0.1]*4, [0.3]*4, [0.4]*4, [0.2]*4]}
-    >>> g_list2 = convert_seqs_to_graphs(seqs_dic2, vp_s2, vp_e2, up_dic=up_dic2, con_dic=con_dic2, str_elem_up_dic=str_elem_up_dic2)
-    >>> g_list2[0].node[0]['feat_vector']
-    [0.8, 0.1, 0.3, 0.4, 0.2, 0.5, 0.8]
-    >>> g_list2[0].node[1]['feat_vector']
-    [0.8, 0.1, 0.3, 0.4, 0.2, 0.7, 0.9]
+    >>> seqs_dic = {"CLIP_01" : "aCGu"}
+    >>> up_dic = {"CLIP_01" : [0.8]*4}
+    >>> vp_s = {"CLIP_01" : 2}
+    >>> vp_e = {"CLIP_01" : 3}
+    >>> con_dic = {"CLIP_01" : [[0.3, 0.5, 0.7, 0.2], [0.2, 0.8, 0.9, 0.1]]}
+    >>> str_elem_up_dic = {"CLIP_01": [[0.1]*4, [0.2]*4, [0.4]*4, [0.2]*4, [0.1]*4]}
+    >>> g_list = convert_seqs_to_graphs(seqs_dic, vp_s, vp_e, up_dic=up_dic, con_dic=con_dic, str_elem_up_dic=str_elem_up_dic)
+    >>> g_list[0].node[0]['feat_vector']
+    [0.1, 0.2, 0.4, 0.2, 0.1, 0.5, 0.8]
+    >>> g_list[0].node[1]['feat_vector']
+    [0.1, 0.2, 0.4, 0.2, 0.1, 0.7, 0.9]
+    >>> bpp_dic = {"CLIP_01" : ["1-4,0.5"]}
+    >>> g_list = convert_seqs_to_graphs(seqs_dic, vp_s, vp_e, vp_lr_ext=1, ext_mode=1, bpp_dic=bpp_dic, use_us_ds_labels=True)
+    >>> convert_graph_to_string(g_list[0])
+    '0-1,0-3,1-2,2-3,'
+    >>> g_list[0].node[0]['label']
+    'ua'
+    >>> g_list[0].node[1]['label']
+    'C'
+    >>> g_list[0].node[2]['label']
+    'G'
+    >>> g_list[0].node[3]['label']
+    'du'
 
     """
     if not g_list:
@@ -1352,24 +1388,68 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
                 sys.exit()
         # Add feature values per position.
         g_i = 0
+        seen_vp = False
         for i,c in enumerate(seq): # i from 0.. l-1
             # Skip if outside region of interest.
             if i < (ex_s-1) or i > (ex_e-1):
                 continue
-            # Add nucleotide node.
-            g.add_node(g_i, label=c) # zero-based graph node index.
+            # Label upstream / downstream nucleotides differently.
+            if use_us_ds_labels:
+                lc = ["a", "c", "g", "u"]
+                uc = ["A", "C", "G", "U"]
+                new_c = c
+                if c in lc:
+                    if seen_vp:
+                        new_c = "d"+c
+                    else:
+                        new_c = "u"+c
+                else:
+                    seen_vp = True
+                g.add_node(g_i, label=new_c)
+            else:
+                # Add nucleotide node.
+                g.add_node(g_i, label=c) # zero-based graph node index.
             # Make feature vector for each graph node.
             if up_dic or str_elem_up_dic or con_dic:
                 feat_vector = []
                 if add_1h_to_g:
                     feat_vector = char_vectorizer(c)
                 if up_dic:
-                    feat_vector.append(up_dic[seq_id][i])
+                    if not str_elem_up_dic:
+                        feat_vector.append(up_dic[seq_id][i])
                 if str_elem_up_dic:
-                    feat_vector.append(str_elem_up_dic[seq_id][0][i])
-                    feat_vector.append(str_elem_up_dic[seq_id][1][i])
-                    feat_vector.append(str_elem_up_dic[seq_id][2][i])
-                    feat_vector.append(str_elem_up_dic[seq_id][3][i])
+                    # Structural elements unpaired probabilities.
+                    p_e = str_elem_up_dic[seq_id][0][i]
+                    p_h = str_elem_up_dic[seq_id][1][i]
+                    p_i = str_elem_up_dic[seq_id][2][i]
+                    p_m = str_elem_up_dic[seq_id][3][i]
+                    p_s = str_elem_up_dic[seq_id][4][i]
+                    # Unpaired probabilities as one-hot (max_prob_elem=1, else 0).
+                    if use_str_elem_1h:
+                        str_c = "E"
+                        p_max = p_e
+                        if p_h > p_max:
+                            str_c = "H"
+                            p_max = p_h
+                        if p_i > p_max:
+                            str_c = "I"
+                            p_max = p_i
+                        if p_m > p_max:
+                            str_c = "M"
+                            p_max = p_m
+                        if p_s > p_max:
+                            str_c = "S"
+                        str_c_1h = char_vectorizer(str_c, 
+                                       custom_alphabet = ["E", "H", "I", "M", "S"])
+                        for v in str_c_1h:
+                            feat_vector.append(v)
+                    else:
+                        # Add probabilities to vector.
+                        feat_vector.append(p_e) # E
+                        feat_vector.append(p_h) # H
+                        feat_vector.append(p_i) # I
+                        feat_vector.append(p_m) # M
+                        feat_vector.append(p_s) # S
                 if con_dic:
                     feat_vector.append(con_dic[seq_id][0][i])
                     feat_vector.append(con_dic[seq_id][1][i])
@@ -1386,8 +1466,8 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
                 p1 = int(m.group(1))
                 p2 = int(m.group(2))
                 bpp_value = float(m.group(3))
-                g_p1 = p1 - ex_s # 0-based base pair pos1.
-                g_p2 = p2 - ex_s # 0-based base pair pos2.
+                g_p1 = p1 - ex_s # 0-based base pair p1.
+                g_p2 = p2 - ex_s # 0-based base pair p2.
                 # Filter.
                 if bpp_value < plfold_bpp_cutoff: continue
                 # Add edge if bpp value >= threshold.
@@ -1536,6 +1616,7 @@ def convert_seqs_to_one_hot(seqs_dic, vp_s_dic, vp_e_dic,
                             seqs_list_1h=False,
                             fix_vp_len=False,
                             up_dic=False,
+                            use_str_elem_1h=False,
                             str_elem_up_dic=False,
                             con_dic=False):
     """
@@ -1547,7 +1628,7 @@ def convert_seqs_to_one_hot(seqs_dic, vp_s_dic, vp_e_dic,
     >>> seqs_dic = {"CLIP_01" : "guAUCGgu"}
     >>> up_dic = {"CLIP_01" : [0.5]*8}
     >>> con_dic = {"CLIP_01" : [[0.4]*8,[0.6]*8]}
-    >>> str_elem_up_dic = {"CLIP_01" : [[0.1]*8,[0.2]*8,[0.3]*8,[0.2]*8]}
+    >>> str_elem_up_dic = {"CLIP_01" : [[0.1]*8,[0.2]*8,[0.3]*8,[0.2]*8,[0.2]*8]}
     >>> vp_s = {"CLIP_01": 3}
     >>> vp_e = {"CLIP_01": 6}
     >>> seqs_list_1h = convert_seqs_to_one_hot(seqs_dic, vp_s, vp_e)
@@ -1561,7 +1642,17 @@ def convert_seqs_to_one_hot(seqs_dic, vp_s_dic, vp_e_dic,
     [[1, 0, 0, 0, 0.4, 0.6], [0, 0, 0, 1, 0.4, 0.6], [0, 1, 0, 0, 0.4, 0.6], [0, 0, 1, 0, 0.4, 0.6]]
     >>> seqs_list_1h = convert_seqs_to_one_hot(seqs_dic, vp_s, vp_e, str_elem_up_dic=str_elem_up_dic)
     >>> print(seqs_list_1h[0])
-    [[1, 0, 0, 0, 0.1, 0.2, 0.3, 0.2], [0, 0, 0, 1, 0.1, 0.2, 0.3, 0.2], [0, 1, 0, 0, 0.1, 0.2, 0.3, 0.2], [0, 0, 1, 0, 0.1, 0.2, 0.3, 0.2]]
+    [[1, 0, 0, 0, 0.1, 0.2, 0.3, 0.2, 0.2], [0, 0, 0, 1, 0.1, 0.2, 0.3, 0.2, 0.2], [0, 1, 0, 0, 0.1, 0.2, 0.3, 0.2, 0.2], [0, 0, 1, 0, 0.1, 0.2, 0.3, 0.2, 0.2]]
+    >>> seqs_dic = {"CLIP_01" : "CG"}
+    >>> vp_s = {"CLIP_01": 1}
+    >>> vp_e = {"CLIP_01": 2}
+    >>> str_elem_up_dic = {'CLIP_01': [[0.1, 0.2], [0.2, 0.3], [0.4, 0.2], [0.2, 0.1], [0.1, 0.2]]}
+    >>> seqs_list_1h = convert_seqs_to_one_hot(seqs_dic, vp_s, vp_e, str_elem_up_dic=str_elem_up_dic, use_str_elem_1h=False)
+    >>> print(seqs_list_1h[0])
+    [[0, 1, 0, 0, 0.1, 0.2, 0.4, 0.2, 0.1], [0, 0, 1, 0, 0.2, 0.3, 0.2, 0.1, 0.2]]
+    >>> seqs_list_1h = convert_seqs_to_one_hot(seqs_dic, vp_s, vp_e, str_elem_up_dic=str_elem_up_dic, use_str_elem_1h=True)
+    >>> print(seqs_list_1h[0])
+    [[0, 1, 0, 0, 0, 0, 1, 0, 0], [0, 0, 1, 0, 0, 1, 0, 0, 0]]
 
     """
     if not seqs_list_1h:
@@ -1577,47 +1668,68 @@ def convert_seqs_to_one_hot(seqs_dic, vp_s_dic, vp_e_dic,
                 continue
         # Convert sequence to one-hot-encoding.
         seq_1h = string_vectorizer(seq, vp_s, vp_e)
-        # If unpaired probabilities given, add to matrix.
-        if up_dic:
-            if not seq_id in up_dic:
-                print ("ERROR: seq_id \"%s\" not in up_dic" % (seq_id))
-                sys.exit()
-            l_seq = len(seq)
-            l_up_list = len(up_dic[seq_id])
-            if l_seq != l_up_list:
-                print ("ERROR: length of unpaired probability list != sequence length (\"%s\" != \"%s\")" % (l_seq, l_up_list))
-                sys.exit()
-            # Start index of up list.
-            i= vp_s - 1
-            # Add unpaired probabilities to one-hot matrix (add row).
-            for row in seq_1h:
-                row.append(up_dic[seq_id][i])
-                i += 1
-        # If conservation scores (phastCons, phyloP) given, add to matrix.
+        # Additional feature checkings.
         if con_dic:
             if not seq_id in con_dic:
                 print ("ERROR: seq_id \"%s\" not in con_dic" % (seq_id))
                 sys.exit()
-            # Start index of up list.
-            i= vp_s - 1
-            # Add unpaired probabilities to one-hot matrix (add row).
-            for row in seq_1h:
-                row.append(con_dic[seq_id][0][i])
-                row.append(con_dic[seq_id][1][i])
-                i += 1
-        # If str elements unpaired probs given, add to matrix.
+        if up_dic:
+            if not seq_id in up_dic:
+                print ("ERROR: seq_id \"%s\" not in up_dic" % (seq_id))
+                sys.exit()
+            if len(seq) != len(up_dic[seq_id]):
+                print ("ERROR: length of unpaired probability list != sequence length (\"%s\" != \"%s\")" % (l_seq, l_up_list))
+                sys.exit()
         if str_elem_up_dic:
             if not seq_id in str_elem_up_dic:
                 print ("ERROR: seq_id \"%s\" not in str_elem_up_dic" % (seq_id))
                 sys.exit()
-            # Start index of up list.
+        # Add additional features to one-hot matrix.
+        if con_dic or up_dic or str_elem_up_dic:
+            # Start index of viewpoint region.
             i= vp_s - 1
-            # Add unpaired probabilities to one-hot matrix (add row).
             for row in seq_1h:
-                row.append(str_elem_up_dic[seq_id][0][i])
-                row.append(str_elem_up_dic[seq_id][1][i])
-                row.append(str_elem_up_dic[seq_id][2][i])
-                row.append(str_elem_up_dic[seq_id][3][i])
+                # Unpaired probabilities of structural elements.
+                if str_elem_up_dic:
+                    p_e = str_elem_up_dic[seq_id][0][i]
+                    p_h = str_elem_up_dic[seq_id][1][i]
+                    p_i = str_elem_up_dic[seq_id][2][i]
+                    p_m = str_elem_up_dic[seq_id][3][i]
+                    p_s = str_elem_up_dic[seq_id][4][i]
+                    # Unpaired probabilities as one-hot (max_prob_elem=1, else 0).
+                    if use_str_elem_1h:
+                        str_c = "E"
+                        p_max = p_e
+                        if p_h > p_max:
+                            str_c = "H"
+                            p_max = p_h
+                        if p_i > p_max:
+                            str_c = "I"
+                            p_max = p_i
+                        if p_m > p_max:
+                            str_c = "M"
+                            p_max = p_m
+                        if p_s > p_max:
+                            str_c = "S"
+                        str_c_1h = char_vectorizer(str_c, 
+                                       custom_alphabet = ["E", "H", "I", "M", "S"])
+                        for v in str_c_1h:
+                            row.append(v)
+                    else:
+                        row.append(p_e) # E
+                        row.append(p_h) # H
+                        row.append(p_i) # I
+                        row.append(p_m) # M
+                        row.append(p_s) # S
+                    # No need to add prob for "S", since its 1-unpaired_prob
+                # Unpaired probabilities (total unpaired probabilities).
+                if up_dic:
+                    if not str_elem_up_dic:
+                        row.append(up_dic[seq_id][i])
+                # Conservation scores.
+                if con_dic:
+                    row.append(con_dic[seq_id][0][i])
+                    row.append(con_dic[seq_id][1][i])
                 i += 1
         # Append one-hot encoded input to inputs list.
         seqs_list_1h.append(seq_1h)
