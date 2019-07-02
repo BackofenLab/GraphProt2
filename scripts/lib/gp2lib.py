@@ -14,6 +14,216 @@ python3 -m doctest -v lib/gp2lib.py
 
 """
 
+def load_dlprb_data(data_folder,
+                vp_ext=100,
+                use_ext_vp=False,
+                fix_vp_len=True):
+    """
+    Prepare data for DLPRB method.
+    Return following lists: ids, labels, sequences, features
+    ids : list of sequence ids
+    features : 5 structural element probabilities for each sequence 
+               position, resulting in 2d array for each sequence
+    From DLPRB github readme:
+    ""Every row corresponds to a different structural context: 
+    paired, hairpin loop, internal loop, multiloop, and external loop"
+    So return for each sequence matrix of size 5*n with n=length(sequence)
+    sequences : return viewpoint sequences, or set use_ext_vp=True to 
+    get features for extended viewpoint sequences (extension set by 
+    vp_ext)
+    labels : the sequence labels 1 or 0 (1 : positives, 0 : negatives)
+
+    Arguments:
+    vp_ext : Define upstream + downstream viewpoint extension
+             Usually set equal to used plfold_L (default: 100)
+    add_1h_to_g : add one-hot encodings to graph node vectors
+    fix_vp_len : Use only viewpoint regions with same length (= max length)
+
+    """
+
+    # Input files.
+    pos_fasta_file = "%s/positives.fa" % (data_folder)
+    neg_fasta_file = "%s/negatives.fa" % (data_folder)
+    pos_str_elem_up_file = "%s/positives.str_elem.up" % (data_folder)
+    neg_str_elem_up_file = "%s/negatives.str_elem.up" % (data_folder)
+
+    # Check inputs.
+    if not os.path.isdir(data_folder):
+        print("INPUT_ERROR: Input data folder \"%s\" not found" % (data_folder))
+        sys.exit()
+    if not os.path.isfile(pos_fasta_file):
+        print("INPUT_ERROR: missing \"%s\"" % (pos_fasta_file))
+        sys.exit()
+    if not os.path.isfile(neg_fasta_file):
+        print("INPUT_ERROR: missing \"%s\"" % (neg_fasta_file))
+        sys.exit()
+    if not os.path.isfile(pos_str_elem_up_file):
+        print("INPUT_ERROR: missing \"%s\"" % (pos_str_elem_up_file))
+        sys.exit()
+    if not os.path.isfile(neg_str_elem_up_file):
+        print("INPUT_ERROR: missing \"%s\"" % (neg_str_elem_up_file))
+        sys.exit()
+
+    # Read in FASTA sequences.
+    pos_seqs_dic = read_fasta_into_dic(pos_fasta_file)
+    neg_seqs_dic = read_fasta_into_dic(neg_fasta_file)
+    # Get viewpoint regions.
+    pos_vp_s, pos_vp_e = extract_viewpoint_regions_from_fasta(pos_seqs_dic)
+    neg_vp_s, neg_vp_e = extract_viewpoint_regions_from_fasta(neg_seqs_dic)
+    # Extract most prominent (max) viewpoint length from data.
+    max_vp_l = 0
+    if fix_vp_len:
+        for seq_id in pos_seqs_dic:
+            vp_l = pos_vp_e[seq_id] - pos_vp_s[seq_id] + 1  # +1 since 1-based.
+            if vp_l > max_vp_l:
+                max_vp_l = vp_l
+        if not max_vp_l:
+            print("ERROR: viewpoint length extraction failed")
+            sys.exit()
+
+    # Remove sequences that do not pass fix_vp_len.
+    if fix_vp_len:
+        filter_seq_dic_fixed_vp_len(pos_seqs_dic, pos_vp_s, pos_vp_e, max_vp_l)
+        filter_seq_dic_fixed_vp_len(neg_seqs_dic, neg_vp_s, neg_vp_e, max_vp_l)
+
+    # Init dictionaries.
+    str_elem_up_dic = False
+    # Read in structural elements probabilities.
+    str_elem_up_dic = read_str_elem_up_into_dic(pos_str_elem_up_file)
+    str_elem_up_dic = read_str_elem_up_into_dic(neg_str_elem_up_file, str_elem_up_dic=str_elem_up_dic)
+
+    ids_list = []
+    label_list = []
+    sequence_list = []
+    feat_matrix_list = []
+
+    # Process positives.
+    for seq_id, seq in sorted(pos_seqs_dic.items()):
+        new_seq, new_s, new_e = extract_vp_seq(pos_seqs_dic, seq_id,
+                                               use_ext_vp=use_ext_vp,
+                                               vp_ext=vp_ext)
+        # Start position to extract probabilities.
+        i=new_s-1
+        # Init feature matrix.
+        feat_matrix = [[],[],[],[],[]] # 5 empty feature rows.
+        for nt in new_seq:
+            p_e = str_elem_up_dic[seq_id][0][i]
+            p_h = str_elem_up_dic[seq_id][1][i]
+            p_i = str_elem_up_dic[seq_id][2][i]
+            p_m = str_elem_up_dic[seq_id][3][i]
+            p_s = str_elem_up_dic[seq_id][4][i]
+            # DLPRB order: S H I M E
+            feat_matrix[0].append(p_s)
+            feat_matrix[1].append(p_h)
+            feat_matrix[2].append(p_i)
+            feat_matrix[3].append(p_m)
+            feat_matrix[4].append(p_e)
+            i+=1
+        ids_list.append(seq_id)
+        feat_matrix_list.append(feat_matrix)
+        sequence_list.append(new_s)
+        label_list.append(1) # one label negatives.
+
+    # Process negatives.
+    for seq_id, seq in sorted(neg_seqs_dic.items()):
+        new_seq, new_s, new_e = extract_vp_seq(neg_seqs_dic, seq_id,
+                                               use_ext_vp=use_ext_vp,
+                                               vp_ext=vp_ext)
+        # Start position to extract probabilities.
+        i=new_s-1
+        # Init feature matrix.
+        feat_matrix = [[],[],[],[],[]] # 5 empty feature rows.
+        for nt in new_seq:
+            p_e = str_elem_up_dic[seq_id][0][i]
+            p_h = str_elem_up_dic[seq_id][1][i]
+            p_i = str_elem_up_dic[seq_id][2][i]
+            p_m = str_elem_up_dic[seq_id][3][i]
+            p_s = str_elem_up_dic[seq_id][4][i]
+            # DLPRB order: S H I M E
+            feat_matrix[0].append(p_s)
+            feat_matrix[1].append(p_h)
+            feat_matrix[2].append(p_i)
+            feat_matrix[3].append(p_m)
+            feat_matrix[4].append(p_e)
+            i+=1
+        ids_list.append(seq_id)
+        feat_matrix_list.append(feat_matrix)
+        sequence_list.append(new_s)
+        label_list.append(0) # zero label negatives.
+
+    # Check lengths.
+    l_feat = len(feat_matrix_list)
+    l_seqs = len(sequence_list)
+    l_labs = len(label_list)
+    if l_feat != l_seqs:
+        print("ERROR: feat_matrix_list length != sequence_list length (%i != %i)" % (l_feat, l_seqs))
+        sys.exit()
+    if l_seqs != l_labs:
+        print("ERROR: sequence_list length != label_list length (%i != %i)" % (l_seqs, l_labs))
+        sys.exit()
+    # Return lists.
+    return ids_list, label_list, sequence_list, feat_matrix_list
+
+
+################################################################################
+
+def extract_vp_seq(seqs_dic, seq_id,
+                   use_ext_vp=False,
+                   vp_ext=100):
+    """
+    Extract viewpoint part (uppercase chars) from sequence with 
+    given sequence ID seq_id.
+    If use_ext_vp is set, viewpoint region will be extended by 
+    vp_ext. Thus total length of returned sequence will be 
+    len(vp_region)+2*len(vp_ext).
+    Return sequence, start position + end position (both one-based)
+    of extracted sequence.
+    
+    >>> seqs_dic = {"CLIP_01" : "acguACGUacgu", "CLIP_02" : "CCCCgggg"}
+    >>> seq, s, e = extract_vp_seq(seqs_dic, "CLIP_01")
+    >>> print(seq, s, e)
+    ACGU 5 8
+    >>> seq, s, e = extract_vp_seq(seqs_dic, "CLIP_01", use_ext_vp=True, vp_ext=2)
+    >>> print(seq, s, e)
+    guACGUac 3 10
+    >>> seq, s, e = extract_vp_seq(seqs_dic, "CLIP_02", use_ext_vp=True, vp_ext=2)
+    >>> print(seq, s, e)
+    CCCCgg 1 6
+
+    """
+    # Check.
+    if not seq_id in seqs_dic:
+        print ("ERROR: seq_id \"%s\" not found in seqs_dic" % (seq_id))
+        sys.exit()
+    seq = seqs_dic[seq_id]
+    m = re.search("([acgun]*)([ACGUN]+)([acgun]*)", seq)
+    if m:
+        us_seq = m.group(1)
+        vp_seq = m.group(2)
+        ds_seq = m.group(3)
+        l_us = len(us_seq)
+        l_vp = len(vp_seq)
+        l_ds = len(ds_seq)
+        # Viewpoint start + end.
+        new_s = l_us+1
+        new_e = l_us+l_vp
+        new_seq = vp_seq
+        if use_ext_vp:
+            new_us_seq = us_seq[-vp_ext:]
+            new_ds_seq = ds_seq[:vp_ext]
+            l_new_us = len(new_us_seq)
+            l_new_ds = len(new_ds_seq)
+            new_s = l_us-l_new_us+1
+            new_e = l_us+l_vp+l_new_ds
+            new_seq = new_us_seq+vp_seq+new_ds_seq
+        return new_seq, new_s, new_e
+    else:
+        print ("ERROR: extract_vp_seq() viewpoint extraction failed for \"%s\"" % (seq_id))
+        sys.exit()
+
+
+################################################################################
+
 def load_ml_data(data_folder, 
               use_up=False,
               use_con=False,
@@ -26,7 +236,7 @@ def load_ml_data(data_folder,
               bpp_cutoff=0.2,
               bpp_mode=1,
               mean_norm=False,
-              vp_ext = 100,
+              vp_ext=100,
               add_1h_to_g=False,
               onehot2d=False,
               fix_vp_len=True):
@@ -642,12 +852,14 @@ def read_fasta_into_dic(fasta_file,
 def string_vectorizer(seq, 
                       s=False,
                       e=False,
+                      empty_vectors=False,
                       custom_alphabet=False):
     """
     Take string sequence, look at each letter and convert to one-hot-encoded
     vector. Optionally define start and end index (1-based) for extracting 
     sub-sequences.
     Return array of one-hot encoded vectors.
+    If empty_vectors=True, return list of empty vectors.
 
     >>> string_vectorizer("ACGU")
     [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
@@ -655,13 +867,20 @@ def string_vectorizer(seq,
     []
     >>> string_vectorizer("XX")
     [[0, 0, 0, 0], [0, 0, 0, 0]]
+    >>> string_vectorizer("ABC", empty_vectors=True)
+    [[], [], []]
 
     """
     alphabet=['A','C','G','U']
     if custom_alphabet:
         alphabet = custom_alphabet
     seq_l = len(seq)
-    vector = [[1 if char == letter else 0 for char in alphabet] for letter in seq]
+    if empty_vectors:
+        vector = []
+        for letter in seq:
+            vector.append([])
+    else:
+        vector = [[1 if char == letter else 0 for char in alphabet] for letter in seq]
     if s and e:
         if len(seq) < e or s < 1:
             print ("ERROR: invalid indices passed to string_vectorizer (s:\"%s\", e:\"%s\")" % (s, e))
@@ -1140,7 +1359,6 @@ def normalize_pos_neg_con_dic(pos_con_dic, neg_con_dic):
 def read_con_into_dic(con_file,
                       con_dic=False,
                       mean_norm=False):
-
     """
     Read in conservation scores (phastCons+phyloP) and store scores as 
     2xn matrix for sequence with length n. 
