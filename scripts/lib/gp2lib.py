@@ -117,7 +117,7 @@ def load_dlprb_data(data_folder,
             i+=1
         ids_list.append(seq_id)
         feat_matrix_list.append(feat_matrix)
-        sequence_list.append(new_s)
+        sequence_list.append(new_seq.upper())
         label_list.append(1) # one label negatives.
 
     # Process negatives.
@@ -144,7 +144,7 @@ def load_dlprb_data(data_folder,
             i+=1
         ids_list.append(seq_id)
         feat_matrix_list.append(feat_matrix)
-        sequence_list.append(new_s)
+        sequence_list.append(new_seq.upper())
         label_list.append(0) # zero label negatives.
 
     # Check lengths.
