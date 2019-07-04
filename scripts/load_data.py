@@ -3,19 +3,19 @@
 from lib import gp2lib
 
 # Input data folder to load data from.
-data_folder = "HNRNPK_K562_eCLIP_test_extlr30_extcon150_thr2.2_m0_out"
+data_folder = "EWSR1_K562_rep1_test_extlr30_extcon150_thr3_m0_out"
 
 graphs, seqs_1h, sfv_list, labels = gp2lib.load_data(data_folder,
-                                           use_up=True,
+                                           use_str_elem_up=True,
+                                           use_str_elem_1h=False,
+                                           use_us_ds_labels=True,
                                            use_con=True,
                                            use_sf=True,
                                            use_entr=False,
                                            onehot2d=False,
                                            mean_norm=True,
-                                           add_1h_to_g=True,
-                                           use_str_elem_up=True,
-                                           use_str_elem_1h=False,
-                                           use_us_ds_labels=False,
+                                           add_1h_to_g=False,
+                                           vp_ext=100,
                                            bpp_cutoff=0.5)
 
 """
@@ -38,8 +38,8 @@ use_entr          Use entropy features (see below), added to site feature vector
                   Advised not to use for binary classification with random 
                   negatives (naturally biased towards RBP binding sites)
 onehot2d          Keep one-matrix 2D
-mean_norm         Do mean normalization of all feature values not normalized by 
-                  default
+mean_norm         Do mean normalization of certain feature values (currently 
+                  1 convservation score + all site feature values)
 bpp_cutoff        Base pair probability threshold for adding base pairs to graph 
                   base pairs with prob. >= bpp_cutoff will be added
 add_1h_to_g       Add sequence one-hot encoding to graph node feature vectors
@@ -50,6 +50,8 @@ use_str_elem_1h   use one-hot encoding of structural elements (E,H,I,M,S)
 use_us_ds_labels  add upstream downstream labeling for context regions in graph (node labels)
                   e.g. upstream "a" becomes "ua", downstream "g" becomes "dg", 
                   while viewpoint region nucleotide labels stay same
+vp_ext            Define upstream + downstream viewpoint extension for graphs
+                  Usually set equal to used plfold_L (default: 100)
 
 
 Position-wise features:
@@ -59,9 +61,10 @@ Position-wise features:
 4 unpaired probabilities for single structural elements
     p_external, p_hairpin, p_internal, p_multiloop
 
-graphs[0].node[1]['feat_vector']
+graphs[0].node[0]['feat_vector']
 graphs[0].graph["id"]
 graphs[0].nodes[0]['label']
+
 
 Currently used site features:
 

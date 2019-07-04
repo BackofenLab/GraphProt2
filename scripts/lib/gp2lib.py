@@ -16,7 +16,7 @@ python3 -m doctest -v lib/gp2lib.py
 
 def load_dlprb_data(data_folder,
                 vp_ext=100,
-                use_ext_vp=False,
+                use_vp_ext=False,
                 fix_vp_len=True):
     """
     Prepare data for DLPRB method.
@@ -28,13 +28,11 @@ def load_dlprb_data(data_folder,
     ""Every row corresponds to a different structural context: 
     paired, hairpin loop, internal loop, multiloop, and external loop"
     So return for each sequence matrix of size 5*n with n=length(sequence)
-    sequences : return viewpoint sequences, or set use_ext_vp=True to 
-    get features for extended viewpoint sequences (extension set by 
-    vp_ext)
+    sequences : return viewpoint sequences, or set use_vp_ext=True to 
+    get features for extended viewpoint sequences (extension set by vp_ext)
     labels : the sequence labels 1 or 0 (1 : positives, 0 : negatives)
-
     Arguments:
-    vp_ext : Define upstream + downstream viewpoint extension
+    vp_ext : Define upstream + downstream viewpoint extension for graphs
              Usually set equal to used plfold_L (default: 100)
     add_1h_to_g : add one-hot encodings to graph node vectors
     fix_vp_len : Use only viewpoint regions with same length (= max length)
@@ -86,8 +84,6 @@ def load_dlprb_data(data_folder,
         filter_seq_dic_fixed_vp_len(pos_seqs_dic, pos_vp_s, pos_vp_e, max_vp_l)
         filter_seq_dic_fixed_vp_len(neg_seqs_dic, neg_vp_s, neg_vp_e, max_vp_l)
 
-    # Init dictionaries.
-    str_elem_up_dic = False
     # Read in structural elements probabilities.
     str_elem_up_dic = read_str_elem_up_into_dic(pos_str_elem_up_file)
     str_elem_up_dic = read_str_elem_up_into_dic(neg_str_elem_up_file, str_elem_up_dic=str_elem_up_dic)
@@ -100,7 +96,7 @@ def load_dlprb_data(data_folder,
     # Process positives.
     for seq_id, seq in sorted(pos_seqs_dic.items()):
         new_seq, new_s, new_e = extract_vp_seq(pos_seqs_dic, seq_id,
-                                               use_ext_vp=use_ext_vp,
+                                               use_vp_ext=use_vp_ext,
                                                vp_ext=vp_ext)
         # Start position to extract probabilities.
         i=new_s-1
@@ -127,7 +123,7 @@ def load_dlprb_data(data_folder,
     # Process negatives.
     for seq_id, seq in sorted(neg_seqs_dic.items()):
         new_seq, new_s, new_e = extract_vp_seq(neg_seqs_dic, seq_id,
-                                               use_ext_vp=use_ext_vp,
+                                               use_vp_ext=use_vp_ext,
                                                vp_ext=vp_ext)
         # Start position to extract probabilities.
         i=new_s-1
@@ -168,12 +164,12 @@ def load_dlprb_data(data_folder,
 ################################################################################
 
 def extract_vp_seq(seqs_dic, seq_id,
-                   use_ext_vp=False,
+                   use_vp_ext=False,
                    vp_ext=100):
     """
     Extract viewpoint part (uppercase chars) from sequence with 
     given sequence ID seq_id.
-    If use_ext_vp is set, viewpoint region will be extended by 
+    If use_vp_ext is set, viewpoint region will be extended by 
     vp_ext. Thus total length of returned sequence will be 
     len(vp_region)+2*len(vp_ext).
     Return sequence, start position + end position (both one-based)
@@ -183,10 +179,10 @@ def extract_vp_seq(seqs_dic, seq_id,
     >>> seq, s, e = extract_vp_seq(seqs_dic, "CLIP_01")
     >>> print(seq, s, e)
     ACGU 5 8
-    >>> seq, s, e = extract_vp_seq(seqs_dic, "CLIP_01", use_ext_vp=True, vp_ext=2)
+    >>> seq, s, e = extract_vp_seq(seqs_dic, "CLIP_01", use_vp_ext=True, vp_ext=2)
     >>> print(seq, s, e)
     guACGUac 3 10
-    >>> seq, s, e = extract_vp_seq(seqs_dic, "CLIP_02", use_ext_vp=True, vp_ext=2)
+    >>> seq, s, e = extract_vp_seq(seqs_dic, "CLIP_02", use_vp_ext=True, vp_ext=2)
     >>> print(seq, s, e)
     CCCCgg 1 6
 
@@ -208,7 +204,7 @@ def extract_vp_seq(seqs_dic, seq_id,
         new_s = l_us+1
         new_e = l_us+l_vp
         new_seq = vp_seq
-        if use_ext_vp:
+        if use_vp_ext:
             new_us_seq = us_seq[-vp_ext:]
             new_ds_seq = ds_seq[:vp_ext]
             l_new_us = len(new_us_seq)
@@ -263,7 +259,7 @@ def load_ml_data(data_folder,
         bpp_mode : see ext_mode in convert_seqs_to_graphs for details
         onehot2d : Do not convert one-hot to 3d
         mean_norm : Do mean normalization of values which are in need of
-        vp_ext : Define upstream + downstream viewpoint extension
+        vp_ext : Define upstream + downstream viewpoint extension for graphs
                  Usually set equal to used plfold_L (default: 100)
         add_1h_to_g : add one-hot encodings to graph node vectors
         fix_vp_len : Use only viewpoint regions with same length (= max length)
@@ -534,7 +530,7 @@ def load_data(data_folder,
         disable_bpp : disables adding of base pair information
         bpp_cutoff : bp probability threshold when adding bp probs.
         bpp_mode : see ext_mode in convert_seqs_to_graphs for details
-        vp_ext : Define upstream + downstream viewpoint extension
+        vp_ext : Define upstream + downstream viewpoint extension for graphs
                  Usually set equal to used plfold_L (default: 100)
         onehot2d : Do not convert one-hot to 3d
         gm_data : If data is in format for generic model generation
@@ -1420,6 +1416,10 @@ def mean_normalize(x, mean_x, max_x, min_x):
     0.0
     >>> mean_normalize(15, 20, 30, 10)
     -0.25
+    
+    Formula from:
+    https://en.wikipedia.org/wiki/Feature_scaling
+    
     """
     return ( (x-mean_x) / (max_x - min_x) )
 

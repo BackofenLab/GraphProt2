@@ -7,7 +7,7 @@ data_folder = "HNRNPK_K562_eCLIP_test_extlr30_extcon150_thr2.2_m0_out"
 
 
 ids, labels, sequences, features = gp2lib.load_dlprb_data(data_folder
-                                                          use_ext_vp=False,
+                                                          use_vp_ext=False,
                                                           vp_ext=100,
                                                           fix_vp_len=True)
 
@@ -24,7 +24,7 @@ features : list of feature matrices, where each sequence has a feature
            For dlprb, nr_of_features = 5
 
 Function arguments:
-use_ext_vp : Instead of extracting viewpoint sequence and get features for 
+use_vp_ext : Instead of extracting viewpoint sequence and get features for 
              this sequence part only, extend viewpoint by vp_ext and get 
              features for extended viewpoint sequence
              This is the default when constructing the graphs, but not 
