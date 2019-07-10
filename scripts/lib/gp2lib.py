@@ -503,6 +503,7 @@ def load_data(data_folder,
               use_sf=False,
               use_str_elem_1h=False,
               use_us_ds_labels=False,
+              use_region_labels=False,
               disable_bpp=False,
               bpp_cutoff=0.2,
               bpp_mode=1,
@@ -527,6 +528,9 @@ def load_data(data_folder,
                          instead of probabilities
         use_us_ds_labels: add upstream downstream labeling for context 
                           regions in graph (node labels)
+        use_region_labels: use exon intron position-wise labels, 
+                           encode one-hot (= 2 channels) and add to 
+                           CNN and graphs.
         disable_bpp : disables adding of base pair information
         bpp_cutoff : bp probability threshold when adding bp probs.
         bpp_mode : see ext_mode in convert_seqs_to_graphs for details
@@ -554,6 +558,8 @@ def load_data(data_folder,
     neg_sf_file = "%s/negatives.sf" % (data_folder)
     pos_entr_file = "%s/positives.entr" % (data_folder)
     neg_entr_file = "%s/negatives.entr" % (data_folder)
+    pos_region_labels_file = "%s/positives.exon_intron_labels" % (data_folder)
+    neg_region_labels_file = "%s/negatives.exon_intron_labels" % (data_folder)
 
     # Check inputs.
     if not os.path.isdir(data_folder):
@@ -607,6 +613,13 @@ def load_data(data_folder,
         if not os.path.isfile(neg_bpp_file):
             print("INPUT_ERROR: missing \"%s\"" % (neg_bpp_file))
             sys.exit()
+    if use_region_labels:
+        if not os.path.isfile(pos_region_labels_file):
+            print("INPUT_ERROR: missing \"%s\"" % (pos_region_labels_file))
+            sys.exit()
+        if not os.path.isfile(neg_region_labels_file):
+            print("INPUT_ERROR: missing \"%s\"" % (neg_region_labels_file))
+            sys.exit()
 
     #print("Read in sequences ... ")
 
@@ -646,6 +659,9 @@ def load_data(data_folder,
     # Each site gets a vector of feature values.
     pos_sf_dic = False
     neg_sf_dic = False
+    # Region labels (exon intron).
+    pos_region_labels_dic = False
+    neg_region_labels_dic = False
 
     print("Read in dataset dictionaries ... ")
 
@@ -670,6 +686,9 @@ def load_data(data_folder,
     if use_entr:
         pos_sf_dic = read_entr_into_dic(pos_entr_file, entr_dic=pos_sf_dic)
         neg_sf_dic = read_entr_into_dic(neg_entr_file, entr_dic=neg_sf_dic)
+    if use_region_labels:
+        pos_region_labels_dic = read_region_labels_into_dic(pos_region_labels_file)
+        neg_region_labels_dic = read_region_labels_into_dic(neg_region_labels_file)
 
     # Normalize con+sf_dics.
     if mean_norm:
@@ -685,11 +704,13 @@ def load_data(data_folder,
     pos_seq_1h = convert_seqs_to_one_hot(pos_seqs_dic, pos_vp_s, pos_vp_e, 
                                          up_dic=pos_up_dic,
                                          con_dic=pos_con_dic,
+                                         region_labels_dic=pos_region_labels_dic,
                                          use_str_elem_1h=use_str_elem_1h,
                                          str_elem_up_dic=pos_str_elem_up_dic)
     neg_seq_1h = convert_seqs_to_one_hot(neg_seqs_dic, neg_vp_s, neg_vp_e, 
                                          up_dic=neg_up_dic, 
                                          con_dic=neg_con_dic,
+                                         region_labels_dic=neg_region_labels_dic,
                                          use_str_elem_1h=use_str_elem_1h,
                                          str_elem_up_dic=neg_str_elem_up_dic)
 
@@ -699,6 +720,7 @@ def load_data(data_folder,
     pos_graphs = convert_seqs_to_graphs(pos_seqs_dic, pos_vp_s, pos_vp_e, 
                                         up_dic=pos_up_dic, 
                                         con_dic=pos_con_dic, 
+                                        region_labels_dic=pos_region_labels_dic,
                                         use_str_elem_1h=use_str_elem_1h,
                                         str_elem_up_dic=pos_str_elem_up_dic, 
                                         use_us_ds_labels=use_us_ds_labels,
@@ -709,7 +731,8 @@ def load_data(data_folder,
                                         plfold_bpp_cutoff=bpp_cutoff)
     neg_graphs = convert_seqs_to_graphs(neg_seqs_dic, neg_vp_s, neg_vp_e, 
                                         up_dic=neg_up_dic, 
-                                        con_dic=neg_con_dic, 
+                                        con_dic=neg_con_dic,
+                                        region_labels_dic=neg_region_labels_dic,
                                         use_str_elem_1h=use_str_elem_1h,
                                         str_elem_up_dic=neg_str_elem_up_dic, 
                                         use_us_ds_labels=use_us_ds_labels,
@@ -841,6 +864,38 @@ def read_fasta_into_dic(fasta_file,
                     seqs_dic[seq_id] += m.group(1).replace("T","U").replace("t","u")
     f.closed
     return seqs_dic
+
+
+################################################################################
+
+def read_region_labels_into_dic(region_labels_file,
+                                region_labels_dic=False):
+    """
+    Read in position-wise labels for each site into dictionary of lists.
+    Key: site ID, value: list of labels
+    E.g. from input:
+    CLIP_1	EEIIIIEEEE
+    CLIP_3	IIIIIIIIII
+    CLIP_2	EEEEIIIIEE
+    Generate lists:
+    ['E', 'E', 'I', 'I', 'I', 'I', 'E', 'E', 'E', 'E']
+    ['I', 'I', 'I', 'I', 'I', 'I', 'I', 'I', 'I', 'I']
+    ['E', 'E', 'E', 'E', 'I', 'I', 'I', 'I', 'E', 'E']
+
+    >>> region_labels_test = "test_data/test.region_labels"
+    >>> read_region_labels_into_dic(region_labels_test)
+    {'CLIP_1': ['E', 'I', 'I', 'E'], 'CLIP_2': ['I', 'I', 'I', 'I']}
+
+    """
+    if not region_labels_dic:
+        region_labels_dic = {}
+    # Read in file content.
+    with open(region_labels_file) as f:
+        for line in f:
+            cols = line.strip().split("\t")
+            site_id = cols[0]
+            region_labels_dic[site_id] = list(cols[1])
+    return region_labels_dic
 
 
 ################################################################################
@@ -1504,6 +1559,7 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
                            str_elem_up_dic=False,
                            use_str_elem_1h=False,
                            use_us_ds_labels=False,
+                           region_labels_dic=False,
                            plfold_bpp_cutoff=0.2,
                            vp_lr_ext=100, 
                            fix_vp_len=False,
@@ -1539,13 +1595,14 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
     >>> up_dic = {"CLIP_01" : [0.8]*4}
     >>> vp_s = {"CLIP_01" : 2}
     >>> vp_e = {"CLIP_01" : 3}
+    >>> region_labels_dic = {"CLIP_01" : ['E', 'E', 'I', 'I']}
     >>> con_dic = {"CLIP_01" : [[0.3, 0.5, 0.7, 0.2], [0.2, 0.8, 0.9, 0.1]]}
     >>> str_elem_up_dic = {"CLIP_01": [[0.1]*4, [0.2]*4, [0.4]*4, [0.2]*4, [0.1]*4]}
-    >>> g_list = convert_seqs_to_graphs(seqs_dic, vp_s, vp_e, up_dic=up_dic, con_dic=con_dic, str_elem_up_dic=str_elem_up_dic)
+    >>> g_list = convert_seqs_to_graphs(seqs_dic, vp_s, vp_e, up_dic=up_dic, con_dic=con_dic, str_elem_up_dic=str_elem_up_dic, region_labels_dic=region_labels_dic)
     >>> g_list[0].node[0]['feat_vector']
-    [0.1, 0.2, 0.4, 0.2, 0.1, 0.5, 0.8]
+    [0.1, 0.2, 0.4, 0.2, 0.1, 0.5, 0.8, 1, 0]
     >>> g_list[0].node[1]['feat_vector']
-    [0.1, 0.2, 0.4, 0.2, 0.1, 0.7, 0.9]
+    [0.1, 0.2, 0.4, 0.2, 0.1, 0.7, 0.9, 0, 1]
     >>> bpp_dic = {"CLIP_01" : ["1-4,0.5"]}
     >>> g_list = convert_seqs_to_graphs(seqs_dic, vp_s, vp_e, vp_lr_ext=1, ext_mode=1, bpp_dic=bpp_dic, use_us_ds_labels=True)
     >>> convert_graph_to_string(g_list[0])
@@ -1613,6 +1670,11 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
             if len(con_dic[seq_id][0]) != l_seq:
                 print ("ERROR: con_dic[seq_id] length != sequence length for seq_id \"%s\"" % (seq_id))
                 sys.exit()
+        # Check region_labels_dic.
+        if region_labels_dic:
+            if not seq_id in region_labels_dic:
+                print ("ERROR: seq_id \"%s\" not in region_labels_dic" % (seq_id))
+                sys.exit()
         # Add feature values per position.
         g_i = 0
         seen_vp = False
@@ -1637,7 +1699,7 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
                 # Add nucleotide node.
                 g.add_node(g_i, label=c) # zero-based graph node index.
             # Make feature vector for each graph node.
-            if up_dic or str_elem_up_dic or con_dic:
+            if up_dic or str_elem_up_dic or con_dic or region_labels_dic:
                 feat_vector = []
                 if add_1h_to_g:
                     feat_vector = char_vectorizer(c)
@@ -1677,9 +1739,17 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
                         feat_vector.append(p_i) # I
                         feat_vector.append(p_m) # M
                         feat_vector.append(p_s) # S
+                # Conservation scores.
                 if con_dic:
                     feat_vector.append(con_dic[seq_id][0][i])
                     feat_vector.append(con_dic[seq_id][1][i])
+                # Region labels (exon intron).
+                if region_labels_dic:
+                    label = region_labels_dic[seq_id][i]
+                    label_1h = char_vectorizer(label,
+                                               custom_alphabet = ["E", "I"])
+                    for v in label_1h:
+                        feat_vector.append(v)
                 g.node[g_i]['feat_vector'] = feat_vector
             # Add backbone edge.
             if g_i > 0:
@@ -1843,6 +1913,7 @@ def convert_seqs_to_one_hot(seqs_dic, vp_s_dic, vp_e_dic,
                             seqs_list_1h=False,
                             fix_vp_len=False,
                             up_dic=False,
+                            region_labels_dic=False,
                             use_str_elem_1h=False,
                             str_elem_up_dic=False,
                             con_dic=False):
@@ -1873,10 +1944,11 @@ def convert_seqs_to_one_hot(seqs_dic, vp_s_dic, vp_e_dic,
     >>> seqs_dic = {"CLIP_01" : "CG"}
     >>> vp_s = {"CLIP_01": 1}
     >>> vp_e = {"CLIP_01": 2}
+    >>> region_labels_dic = {"CLIP_01" : ['E', 'I']}
     >>> str_elem_up_dic = {'CLIP_01': [[0.1, 0.2], [0.2, 0.3], [0.4, 0.2], [0.2, 0.1], [0.1, 0.2]]}
-    >>> seqs_list_1h = convert_seqs_to_one_hot(seqs_dic, vp_s, vp_e, str_elem_up_dic=str_elem_up_dic, use_str_elem_1h=False)
+    >>> seqs_list_1h = convert_seqs_to_one_hot(seqs_dic, vp_s, vp_e, str_elem_up_dic=str_elem_up_dic, region_labels_dic=region_labels_dic)
     >>> print(seqs_list_1h[0])
-    [[0, 1, 0, 0, 0.1, 0.2, 0.4, 0.2, 0.1], [0, 0, 1, 0, 0.2, 0.3, 0.2, 0.1, 0.2]]
+    [[0, 1, 0, 0, 0.1, 0.2, 0.4, 0.2, 0.1, 1, 0], [0, 0, 1, 0, 0.2, 0.3, 0.2, 0.1, 0.2, 0, 1]]
     >>> seqs_list_1h = convert_seqs_to_one_hot(seqs_dic, vp_s, vp_e, str_elem_up_dic=str_elem_up_dic, use_str_elem_1h=True)
     >>> print(seqs_list_1h[0])
     [[0, 1, 0, 0, 0, 0, 1, 0, 0], [0, 0, 1, 0, 0, 1, 0, 0, 0]]
@@ -1911,8 +1983,12 @@ def convert_seqs_to_one_hot(seqs_dic, vp_s_dic, vp_e_dic,
             if not seq_id in str_elem_up_dic:
                 print ("ERROR: seq_id \"%s\" not in str_elem_up_dic" % (seq_id))
                 sys.exit()
+        if region_labels_dic:
+            if not seq_id in region_labels_dic:
+                print ("ERROR: seq_id \"%s\" not in region_labels_dic" % (seq_id))
+                sys.exit()
         # Add additional features to one-hot matrix.
-        if con_dic or up_dic or str_elem_up_dic:
+        if con_dic or up_dic or str_elem_up_dic or region_labels_dic:
             # Start index of viewpoint region.
             i= vp_s - 1
             for row in seq_1h:
@@ -1957,6 +2033,13 @@ def convert_seqs_to_one_hot(seqs_dic, vp_s_dic, vp_e_dic,
                 if con_dic:
                     row.append(con_dic[seq_id][0][i])
                     row.append(con_dic[seq_id][1][i])
+                # Region labels (exon intron).
+                if region_labels_dic:
+                    label = region_labels_dic[seq_id][i]
+                    label_1h = char_vectorizer(label, 
+                                               custom_alphabet = ["E", "I"])
+                    for v in label_1h:
+                        row.append(v)
                 i += 1
         # Append one-hot encoded input to inputs list.
         seqs_list_1h.append(seq_1h)

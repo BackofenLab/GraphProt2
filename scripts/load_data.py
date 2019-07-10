@@ -9,6 +9,7 @@ graphs, seqs_1h, sfv_list, labels = gp2lib.load_data(data_folder,
                                            use_str_elem_up=True,
                                            use_str_elem_1h=False,
                                            use_us_ds_labels=True,
+                                           use_region_labels=True,
                                            use_con=True,
                                            use_sf=True,
                                            use_entr=False,
@@ -50,16 +51,18 @@ use_str_elem_1h   use one-hot encoding of structural elements (E,H,I,M,S)
 use_us_ds_labels  add upstream downstream labeling for context regions in graph (node labels)
                   e.g. upstream "a" becomes "ua", downstream "g" becomes "dg", 
                   while viewpoint region nucleotide labels stay same
+use_region_labels use exon intron position-wise labels, 
+                  encode one-hot (= 2 channels) and add to CNN and graphs.
 vp_ext            Define upstream + downstream viewpoint extension for graphs
                   Usually set equal to used plfold_L (default: 100)
 
 
 Position-wise features:
 4 from nucleotide sequences (one-hot)
-1 unpaired probability from RNAplfold
+5 unpaired probabilities for single structural elements
+    p_external, p_hairpin, p_internal, p_multiloop, p_paired
 2 conservation features (phastCons + phyloP score)
-4 unpaired probabilities for single structural elements
-    p_external, p_hairpin, p_internal, p_multiloop
+2 from exon intron region labels (one-hot)
 
 graphs[0].node[0]['feat_vector']
 graphs[0].graph["id"]
