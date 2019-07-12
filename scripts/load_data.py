@@ -3,23 +3,28 @@
 from lib import gp2lib
 
 # Input data folder to load data from.
-data_folder = "EWSR1_K562_rep1_test_extlr30_extcon150_thr3_m0_out"
+data_folder = "test_extlr30_out"
 
 graphs, seqs_1h, sfv_list, labels = gp2lib.load_data(data_folder,
                                            use_str_elem_up=True,
                                            use_str_elem_1h=False,
-                                           use_us_ds_labels=True,
+                                           use_us_ds_labels=False,
                                            use_region_labels=True,
                                            use_con=True,
                                            use_sf=True,
                                            use_entr=False,
                                            onehot2d=False,
-                                           mean_norm=True,
-                                           add_1h_to_g=False,
+                                           add_1h_to_g=True,
                                            vp_ext=100,
                                            bpp_cutoff=0.5)
 
+
+# Min-max normalize (norm_mode=0) all feature vector values (apart from 1-hot features).
+gp2lib.normalize_graph_feat_vectors(graphs, norm_mode=0)
+
+
 """
+
 graphs: list of graphs
 seqs_1h : list of one-hot matrices plus additional position-wise features
 sfv_list : list of site feature vectors
@@ -39,8 +44,6 @@ use_entr          Use entropy features (see below), added to site feature vector
                   Advised not to use for binary classification with random 
                   negatives (naturally biased towards RBP binding sites)
 onehot2d          Keep one-matrix 2D
-mean_norm         Do mean normalization of certain feature values (currently 
-                  1 convservation score + all site feature values)
 bpp_cutoff        Base pair probability threshold for adding base pairs to graph 
                   base pairs with prob. >= bpp_cutoff will be added
 add_1h_to_g       Add sequence one-hot encoding to graph node feature vectors
@@ -57,8 +60,8 @@ vp_ext            Define upstream + downstream viewpoint extension for graphs
                   Usually set equal to used plfold_L (default: 100)
 
 
-Position-wise features:
-4 from nucleotide sequences (one-hot)
+Position-wise features (in order):
+4 from nucleotide sequences (one-hot)  (you have to set add_1h_to_g=True to get these)
 5 unpaired probabilities for single structural elements
     p_external, p_hairpin, p_internal, p_multiloop, p_paired
 2 conservation features (phastCons + phyloP score)

@@ -12,6 +12,11 @@ GraphProt2 Python3 function library
 Run doctests from base directory:
 python3 -m doctest -v lib/gp2lib.py
 
+
+2DO:
+check whether methods also work with sequences without 
+lowercase context also work
+
 """
 
 def load_dlprb_data(data_folder,
@@ -231,7 +236,6 @@ def load_ml_data(data_folder,
               disable_bpp=False,
               bpp_cutoff=0.2,
               bpp_mode=1,
-              mean_norm=False,
               vp_ext=100,
               add_1h_to_g=False,
               onehot2d=False,
@@ -258,7 +262,6 @@ def load_ml_data(data_folder,
         bpp_cutoff : bp probability threshold when adding bp probs.
         bpp_mode : see ext_mode in convert_seqs_to_graphs for details
         onehot2d : Do not convert one-hot to 3d
-        mean_norm : Do mean normalization of values which are in need of
         vp_ext : Define upstream + downstream viewpoint extension for graphs
                  Usually set equal to used plfold_L (default: 100)
         add_1h_to_g : add one-hot encodings to graph node vectors
@@ -391,14 +394,6 @@ def load_ml_data(data_folder,
         print("INPUT_ERROR: empty total_seqs_dic")
         sys.exit()
 
-    # Normalize combined sf_dic.
-    if mean_norm:
-        print("Normalizing values ... ")
-        if use_sf or use_entr:
-            sf_dic = normalize_sf_dic(sf_dic)
-        if use_con:
-            con_dic = normalize_con_dic(con_dic)
-
     print("Generate one-hot encodings ... ")
 
     # Create / extend one-hot encoding list.
@@ -509,7 +504,6 @@ def load_data(data_folder,
               bpp_mode=1,
               gm_data=False,
               vp_ext = 100,
-              mean_norm=False,
               add_1h_to_g=False,
               onehot2d=False,
               fix_vp_len=True):
@@ -538,7 +532,6 @@ def load_data(data_folder,
                  Usually set equal to used plfold_L (default: 100)
         onehot2d : Do not convert one-hot to 3d
         gm_data : If data is in format for generic model generation
-        mean_norm : Do mean normalization of values which are in need of
         add_1h_to_g : add one-hot encodings to graph node vectors
         fix_vp_len : Use only viewpoint regions with same length (= max length)
 
@@ -689,14 +682,6 @@ def load_data(data_folder,
     if use_region_labels:
         pos_region_labels_dic = read_region_labels_into_dic(pos_region_labels_file)
         neg_region_labels_dic = read_region_labels_into_dic(neg_region_labels_file)
-
-    # Normalize con+sf_dics.
-    if mean_norm:
-        print("Normalizing values ... ")
-        if use_sf or use_entr:
-            pos_sf_dic, neg_sf_dic = normalize_pos_neg_sf_dic(pos_sf_dic, neg_sf_dic)
-        if use_con:
-            pos_con_dic, neg_con_dic = normalize_pos_neg_con_dic(pos_con_dic, neg_con_dic)
 
     print("Generate one-hot encodings ... ")
 
@@ -1465,7 +1450,7 @@ def read_con_into_dic(con_file,
 
 def mean_normalize(x, mean_x, max_x, min_x):
     """
-    Mean normalization of input x, given mean, max, min of dataset x too.
+    Mean normalization of input x, given dataset mean, max, and min.
     
     >>> mean_normalize(10, 10, 15, 5)
     0.0
@@ -1476,7 +1461,110 @@ def mean_normalize(x, mean_x, max_x, min_x):
     https://en.wikipedia.org/wiki/Feature_scaling
     
     """
-    return ( (x-mean_x) / (max_x - min_x) )
+    # If min=max, all values the same, so return x.
+    if (max_x - min_x) == 0:
+        return x
+    else:
+        return ( (x-mean_x) / (max_x - min_x) )
+
+
+################################################################################
+
+def min_max_normalize(x, max_x, min_x):
+    """
+    Min-max normalization of input x, given dataset max and min.
+    
+    >>> min_max_normalize(20, 30, 10)
+    0.5
+    >>> min_max_normalize(30, 30, 10)
+    1.0
+    >>> min_max_normalize(10, 30, 10)
+    0.0
+    
+    Formula from:
+    https://en.wikipedia.org/wiki/Feature_scaling
+    
+    """
+    # If min=max, all values the same, so return x.
+    if (max_x - min_x) == 0:
+        return x
+    else:
+        return ( (x-min_x) / (max_x - min_x) )
+
+
+################################################################################
+
+def normalize_graph_feat_vectors(graphs,
+                                 norm_mode=0):
+    """
+    Normalize graph feature vector values. Automatically check for 
+    one-hot encoded features (only "0" or "1" values), do not normalize these.
+    
+    graph     : List of graphs
+    norm_mode : normalization mode
+                norm_mode=0 : Min-max normalization
+                norm_mode=1 : Mean normalization
+
+    >>> seqs_dic = {"CLIP_01" : "aCGu"}
+    >>> up_dic = {"CLIP_01" : [0.8]*4}
+    >>> vp_s = {"CLIP_01" : 2}
+    >>> vp_e = {"CLIP_01" : 3}
+    >>> region_labels_dic = {"CLIP_01" : ['E', 'E', 'I', 'I']}
+    >>> con_dic = {"CLIP_01" : [[0.3, 0.5, 0.7, 0.2], [0.2, 0.8, 0.9, 0.1]]}
+    >>> str_elem_up_dic = {"CLIP_01": [[0.1, 0.3, 0.25, 0.2], [0.15, 0.1, 0.3, 0.25], [0.2, 0.15, 0.1, 0.3], [0.25, 0.2, 0.15, 0.1], [0.3, 0.25, 0.2, 0.15]]}
+    >>> g_list = convert_seqs_to_graphs(seqs_dic, vp_s, vp_e, up_dic=up_dic, con_dic=con_dic, str_elem_up_dic=str_elem_up_dic, region_labels_dic=region_labels_dic)
+    >>> g_list[0].node[0]['feat_vector']
+    [0.3, 0.1, 0.15, 0.2, 0.25, 0.5, 0.8, 1, 0]
+    >>> g_list[0].node[1]['feat_vector']
+    [0.25, 0.3, 0.1, 0.15, 0.2, 0.7, 0.9, 0, 1]
+    >>> normalize_graph_feat_vectors(g_list, norm_mode=0)
+    >>> g_list[0].node[0]['feat_vector']
+    [1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1, 0]
+    >>> g_list[0].node[1]['feat_vector']
+    [0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0, 1]
+
+    """
+    # Get number of vector elements.
+    c_ve = len(graphs[0].node[0]['feat_vector'])
+    # Identify elements with one-hot encoding (use first graph for that).
+    norm_i = [] # vector indices to normalize.
+    for i in range(c_ve):
+        one_hot = 1
+        for n in graphs[0].nodes:
+            v = graphs[0].node[n]['feat_vector'][i]
+            if str(v) != "0" and str(v) != "1":
+                one_hot = 0
+        if not one_hot:
+            norm_i.append(i)
+    # Vectors of max, min, avg values for each features.
+    max_v = [-1000]*c_ve
+    min_v = [1000]*c_ve
+    avg_v = [0]*c_ve
+    c_v = [0]*c_ve
+    for i in norm_i: # For each normalization index.
+        for g in graphs:
+            for n in g.nodes: # For each node in graph.
+                v = g.node[n]['feat_vector'][i]
+                c_v[i] += 1
+                if v > max_v[i]:
+                    max_v[i] = v
+                if v < min_v[i]:
+                    min_v[i] = v
+                avg_v[i] += v
+    # Calculate means.
+    for i in norm_i:
+        avg_v[i] = avg_v[i] / c_v[i]
+    # Normalize all vector values.
+    for i in norm_i: # For each normalization index.
+        for g in graphs:
+            for n in g.nodes: # For each node in graph.
+                if norm_mode == 0:
+                    g.node[n]['feat_vector'][i] = min_max_normalize(g.node[n]['feat_vector'][i], max_v[i], min_v[i])
+                elif norm_mode == 1:
+                    g.node[n]['feat_vector'][i] = mean_normalize(g.node[n]['feat_vector'][i], avg_v[i], max_v[i], min_v[i])
+                else:
+                    print("ERROR: invalid norm_mode \"%i\" set in normalize_graph_feat_vectors()" % (norm_mode))
+                    sys.exit()
 
 
 ################################################################################
@@ -1754,7 +1842,7 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
             # Add backbone edge.
             if g_i > 0:
                 g.add_edge(g_i-1, g_i, label = '-',type='backbone')
-            # Increment graph node index.
+            # Increment graph connode index.
             g_i += 1
         # Add base pair edges to graph.
         if bpp_dic:
