@@ -15,9 +15,114 @@ python3 -m doctest -v lib/gp2lib.py
 
 2DO:
 check whether methods also work with sequences without 
-lowercase context also work
+lowercase context.
 
 """
+
+def load_ideeps_data(data_folder,
+                vp_ext=20,
+                use_vp_ext=True,
+                fix_vp_len=True):
+    """
+    Prepare data for iDeepS method.
+    Use 101 nt long sequences just like in provided data (fixed length!).
+    Return following lists: ids, labels, sequences
+    ids : list of sequence ids
+          IMPORTANT: id needs to be in format: "id; class:0" for negatives 
+          and "id; class:1" for positives in order for iDeepS to recognize
+          the class labels.
+    vp_ext : Define upstream + downstream viewpoint extension for graphs
+             Usually set equal to used plfold_L (default: 20)
+             vp_ext=20 + 61 nt of viewpoint = 101 nt sequences
+    add_1h_to_g : add one-hot encodings to graph node vectors
+    fix_vp_len : Use only viewpoint regions with same length (= max length)
+
+    """
+
+    # Input files.
+    pos_fasta_file = "%s/positives.fa" % (data_folder)
+    neg_fasta_file = "%s/negatives.fa" % (data_folder)
+
+    # Check inputs.
+    if not os.path.isdir(data_folder):
+        print("INPUT_ERROR: Input data folder \"%s\" not found" % (data_folder))
+        sys.exit()
+    if not os.path.isfile(pos_fasta_file):
+        print("INPUT_ERROR: missing \"%s\"" % (pos_fasta_file))
+        sys.exit()
+    if not os.path.isfile(neg_fasta_file):
+        print("INPUT_ERROR: missing \"%s\"" % (neg_fasta_file))
+        sys.exit()
+
+    # Read in FASTA sequences.
+    pos_seqs_dic = read_fasta_into_dic(pos_fasta_file)
+    neg_seqs_dic = read_fasta_into_dic(neg_fasta_file)
+    # Get viewpoint regions.
+    pos_vp_s, pos_vp_e = extract_viewpoint_regions_from_fasta(pos_seqs_dic)
+    neg_vp_s, neg_vp_e = extract_viewpoint_regions_from_fasta(neg_seqs_dic)
+    # Extract most prominent (max) viewpoint length from data.
+    max_vp_l = 0
+    if fix_vp_len:
+        for seq_id in pos_seqs_dic:
+            vp_l = pos_vp_e[seq_id] - pos_vp_s[seq_id] + 1  # +1 since 1-based.
+            if vp_l > max_vp_l:
+                max_vp_l = vp_l
+        if not max_vp_l:
+            print("ERROR: viewpoint length extraction failed")
+            sys.exit()
+
+    # Remove sequences that do not pass fix_vp_len.
+    if fix_vp_len:
+        filter_seq_dic_fixed_vp_len(pos_seqs_dic, pos_vp_s, pos_vp_e, max_vp_l)
+        filter_seq_dic_fixed_vp_len(neg_seqs_dic, neg_vp_s, neg_vp_e, max_vp_l)
+
+    ids_list = []
+    label_list = []
+    sequence_list = []
+
+    # Expected sequence length.
+    exp_seq_length = max_vp_l
+    if use_vp_ext:
+        exp_seq_length = max_vp_l + vp_ext*2
+
+    # Process positives.
+    for seq_id, seq in sorted(pos_seqs_dic.items()):
+        new_seq, new_s, new_e = extract_vp_seq(pos_seqs_dic, seq_id,
+                                               use_vp_ext=use_vp_ext,
+                                               vp_ext=vp_ext)
+        if len(new_seq) != exp_seq_length:
+            print("ERROR: new_seq length != exp_seq_length length (%i != %i) for seq_id %s" % (len(new_seq), exp_seq_length, seq_id))
+            sys.exit()
+        new_seq_id = seq_id + "; class:1"
+        ids_list.append(new_seq_id)
+        sequence_list.append(new_seq.upper())
+
+        label_list.append(1) # one label positives.
+
+    # Process negatives.
+    for seq_id, seq in sorted(neg_seqs_dic.items()):
+        new_seq, new_s, new_e = extract_vp_seq(neg_seqs_dic, seq_id,
+                                               use_vp_ext=use_vp_ext,
+                                               vp_ext=vp_ext)
+        if len(new_seq) != exp_seq_length:
+            print("ERROR: new_seq length != exp_seq_length length (%i != %i) for seq_id %s" % (len(new_seq), exp_seq_length, seq_id))
+            sys.exit()
+        new_seq_id = seq_id + "; class:0"
+        ids_list.append(new_seq_id)
+        sequence_list.append(new_seq.upper())
+        label_list.append(0) # zero label negatives.
+
+    # Check lengths.
+    l_seqs = len(sequence_list)
+    l_labs = len(label_list)
+    if l_seqs != l_labs:
+        print("ERROR: sequence_list length != label_list length (%i != %i)" % (l_seqs, l_labs))
+        sys.exit()
+    # Return lists.
+    return ids_list, label_list, sequence_list
+
+
+################################################################################
 
 def load_dlprb_data(data_folder,
                 vp_ext=100,
@@ -123,7 +228,7 @@ def load_dlprb_data(data_folder,
         ids_list.append(seq_id)
         feat_matrix_list.append(feat_matrix)
         sequence_list.append(new_seq.upper())
-        label_list.append(1) # one label negatives.
+        label_list.append(1) # one label positives.
 
     # Process negatives.
     for seq_id, seq in sorted(neg_seqs_dic.items()):
