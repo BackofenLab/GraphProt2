@@ -609,6 +609,7 @@ def load_data(data_folder,
               bpp_mode=1,
               gm_data=False,
               vp_ext = 100,
+              sf_norm=True,
               add_1h_to_g=False,
               onehot2d=False,
               fix_vp_len=True):
@@ -630,6 +631,7 @@ def load_data(data_folder,
         use_region_labels: use exon intron position-wise labels, 
                            encode one-hot (= 2 channels) and add to 
                            CNN and graphs.
+        sf_norm:      Normalize site features
         disable_bpp : disables adding of base pair information
         bpp_cutoff : bp probability threshold when adding bp probs.
         bpp_mode : see ext_mode in convert_seqs_to_graphs for details
@@ -787,6 +789,11 @@ def load_data(data_folder,
     if use_region_labels:
         pos_region_labels_dic = read_region_labels_into_dic(pos_region_labels_file)
         neg_region_labels_dic = read_region_labels_into_dic(neg_region_labels_file)
+
+    # Normalize site features.
+    if sf_norm:
+        if use_sf or use_entr:
+            pos_sf_dic, neg_sf_dic = normalize_pos_neg_sf_dic(pos_sf_dic, neg_sf_dic)
 
     print("Generate one-hot encodings ... ")
 
@@ -1306,13 +1313,18 @@ def read_sf_into_dic(sf_file,
 
 ################################################################################
 
-def normalize_sf_dic(sf_dic):
+def normalize_sf_dic(sf_dic,
+                     norm_mode=0):
     """
     Mean normalize sf_dic values or any dictinary with value=vector of feature 
     values.
-    
+
+    norm_mode : normalization mode
+                norm_mode=0 : Min-max normalization
+                norm_mode=1 : Mean normalization
+
     >>> test_dic = {"id1": [0.5, 2.5], "id2": [1, 3], "id3": [1.5, 3.5]}
-    >>> normalize_sf_dic(test_dic)
+    >>> normalize_sf_dic(test_dic, norm_mode=1)
     {'id1': [-0.5, -0.5], 'id2': [0.0, 0.0], 'id3': [0.5, 0.5]}
 
     """
@@ -1337,15 +1349,26 @@ def normalize_sf_dic(sf_dic):
         avg_v[i] = avg_v[i] / len(sf_dic)
     for seq_id in sf_dic:
         for i in range(len(sf_dic[seq_id])):
-            sf_dic[seq_id][i] = mean_normalize(sf_dic[seq_id][i], avg_v[i], max_v[i], min_v[i])
+            if norm_mode == 0:
+                sf_dic[seq_id][i] = min_max_normalize(sf_dic[seq_id][i], max_v[i], min_v[i])
+            elif norm_mode == 1:
+                sf_dic[seq_id][i] = mean_normalize(sf_dic[seq_id][i], avg_v[i], max_v[i], min_v[i])
+            else:
+                print("ERROR: invalid norm_mode \"%i\" set in normalize_sf_dic()" % (norm_mode))
+                sys.exit()
     return sf_dic
 
 
 ################################################################################
 
-def normalize_pos_neg_sf_dic(pos_sf_dic, neg_sf_dic):
+def normalize_pos_neg_sf_dic(pos_sf_dic, neg_sf_dic,
+                             norm_mode=0):
     """
     Mean normalize pos+neg sf_dic values.
+
+    norm_mode : normalization mode
+                norm_mode=0 : Min-max normalization
+                norm_mode=1 : Mean normalization
     """
     max_v = False
     min_v = False
@@ -1378,10 +1401,22 @@ def normalize_pos_neg_sf_dic(pos_sf_dic, neg_sf_dic):
         avg_v[i] = avg_v[i] / c_v
     for seq_id in pos_sf_dic:
         for i in range(len(pos_sf_dic[seq_id])):
-            pos_sf_dic[seq_id][i] = mean_normalize(pos_sf_dic[seq_id][i], avg_v[i], max_v[i], min_v[i])
+            if norm_mode == 0:
+                pos_sf_dic[seq_id][i] = min_max_normalize(pos_sf_dic[seq_id][i], max_v[i], min_v[i])
+            elif norm_mode == 1:
+                pos_sf_dic[seq_id][i] = mean_normalize(pos_sf_dic[seq_id][i], avg_v[i], max_v[i], min_v[i])
+            else:
+                print("ERROR: invalid norm_mode \"%i\" set in normalize_pos_neg_sf_dic()" % (norm_mode))
+                sys.exit()
     for seq_id in neg_sf_dic:
         for i in range(len(neg_sf_dic[seq_id])):
-            neg_sf_dic[seq_id][i] = mean_normalize(neg_sf_dic[seq_id][i], avg_v[i], max_v[i], min_v[i])
+            if norm_mode == 0:
+                neg_sf_dic[seq_id][i] = min_max_normalize(neg_sf_dic[seq_id][i], max_v[i], min_v[i])
+            elif norm_mode == 1:
+                neg_sf_dic[seq_id][i] = mean_normalize(neg_sf_dic[seq_id][i], avg_v[i], max_v[i], min_v[i])
+            else:
+                print("ERROR: invalid norm_mode \"%i\" set in normalize_pos_neg_sf_dic()" % (norm_mode))
+                sys.exit()
     return pos_sf_dic, neg_sf_dic
 
 
