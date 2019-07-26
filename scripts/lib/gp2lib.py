@@ -19,6 +19,360 @@ lowercase context.
 
 """
 
+def load_geometric_data(data_folder,
+                        use_up=False,
+                        use_con=False,
+                        use_entr=False,
+                        use_str_elem_up=False,
+                        use_sf=False,
+                        use_str_elem_1h=False,
+                        use_us_ds_labels=False,
+                        use_region_labels=False,
+                        disable_bpp=False,
+                        bpp_cutoff=0.2,
+                        bpp_mode=1,
+                        gm_data=False,
+                        vp_ext = 100,
+                        sf_norm=True,
+                        add_1h_to_g=False,
+                        fix_vp_len=True):
+
+    """
+    Load function for PyTorch geometric data, instead of loading  networkx 
+    graphs.
+    
+    Load data from data_folder.
+
+    Returns the following lists:
+
+    all_nodes_labels       Nucleotide indices (dict_label_idx)
+    all_graph_indicators   Graph indices, each node of a graph 
+                           gets same index
+    all_edges              Indices of edges
+    all_nodes_attributes   Node vectors
+    graph_labels           Class labels (e.g. 0,1 for binary classification)
+                           Length of list = #positives+#negatives
+    sfv_list               Site feature vectors list
+
+    Function parameters:
+        use_up : if true add unpaired probabilities to graph + one-hot
+        use_con : if true add conservation scores to graph + one-hot
+        use_str_elem_up: add str elements unpaired probs to graph + one-hot
+        use_sf: add site features, store in additional vector for each sequence
+        use_entr: use RBP occupancy / entropy features for each sequence
+        use_str_elem_1h: use structural elements chars as 1h (in 1h + graph)
+                         instead of probabilities
+        use_us_ds_labels: add upstream downstream labeling for context 
+                          regions in graph (node labels)
+        use_region_labels: use exon intron position-wise labels, 
+                           encode one-hot (= 2 channels) and add to 
+                           CNN and graphs.
+        sf_norm:      Normalize site features
+        disable_bpp : disables adding of base pair information
+        bpp_cutoff : bp probability threshold when adding bp probs.
+        bpp_mode : see ext_mode in convert_seqs_to_graphs for details
+        vp_ext : Define upstream + downstream viewpoint extension for graphs
+                 Usually set equal to used plfold_L (default: 100)
+        gm_data : If data is in format for generic model generation
+        add_1h_to_g : add one-hot encodings to graph node vectors
+        fix_vp_len : Use only viewpoint regions with same length (= max length)
+
+    """
+
+    # Input files.
+    pos_fasta_file = "%s/positives.fa" % (data_folder)
+    neg_fasta_file = "%s/negatives.fa" % (data_folder)
+    pos_up_file = "%s/positives.up" % (data_folder)
+    neg_up_file = "%s/negatives.up" % (data_folder)
+    pos_bpp_file = "%s/positives.bpp" % (data_folder)
+    neg_bpp_file = "%s/negatives.bpp" % (data_folder)
+    pos_con_file = "%s/positives.con" % (data_folder)
+    neg_con_file = "%s/negatives.con" % (data_folder)
+    pos_str_elem_up_file = "%s/positives.str_elem.up" % (data_folder)
+    neg_str_elem_up_file = "%s/negatives.str_elem.up" % (data_folder)
+    pos_sf_file = "%s/positives.sf" % (data_folder)
+    neg_sf_file = "%s/negatives.sf" % (data_folder)
+    pos_entr_file = "%s/positives.entr" % (data_folder)
+    neg_entr_file = "%s/negatives.entr" % (data_folder)
+    pos_region_labels_file = "%s/positives.exon_intron_labels" % (data_folder)
+    neg_region_labels_file = "%s/negatives.exon_intron_labels" % (data_folder)
+
+    # Check inputs.
+    if not os.path.isdir(data_folder):
+        print("INPUT_ERROR: Input data folder \"%s\" not found" % (data_folder))
+        sys.exit()
+    if not os.path.isfile(pos_fasta_file):
+        print("INPUT_ERROR: missing \"%s\"" % (pos_fasta_file))
+        sys.exit()
+    if not os.path.isfile(neg_fasta_file):
+        print("INPUT_ERROR: missing \"%s\"" % (neg_fasta_file))
+        sys.exit()
+    if use_up:
+        if not os.path.isfile(pos_up_file):
+            print("INPUT_ERROR: missing \"%s\"" % (pos_up_file))
+            sys.exit()
+        if not os.path.isfile(neg_up_file):
+            print("INPUT_ERROR: missing \"%s\"" % (neg_up_file))
+            sys.exit()
+    if use_str_elem_up:
+        if not os.path.isfile(pos_str_elem_up_file):
+            print("INPUT_ERROR: missing \"%s\"" % (pos_str_elem_up_file))
+            sys.exit()
+        if not os.path.isfile(neg_str_elem_up_file):
+            print("INPUT_ERROR: missing \"%s\"" % (neg_str_elem_up_file))
+            sys.exit()
+    if use_con:
+        if not os.path.isfile(pos_con_file):
+            print("INPUT_ERROR: missing \"%s\"" % (pos_con_file))
+            sys.exit()
+        if not os.path.isfile(neg_con_file):
+            print("INPUT_ERROR: missing \"%s\"" % (neg_con_file))
+            sys.exit()
+    if use_entr:
+        if not os.path.isfile(pos_entr_file):
+            print("INPUT_ERROR: missing \"%s\"" % (pos_entr_file))
+            sys.exit()
+        if not os.path.isfile(neg_entr_file):
+            print("INPUT_ERROR: missing \"%s\"" % (neg_entr_file))
+            sys.exit()
+    if use_sf:
+        if not os.path.isfile(pos_sf_file):
+            print("INPUT_ERROR: missing \"%s\"" % (pos_sf_file))
+            sys.exit()
+        if not os.path.isfile(neg_sf_file):
+            print("INPUT_ERROR: missing \"%s\"" % (neg_sf_file))
+            sys.exit()
+    if not disable_bpp:
+        if not os.path.isfile(pos_bpp_file):
+            print("INPUT_ERROR: missing \"%s\"" % (pos_bpp_file))
+            sys.exit()
+        if not os.path.isfile(neg_bpp_file):
+            print("INPUT_ERROR: missing \"%s\"" % (neg_bpp_file))
+            sys.exit()
+    if use_region_labels:
+        if not os.path.isfile(pos_region_labels_file):
+            print("INPUT_ERROR: missing \"%s\"" % (pos_region_labels_file))
+            sys.exit()
+        if not os.path.isfile(neg_region_labels_file):
+            print("INPUT_ERROR: missing \"%s\"" % (neg_region_labels_file))
+            sys.exit()
+
+    # Read in FASTA sequences.
+    pos_seqs_dic = read_fasta_into_dic(pos_fasta_file)
+    neg_seqs_dic = read_fasta_into_dic(neg_fasta_file)
+    # Get viewpoint regions.
+    pos_vp_s, pos_vp_e = extract_viewpoint_regions_from_fasta(pos_seqs_dic)
+    neg_vp_s, neg_vp_e = extract_viewpoint_regions_from_fasta(neg_seqs_dic)
+    # Extract most prominent (max) viewpoint length from data.
+    max_vp_l = 0
+    if fix_vp_len:
+        for seq_id in pos_seqs_dic:
+            vp_l = pos_vp_e[seq_id] - pos_vp_s[seq_id] + 1  # +1 since 1-based.
+            if vp_l > max_vp_l:
+                max_vp_l = vp_l
+        if not max_vp_l:
+            print("ERROR: viewpoint length extraction failed")
+            sys.exit()
+
+    # Remove sequences that do not pass fix_vp_len.
+    if fix_vp_len:
+        filter_seq_dic_fixed_vp_len(pos_seqs_dic, pos_vp_s, pos_vp_e, max_vp_l)
+        filter_seq_dic_fixed_vp_len(neg_seqs_dic, neg_vp_s, neg_vp_e, max_vp_l)
+
+    # Init dictionaries.
+    pos_up_dic = False
+    neg_up_dic = False
+    pos_bpp_dic = False
+    neg_bpp_dic = False
+    # con_dic: seq_id to 2xn matrix (storing both phastcons+phylop)
+    pos_con_dic = False 
+    neg_con_dic = False
+    pos_str_elem_up_dic = False
+    neg_str_elem_up_dic = False
+    # Site features dictionary also includes RNP occupancy / entropy features.
+    # Each site gets a vector of feature values.
+    pos_sf_dic = False
+    neg_sf_dic = False
+    # Region labels (exon intron).
+    pos_region_labels_dic = False
+    neg_region_labels_dic = False
+
+    print("Read in dataset dictionaries ... ")
+
+    # Extract additional annotations.
+    if use_up:
+        pos_up_dic = read_up_into_dic(pos_up_file)
+        neg_up_dic = read_up_into_dic(neg_up_file)
+    if not disable_bpp:
+        pos_bpp_dic = read_bpp_into_dic(pos_bpp_file, pos_vp_s, pos_vp_e, 
+                                        vp_lr_ext=vp_ext)
+        neg_bpp_dic = read_bpp_into_dic(neg_bpp_file, neg_vp_s, neg_vp_e, 
+                                        vp_lr_ext=vp_ext)
+    if use_con:
+        pos_con_dic = read_con_into_dic(pos_con_file)
+        neg_con_dic = read_con_into_dic(neg_con_file)
+    if use_str_elem_up:
+        pos_str_elem_up_dic = read_str_elem_up_into_dic(pos_str_elem_up_file)
+        neg_str_elem_up_dic = read_str_elem_up_into_dic(neg_str_elem_up_file)
+    if use_sf:
+        pos_sf_dic = read_sf_into_dic(pos_sf_file, sf_dic=pos_sf_dic)
+        neg_sf_dic = read_sf_into_dic(neg_sf_file, sf_dic=neg_sf_dic)
+    if use_entr:
+        pos_sf_dic = read_entr_into_dic(pos_entr_file, entr_dic=pos_sf_dic)
+        neg_sf_dic = read_entr_into_dic(neg_entr_file, entr_dic=neg_sf_dic)
+    if use_region_labels:
+        pos_region_labels_dic = read_region_labels_into_dic(pos_region_labels_file)
+        neg_region_labels_dic = read_region_labels_into_dic(neg_region_labels_file)
+
+    # Normalize site features.
+    if sf_norm:
+        if use_sf or use_entr:
+            pos_sf_dic, neg_sf_dic = normalize_pos_neg_sf_dic(pos_sf_dic, neg_sf_dic)
+
+    print("Generate PyTorch Geometric lists  ... ")
+
+    # Convert input sequences to sequence or structure graphs.
+    pos_anl, pos_agi, pos_ae, pos_ana, g_idx, n_idx = generate_geometric_data(pos_seqs_dic, 
+                                                                pos_vp_s,
+                                                                pos_vp_e,
+                                                                up_dic=pos_up_dic, 
+                                                                con_dic=pos_con_dic, 
+                                                                region_labels_dic=pos_region_labels_dic,
+                                                                use_str_elem_1h=use_str_elem_1h,
+                                                                str_elem_up_dic=pos_str_elem_up_dic, 
+                                                                use_us_ds_labels=use_us_ds_labels,
+                                                                bpp_dic=pos_bpp_dic, 
+                                                                vp_lr_ext=vp_ext, 
+                                                                ext_mode=bpp_mode,
+                                                                add_1h_to_g=add_1h_to_g,
+                                                                plfold_bpp_cutoff=bpp_cutoff)
+    neg_anl, neg_agi, neg_ae, neg_ana, g_idx, n_idx = generate_geometric_data(neg_seqs_dic, 
+                                                                neg_vp_s,
+                                                                neg_vp_e,
+                                                                up_dic=neg_up_dic, 
+                                                                con_dic=neg_con_dic, 
+                                                                region_labels_dic=neg_region_labels_dic,
+                                                                use_str_elem_1h=use_str_elem_1h,
+                                                                str_elem_up_dic=neg_str_elem_up_dic, 
+                                                                use_us_ds_labels=use_us_ds_labels,
+                                                                bpp_dic=neg_bpp_dic, 
+                                                                vp_lr_ext=vp_ext, 
+                                                                ext_mode=bpp_mode,
+                                                                add_1h_to_g=add_1h_to_g,
+                                                                g_idx=g_idx,
+                                                                n_idx=n_idx,
+                                                                plfold_bpp_cutoff=bpp_cutoff)
+
+
+    # Create labels.
+    labels = [1]*len(pos_seqs_dic) + [0]*len(neg_seqs_dic)
+    # If data is generic model data, use n labels for n proteins, 
+    # + "0" label for negatives.
+    if gm_data:
+        # Seen labels dictionary.
+        label_dic = {}
+        # Site ID to label dictionary.
+        id2l_dic = {}
+        # Label index.
+        li = 0
+        for seq_id, seq in sorted(pos_seqs_dic.items()):
+            # Get RBP ID from seq_id.
+                m = re.search("(.+?)_", seq_id)
+                if m:
+                    label = m.group(1)
+                    if not label in label_dic:
+                        li += 1
+                    label_dic[label] = li
+                    id2l_dic[seq_id] = li
+                else:
+                    print ("ERROR: viewpoint extraction failed for \"%s\"" % (seq_id))
+                    sys.exit()
+        # Construct positives label vector.
+        labels = []
+        for seq_id, seq in sorted(seqs_dic.items()):
+            label = id2l_dic[seq_id]
+            labels.append(label)
+        # Add negatives to label vector.
+        labels = labels + [0]*len(neg_seqs_dic)
+        
+    # Concatenate geometric lists.
+    anl = pos_anl + neg_anl
+    agi = pos_agi + neg_agi
+    ae = pos_ae + neg_ae
+    ana = pos_ana + neg_ana
+
+    # From site feature dictionaries to list of site feature vectors.
+    site_feat_v = []
+    if pos_sf_dic:
+        for site_id, site_v in sorted(pos_sf_dic.items()):
+            if site_id in pos_seqs_dic:
+                site_feat_v.append(site_v)
+    else:
+        for l in [0]*len(pos_seq_1h):
+            site_feat_v.append([0])
+    if neg_sf_dic:
+        for site_id, site_v in sorted(neg_sf_dic.items()):
+            if site_id in neg_seqs_dic:
+                site_feat_v.append(site_v)
+    else:
+        for l in [0]*len(neg_seq_1h):
+            site_feat_v.append([0])
+
+    # Return geometric lists, label list, and site feature vectors list.
+    return anl, agi, ae, ana, labels, site_feat_v
+
+
+################################################################################
+
+def load_sf_data(data_folder,
+                 sf_norm=True):
+    """
+    Load site feature vectors, store as list of vectors.
+    Return list of vectors and labels list.
+
+    """
+    # Input files.
+    pos_sf_file = "%s/positives.sf" % (data_folder)
+    neg_sf_file = "%s/negatives.sf" % (data_folder)
+
+    # Check inputs.
+    if not os.path.isfile(pos_sf_file):
+        print("INPUT_ERROR: missing \"%s\"" % (pos_sf_file))
+        sys.exit()
+    if not os.path.isfile(neg_sf_file):
+        print("INPUT_ERROR: missing \"%s\"" % (neg_sf_file))
+        sys.exit()
+
+    # Site features dictionaries.
+    pos_sf_dic = False
+    neg_sf_dic = False
+
+    print("Read in dataset dictionaries ... ")
+
+    pos_sf_dic = read_sf_into_dic(pos_sf_file, sf_dic=pos_sf_dic)
+    neg_sf_dic = read_sf_into_dic(neg_sf_file, sf_dic=neg_sf_dic)
+
+    # Normalize site features.
+    if sf_norm:
+        pos_sf_dic, neg_sf_dic = normalize_pos_neg_sf_dic(pos_sf_dic, neg_sf_dic,
+                                                          norm_mode=0)
+
+    # Create labels.
+    labels = [1]*len(pos_sf_dic) + [0]*len(neg_sf_dic)
+
+    # From site feature dictionaries to list of site feature vectors.
+    sf_list = []
+    for site_id, site_v in sorted(pos_sf_dic.items()):
+        sf_list.append(site_v)
+    for site_id, site_v in sorted(neg_sf_dic.items()):
+        sf_list.append(site_v)
+
+    # Return list of site feature vectors and label vector.
+    return sf_list, labels
+
+
+################################################################################
+
 def load_ideeps_data(data_folder,
                 vp_ext=20,
                 use_vp_ext=True,
@@ -1775,6 +2129,235 @@ def read_bpp_into_dic(bpp_file, vp_s, vp_e,
                     sys.exit()
     f.closed
     return bpp_dic
+
+
+################################################################################
+
+def generate_geometric_data(seqs_dic, vp_s_dic, vp_e_dic, 
+                            g_list=False,
+                            up_dic=False,
+                            bpp_dic=False,
+                            con_dic=False,
+                            str_elem_up_dic=False,
+                            use_str_elem_1h=False,
+                            use_us_ds_labels=False,
+                            region_labels_dic=False,
+                            plfold_bpp_cutoff=0.2,
+                            vp_lr_ext=100, 
+                            fix_vp_len=False,
+                            add_1h_to_g=False,
+                            g_idx=False,
+                            n_idx=False,
+                            ext_mode=1):
+    """
+    Generate PyTorch Geometric graph format data.
+    Return the following lists:
+    all_nodes_labels       Nucleotide indices (dict_label_idx)
+    all_graph_indicators   Graph indices, each node of a graph 
+                           gets same index
+    all_edges              Indices of edges
+    all_nodes_attributes   Node vectors
+    """
+
+    # Label to idx dictionary.
+    dict_label_idx = {'a': '1', 
+                      'c': '2', 
+                      'g': '3', 
+                      'u': '4', 
+                      'A': '5', 
+                      'C': '6', 
+                      'G': '7', 
+                      'U': '8', 
+                      'ua': '9', 
+                      'uc': '10', 
+                      'ug': '11', 
+                      'uu': '12', 
+                      'da': '13', 
+                      'dc': '14', 
+                      'dg': '15', 
+                      'du': '16'}
+    # Init lists.
+    all_nodes_labels = []
+    all_graph_indicators = []
+    all_edges = []
+    all_nodes_attributes = []
+    if not g_idx:
+        g_idx = 0
+    if not n_idx:
+        n_idx = 1
+    for seq_id, seq in sorted(seqs_dic.items()):
+        # Get viewpoint start+end of sequence.
+        vp_s = vp_s_dic[seq_id]
+        vp_e = vp_e_dic[seq_id]
+        l_vp = vp_e - vp_s + 1
+        # If fixed vp length given, only store sites with this vp length.
+        if fix_vp_len:
+            if not l_vp == fix_vp_len:
+                continue
+        l_seq = len(seq)
+        # Subsequence extraction start + end (1-based).
+        ex_s = vp_s
+        ex_e = vp_e
+        # If base pair probabilities given, adjust extraction s+e.
+        if bpp_dic:
+            if not seq_id in bpp_dic:
+                print ("ERROR: seq_id \"%s\" not in bpp_dic" % (seq_id))
+                sys.exit()
+            ex_s = ex_s-vp_lr_ext
+            if ex_s < 1:
+                ex_s = 1
+            ex_e = ex_e+vp_lr_ext
+            if ex_e > l_seq:
+                ex_e = l_seq
+        # Length of graph.
+        n_nodes = ex_e - ex_s + 1
+        # Graph indicator.
+        all_graph_indicators.extend([g_idx+1]*n_nodes)
+        # Check up_dic.
+        if up_dic:
+            if not seq_id in up_dic:
+                print ("ERROR: seq_id \"%s\" not in up_dic" % (seq_id))
+                sys.exit()
+            if len(up_dic[seq_id]) != l_seq:
+                print ("ERROR: up_dic[seq_id] length != sequence length for seq_id \"%s\"" % (seq_id))
+                sys.exit()
+        # Check str_elem_up_dic:
+        if str_elem_up_dic:
+            if not seq_id in str_elem_up_dic:
+                print ("ERROR: seq_id \"%s\" not in str_elem_up_dic" % (seq_id))
+                sys.exit()
+            if len(str_elem_up_dic[seq_id][0]) != l_seq:
+                print ("ERROR: str_elem_up_dic[seq_id] length != sequence length for seq_id \"%s\"" % (seq_id))
+                sys.exit()
+        # Check con_dic.
+        if con_dic:
+            if not seq_id in con_dic:
+                print ("ERROR: seq_id \"%s\" not in con_dic" % (seq_id))
+                sys.exit()
+            if len(con_dic[seq_id][0]) != l_seq:
+                print ("ERROR: con_dic[seq_id] length != sequence length for seq_id \"%s\"" % (seq_id))
+                sys.exit()
+        # Check region_labels_dic.
+        if region_labels_dic:
+            if not seq_id in region_labels_dic:
+                print ("ERROR: seq_id \"%s\" not in region_labels_dic" % (seq_id))
+                sys.exit()
+        # Add feature values per position.
+        g_i = 0
+        seen_vp = False
+        for i,c in enumerate(seq): # i from 0.. l-1
+            # Skip if outside region of interest.
+            if i < (ex_s-1) or i > (ex_e-1):
+                continue
+            # Label upstream / downstream nucleotides differently.
+            if use_us_ds_labels:
+                lc = ["a", "c", "g", "u"]
+                uc = ["A", "C", "G", "U"]
+                new_c = c
+                if c in lc:
+                    if seen_vp:
+                        new_c = "d"+c
+                    else:
+                        new_c = "u"+c
+                else:
+                    seen_vp = True
+                all_nodes_labels.append(dict_label_idx[new_c])
+            else:
+                # Add nucleotide node.
+                all_nodes_labels.append(dict_label_idx[c])
+            # Make feature vector for each graph node.
+            if up_dic or str_elem_up_dic or con_dic or region_labels_dic:
+                feat_vector = []
+                if add_1h_to_g:
+                    feat_vector = char_vectorizer(c)
+                if up_dic:
+                    if not str_elem_up_dic:
+                        feat_vector.append(up_dic[seq_id][i])
+                if str_elem_up_dic:
+                    # Structural elements unpaired probabilities.
+                    p_e = str_elem_up_dic[seq_id][0][i]
+                    p_h = str_elem_up_dic[seq_id][1][i]
+                    p_i = str_elem_up_dic[seq_id][2][i]
+                    p_m = str_elem_up_dic[seq_id][3][i]
+                    p_s = str_elem_up_dic[seq_id][4][i]
+                    # Unpaired probabilities as one-hot (max_prob_elem=1, else 0).
+                    if use_str_elem_1h:
+                        str_c = "E"
+                        p_max = p_e
+                        if p_h > p_max:
+                            str_c = "H"
+                            p_max = p_h
+                        if p_i > p_max:
+                            str_c = "I"
+                            p_max = p_i
+                        if p_m > p_max:
+                            str_c = "M"
+                            p_max = p_m
+                        if p_s > p_max:
+                            str_c = "S"
+                        str_c_1h = char_vectorizer(str_c, 
+                                       custom_alphabet = ["E", "H", "I", "M", "S"])
+                        for v in str_c_1h:
+                            feat_vector.append(v)
+                    else:
+                        # Add probabilities to vector.
+                        feat_vector.append(p_e) # E
+                        feat_vector.append(p_h) # H
+                        feat_vector.append(p_i) # I
+                        feat_vector.append(p_m) # M
+                        feat_vector.append(p_s) # S
+                # Conservation scores.
+                if con_dic:
+                    feat_vector.append(con_dic[seq_id][0][i])
+                    feat_vector.append(con_dic[seq_id][1][i])
+                # Region labels (exon intron).
+                if region_labels_dic:
+                    label = region_labels_dic[seq_id][i]
+                    label_1h = char_vectorizer(label,
+                                               custom_alphabet = ["E", "I"])
+                    for v in label_1h:
+                        feat_vector.append(v)
+                        
+                node_attribute = [str(att) for att in feat_vector]
+                #g.node[g_i]['feat_vector'] = feat_vector
+                all_nodes_attributes.append(",".join(node_attribute))
+            # Add backbone edge.
+            if g_i > 0:
+                all_edges.append((g_i-1+n_idx, g_i+n_idx))
+                all_edges.append((g_i+n_idx, g_i-1+n_idx))
+            # Increment graph node index.
+            g_i += 1
+        # Add base pair edges to graph.
+        if bpp_dic:
+            for entry in bpp_dic[seq_id]:
+                m = re.search("(\d+)-(\d+),(.+)", entry)
+                p1 = int(m.group(1))
+                p2 = int(m.group(2))
+                bpp_value = float(m.group(3))
+                g_p1 = p1 - ex_s # 0-based base pair p1.
+                g_p2 = p2 - ex_s # 0-based base pair p2.
+                # Filter.
+                if bpp_value < plfold_bpp_cutoff: continue
+                # Add edge if bpp value >= threshold.
+                if ext_mode == 1:
+                    if p1 >= ex_s and p2 <= ex_e:
+                        all_edges.append((g_p1+n_idx, g_p2+n_idx))
+                        all_edges.append((g_p2+n_idx, g_p1+n_idx))
+                elif ext_mode == 2:
+                    if (p1 >= ex_s and p2 <= vp_e and p2 >= vp_s) or (p2 <= ex_e and p1 <= vp_e and p1 >= vp_s):
+                        all_edges.append((g_p1+n_idx, g_p2+n_idx))
+                        all_edges.append((g_p2+n_idx, g_p1+n_idx))
+                elif ext_mode == 3:
+                    if p1 >= vp_s and p2 <= vp_e:
+                        all_edges.append((g_p1+n_idx, g_p2+n_idx))
+                        all_edges.append((g_p2+n_idx, g_p1+n_idx))
+                else:
+                    print ("ERROR: invalid ext_mode given (valid values: 1,2,3)")
+                    sys.exit()
+        n_idx += n_nodes
+        # Append graph to list.
+        g_idx += 1
+    return all_nodes_labels, all_graph_indicators, all_edges, all_nodes_attributes, g_idx, n_idx
 
 
 ################################################################################
