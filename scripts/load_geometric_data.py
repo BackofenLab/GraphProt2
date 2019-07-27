@@ -14,6 +14,7 @@ anl, agi, ae, ana, labels, sfvl = gp2lib.load_geometric_data(data_folder,
                                          use_sf=True,
                                          use_entr=False,
                                          add_1h_to_g=True,
+                                         gm_data=False,
                                          bpp_mode=1,
                                          vp_ext=100,
                                          bpp_cutoff=0.5)
