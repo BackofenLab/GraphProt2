@@ -3,19 +3,20 @@
 from lib import gp2lib
 
 # Input data folder to load data from.
-data_folder = "test_extlr30_out"
+data_folder = "CAPRIN1_Baltz2012_original_gp1_data_out"
 
 graphs, seqs_1h, sfv_list, labels = gp2lib.load_data(data_folder,
-                                           use_str_elem_up=True,
+                                           use_str_elem_up=False,
                                            use_str_elem_1h=False,
                                            use_us_ds_labels=False,
-                                           use_region_labels=True,
-                                           use_con=True,
-                                           use_sf=True,
+                                           use_region_labels=False,
+                                           fix_vp_len=False,
+                                           use_con=False,
+                                           use_sf=False,
                                            use_entr=False,
                                            onehot2d=False,
-                                           add_1h_to_g=True,
-                                           vp_ext=100,
+                                           add_1h_to_g=False,
+                                           vp_ext=50,
                                            bpp_cutoff=0.5)
 
 
