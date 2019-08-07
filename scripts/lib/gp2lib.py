@@ -38,7 +38,7 @@ def load_geometric_data(data_folder,
                         fix_vp_len=True):
 
     """
-    Load function for PyTorch geometric data, instead of loading  networkx 
+    Load function for PyTorch geometric data, instead of loading networkx 
     graphs.
     
     Load data from data_folder.
@@ -689,11 +689,13 @@ def load_ml_data(data_folder,
               use_con=False,
               use_entr=False,
               use_str_elem_up=False,
+              use_region_labels=False,
               use_sf=False,
               use_str_elem_1h=False,
               use_us_ds_labels=False,
               disable_bpp=False,
               bpp_cutoff=0.2,
+              sf_norm=True,
               bpp_mode=1,
               vp_ext=100,
               add_1h_to_g=False,
@@ -715,11 +717,15 @@ def load_ml_data(data_folder,
         use_entr: use RBP occupancy / entropy features for each sequence
         use_str_elem_1h: use structural elements chars as 1h (in 1h + graph)
                          instead of probabilities
+        use_region_labels: use exon intron position-wise labels, 
+                           encode one-hot (= 2 channels) and add to 
+                           CNN and graphs.
         use_us_ds_labels: add upstream downstream labeling for context 
                           regions in graph (node labels)
         disable_bpp : disables adding of base pair information
         bpp_cutoff : bp probability threshold when adding bp probs.
         bpp_mode : see ext_mode in convert_seqs_to_graphs for details
+        sf_norm:   Normalize site features
         onehot2d : Do not convert one-hot to 3d
         vp_ext : Define upstream + downstream viewpoint extension for graphs
                  Usually set equal to used plfold_L (default: 100)
@@ -743,6 +749,7 @@ def load_ml_data(data_folder,
     con_dic = False 
     str_elem_up_dic = False
     neg_str_elem_up_dic = False
+    region_labels_dic = False
     sf_dic = False
     max_vp_l = 0
     seq_1h_list = False
@@ -774,6 +781,7 @@ def load_ml_data(data_folder,
         str_elem_up_file = "%s/%s.str_elem.up" % (data_folder, data_id)
         sf_file = "%s/%s.sf" % (data_folder, data_id)
         entr_file = "%s/%s.entr" % (data_folder, data_id)
+        region_labels_file = "%s/%s.exon_intron_labels" % (data_folder, data_id)
         # Check if files exist.
         if use_up:
             if not os.path.isfile(up_file):
@@ -786,6 +794,10 @@ def load_ml_data(data_folder,
         if use_con:
             if not os.path.isfile(con_file):
                 print("INPUT_ERROR: missing \"%s\"" % (con_file))
+                sys.exit()
+        if use_region_labels:
+            if not os.path.isfile(region_labels_file):
+                print("INPUT_ERROR: missing \"%s\"" % (region_labels_file))
                 sys.exit()
         if use_entr:
             if not os.path.isfile(entr_file):
@@ -836,6 +848,9 @@ def load_ml_data(data_folder,
         if use_con:
             con_dic = read_con_into_dic(con_file, 
                                         con_dic=con_dic)
+        if use_region_labels:
+            region_labels_dic = read_region_labels_into_dic(region_labels_file,
+                                                            region_labels_dic=region_labels_dic)
         if use_str_elem_up:
             str_elem_up_dic = read_str_elem_up_into_dic(str_elem_up_file,
                                                         str_elem_up_dic=str_elem_up_dic)
@@ -853,12 +868,18 @@ def load_ml_data(data_folder,
         print("INPUT_ERROR: empty total_seqs_dic")
         sys.exit()
 
+    # Normalize site features.
+    if sf_norm:
+        if use_sf or use_entr:
+            sf_dic = normalize_sf_dic(sf_dic, norm_mode=0)
+
     print("Generate one-hot encodings ... ")
 
     # Create / extend one-hot encoding list.
     seq_1h_list = convert_seqs_to_one_hot(total_seqs_dic, vp_s_dic, vp_e_dic,
                                           up_dic=up_dic,
                                           con_dic=con_dic,
+                                          region_labels_dic=region_labels_dic,
                                           use_str_elem_1h=use_str_elem_1h,
                                           str_elem_up_dic=str_elem_up_dic)
 
@@ -871,6 +892,7 @@ def load_ml_data(data_folder,
                                          use_str_elem_1h=use_str_elem_1h,
                                          use_us_ds_labels=use_us_ds_labels,
                                          str_elem_up_dic=str_elem_up_dic, 
+                                         region_labels_dic=region_labels_dic,
                                          bpp_dic=bpp_dic, 
                                          vp_lr_ext=vp_ext, 
                                          ext_mode=bpp_mode,

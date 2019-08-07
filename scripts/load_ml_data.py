@@ -9,11 +9,13 @@ graphs, seqs_1h, sfv_list, labels, labels_1h = gp2lib.load_ml_data(data_folder,
                                                use_str_elem_up=True,
                                                use_str_elem_1h=False,
                                                use_us_ds_labels=False,
+                                               use_region_labels=False,
                                                use_con=True,
                                                use_sf=True,
-                                               use_entr=True,
+                                               use_entr=False,
+                                               use_up=False,
                                                onehot2d=False,
-                                               mean_norm=True,
+                                               sf_norm=True,
                                                add_1h_to_g=False,
                                                vp_ext=100,
                                                bpp_cutoff=0.5)
@@ -33,6 +35,8 @@ use_up            Add position-wise total unpaired probabilities to one-hot
                   NOTE that this feature will not be added if use_str_elem_up=True
 use_str_elem_up   Add position-wise probabilities for structural elements 
                   (E, H, I, M, S)
+use_region_labels use exon intron position-wise labels, 
+                  encode one-hot (= 2 channels) and add to CNN and graphs.
 use_con           Add position-wise conservation scores to one-hot matrix and 
                   graph node feature vectors
 use_sf            Use site features (one feature vector per binding site)
@@ -40,8 +44,6 @@ use_entr          Use entropy features (see below), added to site feature vector
                   Advised not to use for binary classification with random 
                   negatives (naturally biased towards RBP binding sites)
 onehot2d          Keep one-matrix 2D
-mean_norm         Do mean normalization of certain feature values (currently 
-                  1 convservation score + all site feature values)
 bpp_cutoff        Base pair probability threshold for adding base pairs to graph 
                   base pairs with prob. >= bpp_cutoff will be added
 add_1h_to_g       Add sequence one-hot encoding to graph node feature vectors
