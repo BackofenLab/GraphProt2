@@ -19,6 +19,283 @@ lowercase context.
 
 """
 
+
+def load_geom_ml_data(data_folder, 
+                      use_up=False,
+                      use_con=False,
+                      use_entr=False,
+                      use_str_elem_up=False,
+                      use_region_labels=False,
+                      use_sf=False,
+                      use_str_elem_1h=False,
+                      use_us_ds_labels=False,
+                      disable_bpp=False,
+                      bpp_cutoff=0.2,
+                      sf_norm=True,
+                      bpp_mode=1,
+                      vp_ext=100,
+                      add_1h_to_g=False,
+                      onehot2d=False,
+                      fix_vp_len=True):
+    """
+
+    Load function for PyTorch geometric data, instead of loading networkx 
+    graphs.
+    
+    Load multi label data from folder.
+
+    Loop over all files, load data in.
+    After looping, construct one-hot-lists and graphs from 
+    feature dictionaries.
+
+    NOTE that file names are treated as labels, 
+    e.g. file name: DGCR8.bed, thus label: DGCR8
+
+    Returns the following lists:
+
+    all_nodes_labels       Nucleotide indices (dict_label_idx)
+    all_graph_indicators   Graph indices, each node of a graph 
+                           gets same index
+    all_edges              Indices of edges
+    all_nodes_attributes   Node vectors
+    graph_labels           Class labels (e.g. 0,1 for binary classification)
+                           Length of list = #positives+#negatives
+    sfv_list               Site feature vectors list
+
+    Function parameters:
+        use_up : if true add unpaired probabilities to graph + one-hot
+        use_con : if true add conservation scores to graph + one-hot
+        use_str_elem_up: add str elements unpaired probs to graph + one-hot
+        use_sf: add site features, store in additional vector for each sequence
+        use_entr: use RBP occupancy / entropy features for each sequence
+        use_str_elem_1h: use structural elements chars as 1h (in 1h + graph)
+                         instead of probabilities
+        use_region_labels: use exon intron position-wise labels, 
+                           encode one-hot (= 2 channels) and add to 
+                           CNN and graphs.
+        use_us_ds_labels: add upstream downstream labeling for context 
+                          regions in graph (node labels)
+        disable_bpp : disables adding of base pair information
+        bpp_cutoff : bp probability threshold when adding bp probs.
+        bpp_mode : see ext_mode in convert_seqs_to_graphs for details
+        sf_norm:   Normalize site features
+        onehot2d : Do not convert one-hot to 3d
+        vp_ext : Define upstream + downstream viewpoint extension for graphs
+                 Usually set equal to used plfold_L (default: 100)
+        add_1h_to_g : add one-hot encodings to graph node vectors
+        fix_vp_len : Use only viewpoint regions with same length (= max length)
+
+    """
+
+    # Check input.
+    if not os.path.isdir(data_folder):
+        print("INPUT_ERROR: Input data folder \"%s\" not found" % (data_folder))
+        sys.exit()
+    # Sequences dictionary.
+    total_seqs_dic = {}
+    # Viewpoint coordinate dictionaries.
+    vp_s_dic = {}
+    vp_e_dic = {}
+    # Feature dictionaries.
+    up_dic = False
+    bpp_dic = False
+    con_dic = False 
+    str_elem_up_dic = False
+    region_labels_dic = False
+    sf_dic = False
+    max_vp_l = 0
+    seq_1h_list = False
+    graphs_list = False
+    # Label to index dictionary.
+    l2i_dic = {}
+    # Site ID to protein dictionary.
+    id2l_dic = {}
+    # Label index.
+    li = 0
+    
+    print("Read in datasets ... ")
+    
+    # Get dataset IDs.
+    cmd = "ls " + data_folder + "/*.fa | sort"
+    set_list = os.popen(cmd).readlines()
+    # Go over datasets.
+    l_sl = len(set_list)
+    for l in set_list:
+        m = re.search(".+\/(.+?)\.fa", l.strip())
+        data_id = m.group(1)
+        l2i_dic[data_id] = li
+        li += 1
+        # Input files for dataset.
+        fasta_file = "%s/%s.fa" % (data_folder, data_id)
+        up_file = "%s/%s.up" % (data_folder, data_id)
+        bpp_file = "%s/%s.bpp" % (data_folder, data_id)
+        con_file = "%s/%s.con" % (data_folder, data_id)
+        str_elem_up_file = "%s/%s.str_elem.up" % (data_folder, data_id)
+        sf_file = "%s/%s.sf" % (data_folder, data_id)
+        entr_file = "%s/%s.entr" % (data_folder, data_id)
+        region_labels_file = "%s/%s.exon_intron_labels" % (data_folder, data_id)
+        # Check if files exist.
+        if use_up:
+            if not os.path.isfile(up_file):
+                print("INPUT_ERROR: missing \"%s\"" % (up_file))
+                sys.exit()
+        if use_str_elem_up:
+            if not os.path.isfile(str_elem_up_file):
+                print("INPUT_ERROR: missing \"%s\"" % (str_elem_up_file))
+                sys.exit()
+        if use_con:
+            if not os.path.isfile(con_file):
+                print("INPUT_ERROR: missing \"%s\"" % (con_file))
+                sys.exit()
+        if use_region_labels:
+            if not os.path.isfile(region_labels_file):
+                print("INPUT_ERROR: missing \"%s\"" % (region_labels_file))
+                sys.exit()
+        if use_entr:
+            if not os.path.isfile(entr_file):
+                print("INPUT_ERROR: missing \"%s\"" % (entr_file))
+                sys.exit()
+        if use_sf:
+            if not os.path.isfile(sf_file):
+                print("INPUT_ERROR: missing \"%s\"" % (sf_file))
+                sys.exit()
+        if not disable_bpp:
+            if not os.path.isfile(bpp_file):
+                print("INPUT_ERROR: missing \"%s\"" % (bpp_file))
+                sys.exit()
+
+        print("Read in dataset %s dictionaries ... " % (data_id))
+
+        # Read in FASTA sequences for this round only.
+        seqs_dic = read_fasta_into_dic(fasta_file)
+        # Assign site IDs to dataset label.
+        for seq_id in seqs_dic:
+            id2l_dic[seq_id] = data_id
+        # Get viewpoint regions.
+        vp_s_dic, vp_e_dic = extract_viewpoint_regions_from_fasta(seqs_dic,
+                                                                  vp_s_dic=vp_s_dic,
+                                                                  vp_e_dic=vp_e_dic)
+        # Extract most prominent (max) viewpoint length from data.
+        if not max_vp_l: # extract only first dataset.
+            if fix_vp_len:
+                for seq_id in seqs_dic:
+                    vp_l = vp_e_dic[seq_id] - vp_s_dic[seq_id] + 1  # +1 since 1-based.
+                    if vp_l > max_vp_l:
+                        max_vp_l = vp_l
+                if not max_vp_l:
+                    print("ERROR: viewpoint length extraction failed")
+                    sys.exit()
+
+        # Remove sequences that do not pass fix_vp_len.
+        if fix_vp_len:
+            filter_seq_dic_fixed_vp_len(seqs_dic, vp_s_dic, vp_e_dic, max_vp_l)
+
+        # Extract additional annotations.
+        if use_up:
+            up_dic = read_up_into_dic(up_file, up_dic=up_dic)
+        if not disable_bpp:
+            bpp_dic = read_bpp_into_dic(bpp_file, vp_s_dic, vp_e_dic, 
+                                        bpp_dic=bpp_dic,
+                                        vp_lr_ext=vp_ext)
+        if use_con:
+            con_dic = read_con_into_dic(con_file, 
+                                        con_dic=con_dic)
+        if use_region_labels:
+            region_labels_dic = read_region_labels_into_dic(region_labels_file,
+                                                            region_labels_dic=region_labels_dic)
+        if use_str_elem_up:
+            str_elem_up_dic = read_str_elem_up_into_dic(str_elem_up_file,
+                                                        str_elem_up_dic=str_elem_up_dic)
+        if use_sf:
+            sf_dic = read_sf_into_dic(sf_file,
+                                      sf_dic=sf_dic)
+        if use_entr:
+            sf_dic = read_entr_into_dic(entr_file,
+                                        entr_dic=sf_dic)
+        # Merge to total seqs dic.
+        total_seqs_dic = add_dic2_to_dic1(total_seqs_dic, seqs_dic)
+
+    # Error if not data was read in.
+    if not total_seqs_dic:
+        print("INPUT_ERROR: empty total_seqs_dic")
+        sys.exit()
+
+    # Normalize site features.
+    if sf_norm:
+        if use_sf or use_entr:
+            sf_dic = normalize_sf_dic(sf_dic, norm_mode=0)
+
+    print("Generate one-hot encodings ... ")
+
+    # Create / extend one-hot encoding list.
+    seq_1h_list = convert_seqs_to_one_hot(total_seqs_dic, vp_s_dic, vp_e_dic,
+                                          up_dic=up_dic,
+                                          con_dic=con_dic,
+                                          region_labels_dic=region_labels_dic,
+                                          use_str_elem_1h=use_str_elem_1h,
+                                          str_elem_up_dic=str_elem_up_dic)
+
+    print("Generate geometric lists ... ")
+
+    anl, agi, ae, ana, g_idx, n_idx = generate_geometric_data(total_seqs_dic, 
+                                                vp_s_dic, vp_e_dic,
+                                                up_dic=up_dic, 
+                                                con_dic=con_dic, 
+                                                region_labels_dic=region_labels_dic,
+                                                use_str_elem_1h=use_str_elem_1h,
+                                                str_elem_up_dic=str_elem_up_dic, 
+                                                use_us_ds_labels=use_us_ds_labels,
+                                                bpp_dic=bpp_dic, 
+                                                vp_lr_ext=vp_ext, 
+                                                ext_mode=bpp_mode,
+                                                add_1h_to_g=add_1h_to_g,
+                                                plfold_bpp_cutoff=bpp_cutoff)
+
+    # Check.
+    if li != l_sl:
+        print("ERROR: li != l_sl (%i != %i)" % (li, l_sl))
+        sys.exit()
+    # Label vectors list, in sorted seqs_dic order like other lists.
+    label_vect_list = []
+    # Label vectors list, where only main binding site gets "1".
+    label_1h_vect_list = []
+    # Site-level feature vectors list.
+    site_feat_vect_list = []
+    for seq_id, seq in sorted(total_seqs_dic.items()):
+        # Get data_id of seq_id.
+        data_id = id2l_dic[seq_id]
+        label_1h_list = [0]*li
+        data_id_i = l2i_dic[data_id]
+        label_1h_list[data_id_i] = 1
+        # Generate site label vectors.
+        m = re.search(".+;(.+),", seq_id)
+        labels = m.group(1).split(",")
+        label_list = [0]*li
+        # For each label from binding site.
+        for l in labels:
+            i = l2i_dic[l] # get index of label.
+            label_list[i] = 1
+        label_vect_list.append(label_list)
+        label_1h_vect_list.append(label_1h_list)
+        # Generate site-level feature vectors.
+        if sf_dic:
+            site_feat_vect_list.append(sf_dic[seq_id])
+        else:
+            site_feat_vect_list.append([0])
+    # Convert 1h list to np array, transpose matrices and make each entry 3d (1,number_of_features,vp_length).
+    new_seq_1h_list = []
+    for i in range(len(seq_1h_list)):
+        M = np.array(seq_1h_list[i]).transpose()
+        if not onehot2d:
+            M = np.reshape(M, (1, M.shape[0], M.shape[1]))
+        new_seq_1h_list.append(M)
+
+    # Return geometric lists, 1-h matrix list, site feature vector list, label vector list, and 1-h label vector list.
+    return anl, agi, ae, ana, new_seq_1h_list, site_feat_vect_list, label_vect_list, label_1h_vect_list
+
+
+################################################################################
+
 def load_geometric_data(data_folder,
                         use_up=False,
                         use_con=False,
@@ -748,7 +1025,6 @@ def load_ml_data(data_folder,
     bpp_dic = False
     con_dic = False 
     str_elem_up_dic = False
-    neg_str_elem_up_dic = False
     region_labels_dic = False
     sf_dic = False
     max_vp_l = 0
