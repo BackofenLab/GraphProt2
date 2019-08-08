@@ -16,7 +16,7 @@ graphs, seqs_1h, sfv_list, labels = gp2lib.load_data(data_folder,
                                            use_entr=False,
                                            onehot2d=False,
                                            add_1h_to_g=False,
-                                           vp_ext=50,
+                                           vp_ext=20,
                                            bpp_cutoff=0.5)
 
 
@@ -71,6 +71,7 @@ Position-wise features (in order):
 graphs[0].node[0]['feat_vector']
 graphs[0].graph["id"]
 graphs[0].nodes[0]['label']
+list(graphs[].edges())
 
 
 Currently used site features:
