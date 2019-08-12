@@ -10,21 +10,31 @@ graphs, seqs_1h, sfv_list, labels = gp2lib.load_data(data_folder,
                                            use_str_elem_1h=False,
                                            use_us_ds_labels=False,
                                            use_region_labels=False,
-                                           fix_vp_len=False,
+                                           center_vp=False,
+                                           vp_ext=False,
                                            use_con=False,
                                            use_sf=False,
                                            use_entr=False,
                                            onehot2d=False,
                                            add_1h_to_g=False,
-                                           vp_ext=20,
+                                           all_nt_uc=False,
+                                           con_ext=20,
+                                           fix_vp_len=False,
                                            bpp_cutoff=0.5)
 
 
 # Min-max normalize (norm_mode=0) all feature vector values (apart from 1-hot features).
 gp2lib.normalize_graph_feat_vectors(graphs, norm_mode=0)
 
-
 """
+
+NOTE:
+If you have variable center (=viewpoint or vp) region data, 
+leave center_vp=False, vp_ext=False and fix_vp_len=False
+If you want to have same viewpoint lengths also in case of variable vp length 
+input data, use center_vp=True and e.g. vp_ext=30, meaning every center region 
+will have length of 61 nt.
+
 
 graphs: list of graphs
 seqs_1h : list of one-hot matrices plus additional position-wise features
@@ -57,9 +67,18 @@ use_us_ds_labels  add upstream downstream labeling for context regions in graph 
                   while viewpoint region nucleotide labels stay same
 use_region_labels use exon intron position-wise labels, 
                   encode one-hot (= 2 channels) and add to CNN and graphs.
-vp_ext            Define upstream + downstream viewpoint extension for graphs
+con_ext           Define upstream + downstream viewpoint extension for graphs
+                  The extensions on both sides are called the context regions 
+                  and are usually in lowercase nucleotide characters
                   Usually set equal to used plfold_L (default: 100)
-
+vp_ext            Define upstream + downstream viewpoint extension for graphs
+                  This extends the viewpoint, ie extending the center region 
+                  with uppercase nucleotides (as opposed to con_ext)
+                  Best combined with center_vp=True, to make variable length
+                  viewpoint regions the same length. E.g. setting center_vp=True 
+                  and vp_ext=30 results in viewpoint regions of 61 nt.
+all_nt_uc         Convert all graph node characters into uppercase, regardless 
+                  of viewpoint or context region.
 
 Position-wise features (in order):
 4 from nucleotide sequences (one-hot)  (you have to set add_1h_to_g=True to get these)

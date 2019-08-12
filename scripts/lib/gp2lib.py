@@ -17,8 +17,10 @@ python3 -m doctest -v lib/gp2lib.py
 check whether methods also work with sequences without 
 lowercase context.
 
-"""
+load_data x
+load_geom_ml_data
 
+"""
 
 def load_geom_ml_data(data_folder, 
                       use_up=False,
@@ -30,13 +32,16 @@ def load_geom_ml_data(data_folder,
                       use_str_elem_1h=False,
                       use_us_ds_labels=False,
                       disable_bpp=False,
-                      bpp_cutoff=0.2,
+                      bpp_cutoff=0.5,
                       sf_norm=True,
+                      all_nt_uc=False,
+                      center_vp=False,
+                      vp_ext=False,
                       bpp_mode=1,
-                      vp_ext=100,
+                      con_ext=50,
                       add_1h_to_g=False,
                       onehot2d=False,
-                      fix_vp_len=True):
+                      fix_vp_len=False):
     """
 
     Load function for PyTorch geometric data, instead of loading networkx 
@@ -80,7 +85,7 @@ def load_geom_ml_data(data_folder,
         bpp_mode : see ext_mode in convert_seqs_to_graphs for details
         sf_norm:   Normalize site features
         onehot2d : Do not convert one-hot to 3d
-        vp_ext : Define upstream + downstream viewpoint extension for graphs
+        con_ext : Define upstream + downstream viewpoint extension for graphs
                  Usually set equal to used plfold_L (default: 100)
         add_1h_to_g : add one-hot encodings to graph node vectors
         fix_vp_len : Use only viewpoint regions with same length (= max length)
@@ -174,7 +179,9 @@ def load_geom_ml_data(data_folder,
         # Get viewpoint regions.
         vp_s_dic, vp_e_dic = extract_viewpoint_regions_from_fasta(seqs_dic,
                                                                   vp_s_dic=vp_s_dic,
-                                                                  vp_e_dic=vp_e_dic)
+                                                                  vp_e_dic=vp_e_dic,
+                                                                  center_vp=center_vp,
+                                                                  vp_ext=vp_ext)
         # Extract most prominent (max) viewpoint length from data.
         if not max_vp_l: # extract only first dataset.
             if fix_vp_len:
@@ -190,13 +197,17 @@ def load_geom_ml_data(data_folder,
         if fix_vp_len:
             filter_seq_dic_fixed_vp_len(seqs_dic, vp_s_dic, vp_e_dic, max_vp_l)
 
+        # Update uppercase regions (viewpoint parts).
+        if center_vp or vp_ext:
+            update_sequence_viewpoint_regions(seqs_dic, vp_s_dic, vp_e_dic)
+
         # Extract additional annotations.
         if use_up:
             up_dic = read_up_into_dic(up_file, up_dic=up_dic)
         if not disable_bpp:
             bpp_dic = read_bpp_into_dic(bpp_file, vp_s_dic, vp_e_dic, 
                                         bpp_dic=bpp_dic,
-                                        vp_lr_ext=vp_ext)
+                                        con_ext=con_ext)
         if use_con:
             con_dic = read_con_into_dic(con_file, 
                                         con_dic=con_dic)
@@ -246,7 +257,8 @@ def load_geom_ml_data(data_folder,
                                                 str_elem_up_dic=str_elem_up_dic, 
                                                 use_us_ds_labels=use_us_ds_labels,
                                                 bpp_dic=bpp_dic, 
-                                                vp_lr_ext=vp_ext, 
+                                                all_nt_uc=all_nt_uc,
+                                                con_ext=con_ext, 
                                                 ext_mode=bpp_mode,
                                                 add_1h_to_g=add_1h_to_g,
                                                 plfold_bpp_cutoff=bpp_cutoff)
@@ -305,14 +317,17 @@ def load_geometric_data(data_folder,
                         use_str_elem_1h=False,
                         use_us_ds_labels=False,
                         use_region_labels=False,
+                        center_vp=False,
+                        vp_ext=False,
+                        all_nt_uc=False,
                         disable_bpp=False,
-                        bpp_cutoff=0.2,
+                        bpp_cutoff=0.5,
                         bpp_mode=1,
                         gm_data=False,
-                        vp_ext = 100,
+                        con_ext = 50,
                         sf_norm=True,
                         add_1h_to_g=False,
-                        fix_vp_len=True):
+                        fix_vp_len=False):
 
     """
     Load function for PyTorch geometric data, instead of loading networkx 
@@ -348,7 +363,7 @@ def load_geometric_data(data_folder,
         disable_bpp : disables adding of base pair information
         bpp_cutoff : bp probability threshold when adding bp probs.
         bpp_mode : see ext_mode in convert_seqs_to_graphs for details
-        vp_ext : Define upstream + downstream viewpoint extension for graphs
+        con_ext : Define upstream + downstream viewpoint extension for graphs
                  Usually set equal to used plfold_L (default: 100)
         gm_data : If data is in format for generic model generation
         add_1h_to_g : add one-hot encodings to graph node vectors
@@ -438,7 +453,9 @@ def load_geometric_data(data_folder,
     pos_seqs_dic = read_fasta_into_dic(pos_fasta_file)
     neg_seqs_dic = read_fasta_into_dic(neg_fasta_file)
     # Get viewpoint regions.
-    pos_vp_s, pos_vp_e = extract_viewpoint_regions_from_fasta(pos_seqs_dic)
+    pos_vp_s, pos_vp_e = extract_viewpoint_regions_from_fasta(pos_seqs_dic,
+                                                              center_vp=center_vp,
+                                                              vp_ext=vp_ext)
     neg_vp_s, neg_vp_e = extract_viewpoint_regions_from_fasta(neg_seqs_dic)
     # Extract most prominent (max) viewpoint length from data.
     max_vp_l = 0
@@ -455,6 +472,11 @@ def load_geometric_data(data_folder,
     if fix_vp_len:
         filter_seq_dic_fixed_vp_len(pos_seqs_dic, pos_vp_s, pos_vp_e, max_vp_l)
         filter_seq_dic_fixed_vp_len(neg_seqs_dic, neg_vp_s, neg_vp_e, max_vp_l)
+
+    # Update uppercase regions (viewpoint parts).
+    if center_vp or vp_ext:
+        update_sequence_viewpoint_regions(pos_seqs_dic, pos_vp_s, pos_vp_e)
+        update_sequence_viewpoint_regions(neg_seqs_dic, neg_vp_s, neg_vp_e)
 
     # Init dictionaries.
     pos_up_dic = False
@@ -482,9 +504,9 @@ def load_geometric_data(data_folder,
         neg_up_dic = read_up_into_dic(neg_up_file)
     if not disable_bpp:
         pos_bpp_dic = read_bpp_into_dic(pos_bpp_file, pos_vp_s, pos_vp_e, 
-                                        vp_lr_ext=vp_ext)
+                                        con_ext=con_ext)
         neg_bpp_dic = read_bpp_into_dic(neg_bpp_file, neg_vp_s, neg_vp_e, 
-                                        vp_lr_ext=vp_ext)
+                                        con_ext=con_ext)
     if use_con:
         pos_con_dic = read_con_into_dic(pos_con_file)
         neg_con_dic = read_con_into_dic(neg_con_file)
@@ -518,8 +540,9 @@ def load_geometric_data(data_folder,
                                                                 use_str_elem_1h=use_str_elem_1h,
                                                                 str_elem_up_dic=pos_str_elem_up_dic, 
                                                                 use_us_ds_labels=use_us_ds_labels,
+                                                                all_nt_uc=all_nt_uc,
                                                                 bpp_dic=pos_bpp_dic, 
-                                                                vp_lr_ext=vp_ext, 
+                                                                con_ext=con_ext, 
                                                                 ext_mode=bpp_mode,
                                                                 add_1h_to_g=add_1h_to_g,
                                                                 plfold_bpp_cutoff=bpp_cutoff)
@@ -532,8 +555,9 @@ def load_geometric_data(data_folder,
                                                                 use_str_elem_1h=use_str_elem_1h,
                                                                 str_elem_up_dic=neg_str_elem_up_dic, 
                                                                 use_us_ds_labels=use_us_ds_labels,
+                                                                all_nt_uc=all_nt_uc,
                                                                 bpp_dic=neg_bpp_dic, 
-                                                                vp_lr_ext=vp_ext, 
+                                                                con_ext=con_ext, 
                                                                 ext_mode=bpp_mode,
                                                                 add_1h_to_g=add_1h_to_g,
                                                                 g_idx=g_idx,
@@ -651,8 +675,10 @@ def load_sf_data(data_folder,
 ################################################################################
 
 def load_ideeps_data(data_folder,
-                vp_ext=20,
-                use_vp_ext=True,
+                con_ext=10,
+                use_con_ext=True,
+                center_vp=True,
+                vp_ext=50,
                 fix_vp_len=True):
     """
     Prepare data for iDeepS method.
@@ -662,9 +688,9 @@ def load_ideeps_data(data_folder,
           IMPORTANT: id needs to be in format: "id; class:0" for negatives 
           and "id; class:1" for positives in order for iDeepS to recognize
           the class labels.
-    vp_ext : Define upstream + downstream viewpoint extension for graphs
+    con_ext : Define upstream + downstream viewpoint extension for graphs
              Usually set equal to used plfold_L (default: 20)
-             vp_ext=20 + 61 nt of viewpoint = 101 nt sequences
+             con_ext=20 + 61 nt of viewpoint = 101 nt sequences
     add_1h_to_g : add one-hot encodings to graph node vectors
     fix_vp_len : Use only viewpoint regions with same length (= max length)
 
@@ -689,8 +715,12 @@ def load_ideeps_data(data_folder,
     pos_seqs_dic = read_fasta_into_dic(pos_fasta_file)
     neg_seqs_dic = read_fasta_into_dic(neg_fasta_file)
     # Get viewpoint regions.
-    pos_vp_s, pos_vp_e = extract_viewpoint_regions_from_fasta(pos_seqs_dic)
-    neg_vp_s, neg_vp_e = extract_viewpoint_regions_from_fasta(neg_seqs_dic)
+    pos_vp_s, pos_vp_e = extract_viewpoint_regions_from_fasta(pos_seqs_dic,
+                                                              center_vp=center_vp,
+                                                              vp_ext=vp_ext)
+    neg_vp_s, neg_vp_e = extract_viewpoint_regions_from_fasta(neg_seqs_dic,
+                                                              center_vp=center_vp,
+                                                              vp_ext=vp_ext)
     # Extract most prominent (max) viewpoint length from data.
     max_vp_l = 0
     if fix_vp_len:
@@ -707,20 +737,25 @@ def load_ideeps_data(data_folder,
         filter_seq_dic_fixed_vp_len(pos_seqs_dic, pos_vp_s, pos_vp_e, max_vp_l)
         filter_seq_dic_fixed_vp_len(neg_seqs_dic, neg_vp_s, neg_vp_e, max_vp_l)
 
+    # Update uppercase regions (viewpoint parts).
+    if center_vp or vp_ext:
+        update_sequence_viewpoint_regions(pos_seqs_dic, pos_vp_s, pos_vp_e)
+        update_sequence_viewpoint_regions(neg_seqs_dic, neg_vp_s, neg_vp_e)
+
     ids_list = []
     label_list = []
     sequence_list = []
 
     # Expected sequence length.
     exp_seq_length = max_vp_l
-    if use_vp_ext:
-        exp_seq_length = max_vp_l + vp_ext*2
+    if use_con_ext:
+        exp_seq_length = max_vp_l + con_ext*2
 
     # Process positives.
     for seq_id, seq in sorted(pos_seqs_dic.items()):
         new_seq, new_s, new_e = extract_vp_seq(pos_seqs_dic, seq_id,
-                                               use_vp_ext=use_vp_ext,
-                                               vp_ext=vp_ext)
+                                               use_con_ext=use_con_ext,
+                                               con_ext=con_ext)
         if len(new_seq) != exp_seq_length:
             print("ERROR: new_seq length != exp_seq_length length (%i != %i) for seq_id %s" % (len(new_seq), exp_seq_length, seq_id))
             sys.exit()
@@ -733,8 +768,8 @@ def load_ideeps_data(data_folder,
     # Process negatives.
     for seq_id, seq in sorted(neg_seqs_dic.items()):
         new_seq, new_s, new_e = extract_vp_seq(neg_seqs_dic, seq_id,
-                                               use_vp_ext=use_vp_ext,
-                                               vp_ext=vp_ext)
+                                               use_con_ext=use_con_ext,
+                                               con_ext=con_ext)
         if len(new_seq) != exp_seq_length:
             print("ERROR: new_seq length != exp_seq_length length (%i != %i) for seq_id %s" % (len(new_seq), exp_seq_length, seq_id))
             sys.exit()
@@ -756,8 +791,10 @@ def load_ideeps_data(data_folder,
 ################################################################################
 
 def load_dlprb_data(data_folder,
-                vp_ext=100,
-                use_vp_ext=False,
+                con_ext=10,
+                center_vp=True,
+                vp_ext=50,
+                use_con_ext=False,
                 fix_vp_len=True):
     """
     Prepare data for DLPRB method.
@@ -769,11 +806,11 @@ def load_dlprb_data(data_folder,
     ""Every row corresponds to a different structural context: 
     paired, hairpin loop, internal loop, multiloop, and external loop"
     So return for each sequence matrix of size 5*n with n=length(sequence)
-    sequences : return viewpoint sequences, or set use_vp_ext=True to 
-    get features for extended viewpoint sequences (extension set by vp_ext)
+    sequences : return viewpoint sequences, or set use_con_ext=True to 
+    get features for extended viewpoint sequences (extension set by con_ext)
     labels : the sequence labels 1 or 0 (1 : positives, 0 : negatives)
     Arguments:
-    vp_ext : Define upstream + downstream viewpoint extension for graphs
+    con_ext : Define upstream + downstream viewpoint extension for graphs
              Usually set equal to used plfold_L (default: 100)
     add_1h_to_g : add one-hot encodings to graph node vectors
     fix_vp_len : Use only viewpoint regions with same length (= max length)
@@ -807,8 +844,12 @@ def load_dlprb_data(data_folder,
     pos_seqs_dic = read_fasta_into_dic(pos_fasta_file)
     neg_seqs_dic = read_fasta_into_dic(neg_fasta_file)
     # Get viewpoint regions.
-    pos_vp_s, pos_vp_e = extract_viewpoint_regions_from_fasta(pos_seqs_dic)
-    neg_vp_s, neg_vp_e = extract_viewpoint_regions_from_fasta(neg_seqs_dic)
+    pos_vp_s, pos_vp_e = extract_viewpoint_regions_from_fasta(pos_seqs_dic,
+                                                              center_vp=center_vp,
+                                                              vp_ext=vp_ext)
+    neg_vp_s, neg_vp_e = extract_viewpoint_regions_from_fasta(neg_seqs_dic,
+                                                              center_vp=center_vp,
+                                                              vp_ext=vp_ext)
     # Extract most prominent (max) viewpoint length from data.
     max_vp_l = 0
     if fix_vp_len:
@@ -825,6 +866,11 @@ def load_dlprb_data(data_folder,
         filter_seq_dic_fixed_vp_len(pos_seqs_dic, pos_vp_s, pos_vp_e, max_vp_l)
         filter_seq_dic_fixed_vp_len(neg_seqs_dic, neg_vp_s, neg_vp_e, max_vp_l)
 
+    # Update uppercase regions (viewpoint parts).
+    if center_vp or vp_ext:
+        update_sequence_viewpoint_regions(pos_seqs_dic, pos_vp_s, pos_vp_e)
+        update_sequence_viewpoint_regions(neg_seqs_dic, neg_vp_s, neg_vp_e)
+
     # Read in structural elements probabilities.
     str_elem_up_dic = read_str_elem_up_into_dic(pos_str_elem_up_file)
     str_elem_up_dic = read_str_elem_up_into_dic(neg_str_elem_up_file, str_elem_up_dic=str_elem_up_dic)
@@ -837,8 +883,8 @@ def load_dlprb_data(data_folder,
     # Process positives.
     for seq_id, seq in sorted(pos_seqs_dic.items()):
         new_seq, new_s, new_e = extract_vp_seq(pos_seqs_dic, seq_id,
-                                               use_vp_ext=use_vp_ext,
-                                               vp_ext=vp_ext)
+                                               use_con_ext=use_con_ext,
+                                               con_ext=con_ext)
         # Start position to extract probabilities.
         i=new_s-1
         # Init feature matrix.
@@ -864,8 +910,8 @@ def load_dlprb_data(data_folder,
     # Process negatives.
     for seq_id, seq in sorted(neg_seqs_dic.items()):
         new_seq, new_s, new_e = extract_vp_seq(neg_seqs_dic, seq_id,
-                                               use_vp_ext=use_vp_ext,
-                                               vp_ext=vp_ext)
+                                               use_con_ext=use_con_ext,
+                                               con_ext=con_ext)
         # Start position to extract probabilities.
         i=new_s-1
         # Init feature matrix.
@@ -905,14 +951,14 @@ def load_dlprb_data(data_folder,
 ################################################################################
 
 def extract_vp_seq(seqs_dic, seq_id,
-                   use_vp_ext=False,
-                   vp_ext=100):
+                   use_con_ext=False,
+                   con_ext=100):
     """
     Extract viewpoint part (uppercase chars) from sequence with 
     given sequence ID seq_id.
-    If use_vp_ext is set, viewpoint region will be extended by 
-    vp_ext. Thus total length of returned sequence will be 
-    len(vp_region)+2*len(vp_ext).
+    If use_con_ext is set, viewpoint region will be extended by 
+    con_ext. Thus total length of returned sequence will be 
+    len(vp_region)+2*len(con_ext).
     Return sequence, start position + end position (both one-based)
     of extracted sequence.
     
@@ -920,10 +966,10 @@ def extract_vp_seq(seqs_dic, seq_id,
     >>> seq, s, e = extract_vp_seq(seqs_dic, "CLIP_01")
     >>> print(seq, s, e)
     ACGU 5 8
-    >>> seq, s, e = extract_vp_seq(seqs_dic, "CLIP_01", use_vp_ext=True, vp_ext=2)
+    >>> seq, s, e = extract_vp_seq(seqs_dic, "CLIP_01", use_con_ext=True, con_ext=2)
     >>> print(seq, s, e)
     guACGUac 3 10
-    >>> seq, s, e = extract_vp_seq(seqs_dic, "CLIP_02", use_vp_ext=True, vp_ext=2)
+    >>> seq, s, e = extract_vp_seq(seqs_dic, "CLIP_02", use_con_ext=True, con_ext=2)
     >>> print(seq, s, e)
     CCCCgg 1 6
 
@@ -945,9 +991,9 @@ def extract_vp_seq(seqs_dic, seq_id,
         new_s = l_us+1
         new_e = l_us+l_vp
         new_seq = vp_seq
-        if use_vp_ext:
-            new_us_seq = us_seq[-vp_ext:]
-            new_ds_seq = ds_seq[:vp_ext]
+        if use_con_ext:
+            new_us_seq = us_seq[-con_ext:]
+            new_ds_seq = ds_seq[:con_ext]
             l_new_us = len(new_us_seq)
             l_new_ds = len(new_ds_seq)
             new_s = l_us-l_new_us+1
@@ -973,11 +1019,14 @@ def load_ml_data(data_folder,
               disable_bpp=False,
               bpp_cutoff=0.2,
               sf_norm=True,
+              center_vp=False,
+              all_nt_uc=False,
+              vp_ext=False,
               bpp_mode=1,
-              vp_ext=100,
+              con_ext=100,
               add_1h_to_g=False,
               onehot2d=False,
-              fix_vp_len=True):
+              fix_vp_len=False):
     """
     Load multi label data from folder.
     Loop over all files, load data in.
@@ -1004,7 +1053,7 @@ def load_ml_data(data_folder,
         bpp_mode : see ext_mode in convert_seqs_to_graphs for details
         sf_norm:   Normalize site features
         onehot2d : Do not convert one-hot to 3d
-        vp_ext : Define upstream + downstream viewpoint extension for graphs
+        con_ext : Define upstream + downstream viewpoint extension for graphs
                  Usually set equal to used plfold_L (default: 100)
         add_1h_to_g : add one-hot encodings to graph node vectors
         fix_vp_len : Use only viewpoint regions with same length (= max length)
@@ -1098,7 +1147,9 @@ def load_ml_data(data_folder,
         # Get viewpoint regions.
         vp_s_dic, vp_e_dic = extract_viewpoint_regions_from_fasta(seqs_dic,
                                                                   vp_s_dic=vp_s_dic,
-                                                                  vp_e_dic=vp_e_dic)
+                                                                  vp_e_dic=vp_e_dic,
+                                                                  center_vp=center_vp,
+                                                                  vp_ext=vp_ext)
         # Extract most prominent (max) viewpoint length from data.
         if not max_vp_l: # extract only first dataset.
             if fix_vp_len:
@@ -1114,13 +1165,17 @@ def load_ml_data(data_folder,
         if fix_vp_len:
             filter_seq_dic_fixed_vp_len(seqs_dic, vp_s_dic, vp_e_dic, max_vp_l)
 
+        # Update uppercase regions (viewpoint parts).
+        if center_vp or vp_ext:
+            update_sequence_viewpoint_regions(seqs_dic, vp_s_dic, vp_e_dic)
+
         # Extract additional annotations.
         if use_up:
             up_dic = read_up_into_dic(up_file, up_dic=up_dic)
         if not disable_bpp:
             bpp_dic = read_bpp_into_dic(bpp_file, vp_s_dic, vp_e_dic, 
                                         bpp_dic=bpp_dic,
-                                        vp_lr_ext=vp_ext)
+                                        con_ext=con_ext)
         if use_con:
             con_dic = read_con_into_dic(con_file, 
                                         con_dic=con_dic)
@@ -1167,10 +1222,11 @@ def load_ml_data(data_folder,
                                          con_dic=con_dic, 
                                          use_str_elem_1h=use_str_elem_1h,
                                          use_us_ds_labels=use_us_ds_labels,
+                                         all_nt_uc=all_nt_uc,
                                          str_elem_up_dic=str_elem_up_dic, 
                                          region_labels_dic=region_labels_dic,
                                          bpp_dic=bpp_dic, 
-                                         vp_lr_ext=vp_ext, 
+                                         con_ext=con_ext, 
                                          ext_mode=bpp_mode,
                                          add_1h_to_g=add_1h_to_g,
                                          plfold_bpp_cutoff=bpp_cutoff)
@@ -1258,9 +1314,12 @@ def load_data(data_folder,
               use_region_labels=False,
               disable_bpp=False,
               bpp_cutoff=0.2,
+              all_nt_uc=False,
               bpp_mode=1,
               gm_data=False,
-              vp_ext = 100,
+              con_ext = 100,
+              center_vp=False,
+              vp_ext=False,
               sf_norm=True,
               add_1h_to_g=False,
               onehot2d=False,
@@ -1287,8 +1346,12 @@ def load_data(data_folder,
         disable_bpp : disables adding of base pair information
         bpp_cutoff : bp probability threshold when adding bp probs.
         bpp_mode : see ext_mode in convert_seqs_to_graphs for details
-        vp_ext : Define upstream + downstream viewpoint extension for graphs
+        con_ext : Define upstream + downstream viewpoint extension for graphs
                  Usually set equal to used plfold_L (default: 100)
+        vp_ext : extend the viewpoint (uppercase region)
+        center_vp : center the viewpoint parts, so that only one viewpoint 
+                    position remains. Then extend viewpoint again using vp_ext
+                    This is useful to make variable viewpoints same length.
         onehot2d : Do not convert one-hot to 3d
         gm_data : If data is in format for generic model generation
         add_1h_to_g : add one-hot encodings to graph node vectors
@@ -1313,6 +1376,10 @@ def load_data(data_folder,
     pos_region_labels_file = "%s/positives.exon_intron_labels" % (data_folder)
     neg_region_labels_file = "%s/negatives.exon_intron_labels" % (data_folder)
 
+    # Check options.
+    if all_nt_uc and use_us_ds_labels:
+        print("ERROR: use either all_nt_uc=True or use_us_ds_labels=True")
+        sys.exit()
     # Check inputs.
     if not os.path.isdir(data_folder):
         print("INPUT_ERROR: Input data folder \"%s\" not found" % (data_folder))
@@ -1379,8 +1446,17 @@ def load_data(data_folder,
     pos_seqs_dic = read_fasta_into_dic(pos_fasta_file)
     neg_seqs_dic = read_fasta_into_dic(neg_fasta_file)
     # Get viewpoint regions.
-    pos_vp_s, pos_vp_e = extract_viewpoint_regions_from_fasta(pos_seqs_dic)
-    neg_vp_s, neg_vp_e = extract_viewpoint_regions_from_fasta(neg_seqs_dic)
+    pos_vp_s, pos_vp_e = extract_viewpoint_regions_from_fasta(pos_seqs_dic,
+                                                              center_vp=center_vp,
+                                                              vp_ext=vp_ext)
+    neg_vp_s, neg_vp_e = extract_viewpoint_regions_from_fasta(neg_seqs_dic,
+                                                              center_vp=center_vp,
+                                                              vp_ext=vp_ext)
+    # Update uppercase regions (viewpoint parts).
+    if center_vp or vp_ext:
+        update_sequence_viewpoint_regions(pos_seqs_dic, pos_vp_s, pos_vp_e)
+        update_sequence_viewpoint_regions(neg_seqs_dic, neg_vp_s, neg_vp_e)
+    
     # Extract most prominent (max) viewpoint length from data.
     max_vp_l = 0
     if fix_vp_len:
@@ -1423,9 +1499,9 @@ def load_data(data_folder,
         neg_up_dic = read_up_into_dic(neg_up_file)
     if not disable_bpp:
         pos_bpp_dic = read_bpp_into_dic(pos_bpp_file, pos_vp_s, pos_vp_e, 
-                                        vp_lr_ext=vp_ext)
+                                        con_ext=con_ext)
         neg_bpp_dic = read_bpp_into_dic(neg_bpp_file, neg_vp_s, neg_vp_e, 
-                                        vp_lr_ext=vp_ext)
+                                        con_ext=con_ext)
     if use_con:
         pos_con_dic = read_con_into_dic(pos_con_file)
         neg_con_dic = read_con_into_dic(neg_con_file)
@@ -1474,8 +1550,9 @@ def load_data(data_folder,
                                         str_elem_up_dic=pos_str_elem_up_dic, 
                                         use_us_ds_labels=use_us_ds_labels,
                                         bpp_dic=pos_bpp_dic, 
-                                        vp_lr_ext=vp_ext, 
+                                        con_ext=con_ext, 
                                         ext_mode=bpp_mode,
+                                        all_nt_uc=all_nt_uc,
                                         add_1h_to_g=add_1h_to_g,
                                         plfold_bpp_cutoff=bpp_cutoff)
     neg_graphs = convert_seqs_to_graphs(neg_seqs_dic, neg_vp_s, neg_vp_e, 
@@ -1486,8 +1563,9 @@ def load_data(data_folder,
                                         str_elem_up_dic=neg_str_elem_up_dic, 
                                         use_us_ds_labels=use_us_ds_labels,
                                         bpp_dic=neg_bpp_dic, 
-                                        vp_lr_ext=vp_ext,  
+                                        con_ext=con_ext,
                                         ext_mode=bpp_mode,
+                                        all_nt_uc=all_nt_uc,
                                         add_1h_to_g=add_1h_to_g,
                                         plfold_bpp_cutoff=bpp_cutoff)
 
@@ -1652,6 +1730,7 @@ def read_region_labels_into_dic(region_labels_file,
 def string_vectorizer(seq, 
                       s=False,
                       e=False,
+                      convert_to_uc=False,
                       empty_vectors=False,
                       custom_alphabet=False):
     """
@@ -1660,6 +1739,8 @@ def string_vectorizer(seq,
     sub-sequences.
     Return array of one-hot encoded vectors.
     If empty_vectors=True, return list of empty vectors.
+    Enable convert_to_uc to convert characters to uppercase before string 
+    vectorization. Good if context regions are part of given subsequence.
 
     >>> string_vectorizer("ACGU")
     [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
@@ -1669,12 +1750,18 @@ def string_vectorizer(seq,
     [[0, 0, 0, 0], [0, 0, 0, 0]]
     >>> string_vectorizer("ABC", empty_vectors=True)
     [[], [], []]
+    >>> string_vectorizer("aCGu", convert_to_uc=False)
+    [[0, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 0]]
+    >>> string_vectorizer("aCGu", convert_to_uc=True)
+    [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
 
     """
     alphabet=['A','C','G','U']
     if custom_alphabet:
         alphabet = custom_alphabet
     seq_l = len(seq)
+    if convert_to_uc:
+        seq = seq.upper()
     if empty_vectors:
         vector = []
         for letter in seq:
@@ -1724,6 +1811,39 @@ def char_vectorizer(char,
 
 ################################################################################
 
+def update_sequence_viewpoint_regions(seqs_dic, vp_s_dic, vp_e_dic):
+    """
+    Update sequence viewpoint regions, ie regions marked by vp_s_dic and 
+    vp_e_dic, converting nucleotides to uppercase.
+    
+    >>> seqs_dic = {"S1" : "acgtACGTacgt"}
+    >>> vp_s_dic = {"S1" : 4}
+    >>> vp_e_dic = {"S1" : 9}
+    >>> update_sequence_viewpoint_regions(seqs_dic, vp_s_dic, vp_e_dic)
+    >>> print(seqs_dic["S1"])
+    acgTACGTAcgt
+    >>> seqs_dic = {"S2" : "acgtacgtACGTac"}
+    >>> vp_s_dic = {"S2" : 5}
+    >>> vp_e_dic = {"S2" : 16}
+    >>> update_sequence_viewpoint_regions(seqs_dic, vp_s_dic, vp_e_dic)
+    >>> print(seqs_dic["S2"])
+    acgtACGTACGTAC
+
+    """
+    for seq_id in seqs_dic:
+        vp_s = vp_s_dic[seq_id]
+        vp_e = vp_e_dic[seq_id]
+        seq = seqs_dic[seq_id]
+        # Extract and update case for sequence parts.
+        us_seq = seq[:vp_s-1].lower()
+        vp_seq = seq[vp_s-1:vp_e].upper()
+        ds_seq = seq[vp_e:].lower()
+        # Store new sequence in given dictionary.
+        seqs_dic[seq_id] = us_seq + vp_seq + ds_seq
+
+
+################################################################################
+
 def filter_seq_dic_fixed_vp_len(seqs_dic, vp_s_dic, vp_e_dic, vp_l):
     """
     Remove sequences from sequence dictionary that do have a viewpoint 
@@ -1753,10 +1873,14 @@ def filter_seq_dic_fixed_vp_len(seqs_dic, vp_s_dic, vp_e_dic, vp_l):
 
 def extract_viewpoint_regions_from_fasta(seqs_dic,
                                          vp_s_dic=False,
-                                         vp_e_dic=False):
+                                         vp_e_dic=False,
+                                         center_vp=False,
+                                         vp_ext=False):
     """
     Extract viewpoint start end end positions from FASTA dictionary.
     Return dictionaries for start+end (1-based indices, key:fasta_id).
+    Set center_vp to center the extracted viewpoints, and vp_ext to 
+    bring all viewpoints to same length 1+2*vp_ext
 
     >>> seqs_dic = {"id1": "acguACGUacgu", "id2": "ACGUacgu"}
     >>> vp_s, vp_e = extract_viewpoint_regions_from_fasta(seqs_dic)
@@ -1768,19 +1892,49 @@ def extract_viewpoint_regions_from_fasta(seqs_dic,
     True
     >>> vp_e["id2"] == 4
     True
-
+    >>> vp_s, vp_e = extract_viewpoint_regions_from_fasta(seqs_dic, center_vp=True)
+    >>> vp_s["id1"] == 7
+    True
+    >>> vp_e["id1"] == 7
+    True
+    >>> vp_s, vp_e = extract_viewpoint_regions_from_fasta(seqs_dic, center_vp=True, vp_ext=2)
+    >>> vp_s["id1"] == 5
+    True
+    >>> vp_e["id1"] == 9
+    True
+    
     """
     if not vp_s_dic:
         vp_s_dic = {}
     if not vp_e_dic:
         vp_e_dic = {}
+    # Sanity check vp_ext.
+    if vp_ext:
+        if vp_ext < 0 or vp_ext > 100:
+            print ("ERROR: vp_ext set too high (vp_ext=%i) Set vp_ext between 0 and 100." % (vp_ext))
+            sys.exit()
+    # Get viewpoint starts+ends (= uppercase nucleotide labels) for each sequence.
     for seq_id, seq in sorted(seqs_dic.items()):
+        l_seq = len(seq)
         m = re.search("([acgun]*)([ACGUN]+)", seq)
         if m:
             l_us = len(m.group(1))
             l_vp = len(m.group(2))
             vp_s = l_us+1
             vp_e = l_us+l_vp
+            # If center_vp, center viewpoint region.
+            if center_vp:
+                 vp_s = round(vp_s + (l_vp/2))
+                 vp_e = vp_s
+            # If vp_ext, extend vp region by vp_ext (new vp region).
+            if vp_ext:
+                vp_s = vp_s - vp_ext
+                if vp_s < 1:
+                    vp_s = 1
+                vp_e = vp_e + vp_ext
+                if vp_e > l_seq:
+                    vp_e = l_seq
+            # Store coordinates in hash.
             vp_s_dic[seq_id] = vp_s
             vp_e_dic[seq_id] = vp_e
         else:
@@ -2363,33 +2517,33 @@ def normalize_graph_feat_vectors(graphs,
 
 def read_bpp_into_dic(bpp_file, vp_s, vp_e,
                       bpp_dic=False,
-                      vp_lr_ext=100,
+                      con_ext=100,
                       ext_mode=1):
     """
     Read in base pair probabilities and store information in list for 
     each sequence, where region to extract values from is defined by 
-    viewpoint (vp) start+end (+ vp_lr_ext == plfold L parameter, assuming L=100)
+    viewpoint (vp) start+end (+ con_ext == plfold L parameter, assuming L=100)
     Return dictionary with base pair+probability list for each sequence
     (key: sequence id, value: "bp_start-bp_end,bp_prob").
     ext_mode: define which base pairs get extracted.
-    ext_mode=1 : all bps in extended vp region vp_s-vp_lr_ext - vp_e+vp_lr_ext
+    ext_mode=1 : all bps in extended vp region vp_s-con_ext - vp_e+con_ext
     ext_mode=2 : bps in extended vp region with start or end in base vp
     ext_mode=3 : only bps with start+end in base vp
 
     >>> bpp_test = "test_data/test.bpp"
     >>> vp_s = {"CLIP_01": 150}
     >>> vp_e = {"CLIP_01": 250}
-    >>> d = read_bpp_into_dic(bpp_test, vp_s, vp_e, vp_lr_ext=50, ext_mode=1)
+    >>> d = read_bpp_into_dic(bpp_test, vp_s, vp_e, con_ext=50, ext_mode=1)
     >>> print(d)
     {'CLIP_01': ['110-140,0.22', '130-150,0.33', '160-200,0.44', '240-260,0.55', '270-290,0.66']}
-    >>> d = read_bpp_into_dic(bpp_test, vp_s, vp_e, vp_lr_ext=50, ext_mode=2)
+    >>> d = read_bpp_into_dic(bpp_test, vp_s, vp_e, con_ext=50, ext_mode=2)
     >>> print(d)
     {'CLIP_01': ['130-150,0.33', '160-200,0.44', '240-260,0.55']}
-    >>> d = read_bpp_into_dic(bpp_test, vp_s, vp_e, vp_lr_ext=50, ext_mode=3)
+    >>> d = read_bpp_into_dic(bpp_test, vp_s, vp_e, con_ext=50, ext_mode=3)
     >>> print(d)
     {'CLIP_01': ['160-200,0.44']}
     >>> bpp_test = "test_data/test2.bpp"
-    >>> d = read_bpp_into_dic(bpp_test, vp_s, vp_e, vp_lr_ext=50, ext_mode=1)
+    >>> d = read_bpp_into_dic(bpp_test, vp_s, vp_e, con_ext=50, ext_mode=1)
     >>> print(d)
     {}
 
@@ -2414,10 +2568,10 @@ def read_bpp_into_dic(bpp_file, vp_s, vp_e,
                 bpp = float(m.group(3))
                 bpp_se = "%s-%s,%s" % (s,e,bpp)
                 if ext_mode == 1:
-                    if s >= (vp_s[seq_id]-vp_lr_ext) and e <= (vp_e[seq_id]+vp_lr_ext):
+                    if s >= (vp_s[seq_id]-con_ext) and e <= (vp_e[seq_id]+con_ext):
                         bpp_dic[seq_id].append(bpp_se)
                 elif ext_mode == 2:
-                    if (s >= (vp_s[seq_id]-vp_lr_ext) and (e <= (vp_e[seq_id]) and e >= vp_s[seq_id])) or (e <= (vp_e[seq_id]+vp_lr_ext) and (s <= (vp_e[seq_id]) and s >= vp_s[seq_id])):
+                    if (s >= (vp_s[seq_id]-con_ext) and (e <= (vp_e[seq_id]) and e >= vp_s[seq_id])) or (e <= (vp_e[seq_id]+con_ext) and (s <= (vp_e[seq_id]) and s >= vp_s[seq_id])):
                         bpp_dic[seq_id].append(bpp_se)
                 elif ext_mode == 3:
                     if s >= vp_s[seq_id] and e <= vp_e[seq_id]:
@@ -2441,7 +2595,8 @@ def generate_geometric_data(seqs_dic, vp_s_dic, vp_e_dic,
                             use_us_ds_labels=False,
                             region_labels_dic=False,
                             plfold_bpp_cutoff=0.2,
-                            vp_lr_ext=100, 
+                            con_ext=100, 
+                            all_nt_uc=False,
                             fix_vp_len=False,
                             add_1h_to_g=False,
                             g_idx=False,
@@ -2457,6 +2612,10 @@ def generate_geometric_data(seqs_dic, vp_s_dic, vp_e_dic,
     all_nodes_attributes   Node vectors
     """
 
+    # Check options.
+    if all_nt_uc and use_us_ds_labels:
+        print("ERROR: use either all_nt_uc=True or use_us_ds_labels=True")
+        sys.exit()
     # Label to idx dictionary.
     dict_label_idx = {'a': '1', 
                       'c': '2', 
@@ -2501,10 +2660,10 @@ def generate_geometric_data(seqs_dic, vp_s_dic, vp_e_dic,
             if not seq_id in bpp_dic:
                 print ("ERROR: seq_id \"%s\" not in bpp_dic" % (seq_id))
                 sys.exit()
-            ex_s = ex_s-vp_lr_ext
+            ex_s = ex_s-con_ext
             if ex_s < 1:
                 ex_s = 1
-            ex_e = ex_e+vp_lr_ext
+            ex_e = ex_e+con_ext
             if ex_e > l_seq:
                 ex_e = l_seq
         # Length of graph.
@@ -2559,6 +2718,9 @@ def generate_geometric_data(seqs_dic, vp_s_dic, vp_e_dic,
                         new_c = "u"+c
                 else:
                     seen_vp = True
+                all_nodes_labels.append(dict_label_idx[new_c])
+            elif all_nt_uc:
+                new_c=c.upper()
                 all_nodes_labels.append(dict_label_idx[new_c])
             else:
                 # Add nucleotide node.
@@ -2670,7 +2832,8 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
                            use_us_ds_labels=False,
                            region_labels_dic=False,
                            plfold_bpp_cutoff=0.2,
-                           vp_lr_ext=100, 
+                           all_nt_uc=False,
+                           con_ext=100,
                            fix_vp_len=False,
                            add_1h_to_g=False,
                            ext_mode=1):
@@ -2684,7 +2847,7 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
     Probability cutoff can be set via plfold_bpp_cutoff (i.e. if bpp is 
     lower the base pair edge will not be added to graph).
     ext_mode: define which base pairs get extracted.
-    ext_mode=1 : all bps in extended vp region vp_s-vp_lr_ext - vp_e+vp_lr_ext
+    ext_mode=1 : all bps in extended vp region vp_s-con_ext - vp_e+con_ext
     ext_mode=2 : bps in extended vp region with start or end in base vp
     ext_mode=3 : only bps with start+end in non-extended vp region
 
@@ -2695,7 +2858,7 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
     >>> bpp_dic = {"CLIP_01" : id1_bp, "CLIP_02" : id2_bp}
     >>> vp_s = {"CLIP_01": 11, "CLIP_02": 5}
     >>> vp_e = {"CLIP_01": 21, "CLIP_02": 15}
-    >>> g_list = convert_seqs_to_graphs(seqs_dic, vp_s, vp_e, up_dic=up_dic, vp_lr_ext=5, ext_mode=1, bpp_dic=bpp_dic)
+    >>> g_list = convert_seqs_to_graphs(seqs_dic, vp_s, vp_e, up_dic=up_dic, con_ext=5, ext_mode=1, bpp_dic=bpp_dic)
     >>> convert_graph_to_string(g_list[0])
     '0-1,0-2,1-2,1-6,2-3,3-4,4-5,5-6,6-7,7-8,7-12,8-9,9-10,10-11,11-12,12-13,13-14,13-17,14-15,15-16,16-17,17-18,18-19,19-20,'
     >>> convert_graph_to_string(g_list[1])
@@ -2713,7 +2876,7 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
     >>> g_list[0].node[1]['feat_vector']
     [0.1, 0.2, 0.4, 0.2, 0.1, 0.7, 0.9, 0, 1]
     >>> bpp_dic = {"CLIP_01" : ["1-4,0.5"]}
-    >>> g_list = convert_seqs_to_graphs(seqs_dic, vp_s, vp_e, vp_lr_ext=1, ext_mode=1, bpp_dic=bpp_dic, use_us_ds_labels=True)
+    >>> g_list = convert_seqs_to_graphs(seqs_dic, vp_s, vp_e, con_ext=1, ext_mode=1, bpp_dic=bpp_dic, use_us_ds_labels=True)
     >>> convert_graph_to_string(g_list[0])
     '0-1,0-3,1-2,2-3,'
     >>> g_list[0].node[0]['label']
@@ -2726,6 +2889,10 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
     'du'
 
     """
+    # Check input.
+    if all_nt_uc and use_us_ds_labels:
+        print ("ERROR: use either all_nt_uc=True or use_us_ds_labels=True")
+        sys.exit()
     if not g_list:
         g_list = []
     for seq_id, seq in sorted(seqs_dic.items()):
@@ -2749,10 +2916,10 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
             if not seq_id in bpp_dic:
                 print ("ERROR: seq_id \"%s\" not in bpp_dic" % (seq_id))
                 sys.exit()
-            ex_s = ex_s-vp_lr_ext
+            ex_s = ex_s-con_ext
             if ex_s < 1:
                 ex_s = 1
-            ex_e = ex_e+vp_lr_ext
+            ex_e = ex_e+con_ext
             if ex_e > l_seq:
                 ex_e = l_seq
         # Check up_dic.
@@ -2803,6 +2970,10 @@ def convert_seqs_to_graphs(seqs_dic, vp_s_dic, vp_e_dic,
                         new_c = "u"+c
                 else:
                     seen_vp = True
+                g.add_node(g_i, label=new_c)
+            elif all_nt_uc:
+                # Convert nucleotides to uppercase.
+                new_c = c.upper()
                 g.add_node(g_i, label=new_c)
             else:
                 # Add nucleotide node.
@@ -2948,13 +3119,13 @@ WXd;;;;;::cclllloooddddxxxxxxxxxxxdkXWNWWWWWO:'',,;:ccllllooodddxxkkkkkOOOOOOOKW
 def convert_seqs_to_bppms(seqs_dic, vp_s, vp_e, bpp_dic,
                           plfold_bpp_cutoff=0.2,
                           vp_size=101,
-                          vp_lr_ext=100):
+                          con_ext=100):
     """
     Convert sequences to base pair probability matrices, given base pair 
     information in bpp_dic (key: sequence id, value: list of base pair 
     strings in format: "bp_start-bp_end,bp_prob")
-    vp_lr_ext sets sequence region to use for base pair probability matrix.
-    len(vp_lr_ext) upstream context + viewpoint region + len(vp_lr_ext) down-
+    con_ext sets sequence region to use for base pair probability matrix.
+    len(con_ext) upstream context + viewpoint region + len(con_ext) down-
     stream context. If sequence is shorter than context extensions, 
     still generate same size matrix, filling up missing regions with "0" 
     entries. Resulting matrix is symmetric.
@@ -2965,7 +3136,7 @@ def convert_seqs_to_bppms(seqs_dic, vp_s, vp_e, bpp_dic,
     >>> bpp_dic = {"CLIP_01" : id1_bp}
     >>> vp_s = {"CLIP_01": 5}
     >>> vp_e = {"CLIP_01": 8}
-    >>> bppms_list = convert_seqs_to_bppms(seqs_dic, vp_s, vp_e, bpp_dic, vp_size=4, vp_lr_ext=2)
+    >>> bppms_list = convert_seqs_to_bppms(seqs_dic, vp_s, vp_e, bpp_dic, vp_size=4, con_ext=2)
     >>> print(bppms_list[0])
     [[0.  0.  0.  0.  0.  0.  0.  0.3]
      [0.  0.  0.  0.  0.  0.  0.5 0. ]
@@ -2978,15 +3149,15 @@ def convert_seqs_to_bppms(seqs_dic, vp_s, vp_e, bpp_dic,
 
     """
     bppms_list = []
-    # Fixed matrix size, defined by vp_size + vp_lr_ext.
-    m_size = vp_size + vp_lr_ext*2
+    # Fixed matrix size, defined by vp_size + con_ext.
+    m_size = vp_size + con_ext*2
     for seq_id, seq in sorted(seqs_dic.items()):
         l_seq = len(seq)
         # Define region with base pair information.
-        ex_s = vp_s[seq_id]-vp_lr_ext
+        ex_s = vp_s[seq_id]-con_ext
         if ex_s < 1:
             ex_s = 1
-        ex_e = vp_e[seq_id]+vp_lr_ext
+        ex_e = vp_e[seq_id]+con_ext
         if ex_e > l_seq:
             ex_e = l_seq
         # Size of actual region (can be smaller than m_size in case of shortened context).
