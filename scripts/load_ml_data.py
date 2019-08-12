@@ -14,6 +14,9 @@ graphs, seqs_1h, sfv_list, labels, labels_1h = gp2lib.load_ml_data(data_folder,
                                                use_sf=True,
                                                use_entr=False,
                                                use_up=False,
+                                               all_nt_uc=False,
+                                               center_vp=False,
+                                               vp_ext=False,
                                                onehot2d=False,
                                                sf_norm=True,
                                                add_1h_to_g=False,
@@ -21,6 +24,7 @@ graphs, seqs_1h, sfv_list, labels, labels_1h = gp2lib.load_ml_data(data_folder,
                                                bpp_cutoff=0.5)
 
 """
+
 graphs: list of graphs
 seqs_1h : list of one-hot matrices plus additional position-wise features
 sfv_list : list of site feature vectors
