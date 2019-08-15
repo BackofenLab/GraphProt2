@@ -6,20 +6,21 @@ from lib import gp2lib
 data_folder = "CAPRIN1_Baltz2012_original_gp1_data_out"
 
 graphs, seqs_1h, sfv_list, labels = gp2lib.load_data(data_folder,
+                                           gm_data=False,
                                            use_str_elem_up=False,
                                            use_str_elem_1h=False,
                                            use_us_ds_labels=False,
                                            use_region_labels=False,
                                            center_vp=False,
-                                           vp_ext=False,
+                                           vp_ext=0,
+                                           con_ext=20,
                                            use_con=False,
                                            use_sf=False,
                                            use_entr=False,
-                                           onehot2d=False,
                                            add_1h_to_g=False,
                                            all_nt_uc=False,
-                                           con_ext=20,
                                            fix_vp_len=False,
+                                           bpp_mode=2,
                                            bpp_cutoff=0.5)
 
 

@@ -9,21 +9,23 @@ data_folder = "/home/uhlm/scratch_0_uhlm/Data/cluster/gp2_out_merged_results"
 # test10_generic_set_extlr30_extcon150_thr2_m0_out
 
 graphs, seqs_1h, sfv_list, labels = gp2lib.load_data(data_folder,
-                                           use_up=True,
-                                           use_con=True,
-                                           use_sf=True,
-                                           use_entr=False,
                                            gm_data=True,
-                                           all_nt_uc=False,
-                                           center_vp=False,
-                                           vp_ext=False,
-                                           onehot2d=False,
-                                           add_1h_to_g=True,
-                                           vp_ext = 10,
-                                           use_str_elem_up=True,
+                                           use_str_elem_up=False,
                                            use_str_elem_1h=False,
                                            use_us_ds_labels=False,
-                                           bpp_cutoff=1)
+                                           use_region_labels=False,
+                                           use_up=False,
+                                           center_vp=False,
+                                           vp_ext=0,
+                                           con_ext=20,
+                                           use_con=False,
+                                           use_sf=False,
+                                           use_entr=False,
+                                           add_1h_to_g=False,
+                                           all_nt_uc=False,
+                                           fix_vp_len=False,
+                                           bpp_mode=2,
+                                           bpp_cutoff=0.5)
 
 
 # Get RBP label to numeric label ID (stored in labels list) mapping.

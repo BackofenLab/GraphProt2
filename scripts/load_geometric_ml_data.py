@@ -16,12 +16,11 @@ anl, agi, ae, ana, s1h, sfvl, labels, labels_1h = gp2lib.load_geom_ml_data(data_
                                                    use_up=False,
                                                    all_nt_uc=False,
                                                    center_vp=False,
-                                                   vp_ext=False,
-                                                   sf_norm=True,
+                                                   vp_ext=0,
                                                    add_1h_to_g=False,
-                                                   vp_ext=100,
+                                                   bpp_mode=2,
+                                                   con_ext=50,
                                                    bpp_cutoff=0.5)
-
 
 """
 

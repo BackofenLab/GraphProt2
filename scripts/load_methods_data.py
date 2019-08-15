@@ -36,8 +36,8 @@ fix_vp_len : Use only viewpoint regions with same length (= max length)
 """
 
 ids, labels, sequences, features = gp2lib.load_dlprb_data(data_folder,
-                                                          use_vp_ext=True,
-                                                          vp_ext=10,
+                                                          use_con_ext=True,
+                                                          con_ext=10,
                                                           fix_vp_len=True)
 
 
@@ -67,8 +67,8 @@ fix_vp_len : Use only viewpoint regions with same length (= max length)
 """
 
 ids, labels, sequences = gp2lib.load_ideeps_data(data_folder,
-                                                 use_vp_ext=True,
-                                                 vp_ext=20,
+                                                 use_con_ext=True,
+                                                 con_ext=20,
                                                  fix_vp_len=True)
 
 

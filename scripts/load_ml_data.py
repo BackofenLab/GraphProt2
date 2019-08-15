@@ -16,11 +16,12 @@ graphs, seqs_1h, sfv_list, labels, labels_1h = gp2lib.load_ml_data(data_folder,
                                                use_up=False,
                                                all_nt_uc=False,
                                                center_vp=False,
-                                               vp_ext=False,
+                                               vp_ext=0,
                                                onehot2d=False,
                                                sf_norm=True,
+                                               bpp_mode=2,
                                                add_1h_to_g=False,
-                                               vp_ext=100,
+                                               con_ext=50,
                                                bpp_cutoff=0.5)
 
 """

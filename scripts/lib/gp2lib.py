@@ -17,9 +17,6 @@ python3 -m doctest -v lib/gp2lib.py
 check whether methods also work with sequences without 
 lowercase context.
 
-load_data x
-load_geom_ml_data
-
 """
 
 def load_geom_ml_data(data_folder, 
@@ -36,7 +33,7 @@ def load_geom_ml_data(data_folder,
                       sf_norm=True,
                       all_nt_uc=False,
                       center_vp=False,
-                      vp_ext=False,
+                      vp_ext=0,
                       bpp_mode=1,
                       con_ext=50,
                       add_1h_to_g=False,
@@ -792,8 +789,8 @@ def load_ideeps_data(data_folder,
 
 def load_dlprb_data(data_folder,
                 con_ext=10,
-                center_vp=True,
-                vp_ext=50,
+                center_vp=False,
+                vp_ext=0,
                 use_con_ext=False,
                 fix_vp_len=True):
     """
@@ -1021,9 +1018,9 @@ def load_ml_data(data_folder,
               sf_norm=True,
               center_vp=False,
               all_nt_uc=False,
-              vp_ext=False,
+              vp_ext=0,
               bpp_mode=1,
-              con_ext=100,
+              con_ext=50,
               add_1h_to_g=False,
               onehot2d=False,
               fix_vp_len=False):
@@ -1317,13 +1314,13 @@ def load_data(data_folder,
               all_nt_uc=False,
               bpp_mode=1,
               gm_data=False,
-              con_ext = 100,
+              con_ext = 50,
               center_vp=False,
-              vp_ext=False,
+              vp_ext=0,
               sf_norm=True,
               add_1h_to_g=False,
               onehot2d=False,
-              fix_vp_len=True):
+              fix_vp_len=False):
     """
     Load data from data_folder.
     Return list of structure graphs, one-hot encoded sequences np array, 
@@ -1440,7 +1437,7 @@ def load_data(data_folder,
             print("INPUT_ERROR: missing \"%s\"" % (neg_region_labels_file))
             sys.exit()
 
-    #print("Read in sequences ... ")
+    print("Read in sequences ... ")
 
     # Read in FASTA sequences.
     pos_seqs_dic = read_fasta_into_dic(pos_fasta_file)
@@ -1490,6 +1487,12 @@ def load_data(data_folder,
     # Region labels (exon intron).
     pos_region_labels_dic = False
     neg_region_labels_dic = False
+
+    # Number of sequences read in.
+    c_pos_seq = len(pos_seqs_dic)
+    c_neg_seq = len(neg_seqs_dic)
+    c_seq = c_pos_seq + c_neg_seq
+    print("Number of sequences: %i (pos: %i, neg: %i)" %(c_seq, c_pos_seq, c_neg_seq))
 
     print("Read in dataset dictionaries ... ")
 
@@ -1568,6 +1571,11 @@ def load_data(data_folder,
                                         all_nt_uc=all_nt_uc,
                                         add_1h_to_g=add_1h_to_g,
                                         plfold_bpp_cutoff=bpp_cutoff)
+
+    c_pos_g = len(pos_graphs)
+    c_neg_g = len(neg_graphs)
+    c_graphs = c_pos_g + c_neg_g
+    print("Number of generated graphs: %i (pos: %i, neg: %i)" %(c_graphs, c_pos_g, c_neg_g))
 
     # Create labels.
     labels = [1]*len(pos_seq_1h) + [0]*len(neg_seq_1h)
@@ -1902,7 +1910,11 @@ def extract_viewpoint_regions_from_fasta(seqs_dic,
     True
     >>> vp_e["id1"] == 9
     True
-    
+    >>> vp_s, vp_e = extract_viewpoint_regions_from_fasta(seqs_dic, center_vp=True, vp_ext=3)
+    >>> vp_s["id2"] == 1
+    True
+    >>> vp_e["id2"] == 9
+    True
     """
     if not vp_s_dic:
         vp_s_dic = {}
@@ -1920,6 +1932,10 @@ def extract_viewpoint_regions_from_fasta(seqs_dic,
         if m:
             l_us = len(m.group(1))
             l_vp = len(m.group(2))
+            # If viewpoint length 0.
+            if not l_vp:
+                print ("ERROR: no viewpoint found for \"%s\"" % (seq_id))
+                sys.exit()
             vp_s = l_us+1
             vp_e = l_us+l_vp
             # If center_vp, center viewpoint region.
