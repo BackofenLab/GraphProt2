@@ -453,7 +453,9 @@ def load_geometric_data(data_folder,
     pos_vp_s, pos_vp_e = extract_viewpoint_regions_from_fasta(pos_seqs_dic,
                                                               center_vp=center_vp,
                                                               vp_ext=vp_ext)
-    neg_vp_s, neg_vp_e = extract_viewpoint_regions_from_fasta(neg_seqs_dic)
+    neg_vp_s, neg_vp_e = extract_viewpoint_regions_from_fasta(neg_seqs_dic,
+                                                              center_vp=center_vp,
+                                                              vp_ext=vp_ext)
     # Extract most prominent (max) viewpoint length from data.
     max_vp_l = 0
     if fix_vp_len:
@@ -606,14 +608,14 @@ def load_geometric_data(data_folder,
             if site_id in pos_seqs_dic:
                 site_feat_v.append(site_v)
     else:
-        for l in [0]*len(pos_seq_1h):
+        for l in [0]*len(pos_seqs_dic):
             site_feat_v.append([0])
     if neg_sf_dic:
         for site_id, site_v in sorted(neg_sf_dic.items()):
             if site_id in neg_seqs_dic:
                 site_feat_v.append(site_v)
     else:
-        for l in [0]*len(neg_seq_1h):
+        for l in [0]*len(neg_seqs_dic):
             site_feat_v.append([0])
 
     # Return geometric lists, label list, and site feature vectors list.
@@ -2452,6 +2454,83 @@ def min_max_normalize(x, max_x, min_x):
         return x
     else:
         return ( (x-min_x) / (max_x - min_x) )
+
+
+
+def normalize_geometric_all_nodes_attributes(ana,
+                                             norm_mode=0):
+    """
+    Normalize PyTorch geometric format node attribute vectors.
+    Each vector element contains a string of node attributes for one 
+    node. Return the normalized vector of
+    Example content of ana[0]
+    '0.015,0.0003,0.003,0.0002,0.980,0.0,-0.514,0,1'
+    >>> test_ana = ['0.3,0.1,0.15,0.2,0.25,0.5,0.8,1,0', '0.25,0.3,0.1,0.15,0.2,0.7,0.9,0,1']
+    >>> normalize_geometric_all_nodes_attributes(test_ana, norm_mode=0)
+    >>> test_ana[0]
+    '1.0,0.0,1.0,1.0,1.0,0.0,0.0,1,0'
+    >>> test_ana[1]
+    '0.0,1.0,0.0,0.0,0.0,1.0,1.0,0,1'
+
+    """
+    # Get number of vector elements.
+    c_ve = len(ana[0].split(","))
+    if not c_ve:
+        print ("ERROR: invalid list given in normalize_geometric_all_nodes_attributes()")
+        sys.exit()
+    # Identify elements with one-hot encoding (use first k vectors).
+    l_ana = len(ana)
+    k = 150
+    if l_ana < k:
+        k = l_ana
+    norm_i = [] # vector indices to normalize.
+    for i in range(c_ve):
+        one_hot = 1
+        for j in range(k):
+            v = ana[j].split(",")[i]
+            if str(v) != "0" and str(v) != "1":
+                one_hot = 0
+        if not one_hot:
+            norm_i.append(i)
+    # Vectors of max, min, avg values for each features.
+    max_v = [-1000]*c_ve
+    min_v = [1000]*c_ve
+    avg_v = [0]*c_ve
+    c_v = [0]*c_ve
+    # Get min, max, avg, counts from ana list.
+    for el in ana:
+        vec = el.split(",")
+        for i in norm_i:
+            v = float(vec[i])
+            c_v[i] += 1
+            if v > max_v[i]:
+                max_v[i] = v
+            if v < min_v[i]:
+                min_v[i] = v
+            avg_v[i] += v
+    # Calculate means.
+    for i in norm_i:
+        avg_v[i] = avg_v[i] / c_v[i]
+    # Normalize vector values and store them again in given list.
+    for i_el, el in enumerate(ana):
+        vec = el.split(",")
+        # vec = [float(ve) for ve in el.split(",")]
+        for i in norm_i:
+            ve = float(vec[i])
+            if norm_mode == 0:
+                ve = min_max_normalize(ve, max_v[i], min_v[i])
+            elif norm_mode == 1:
+                ve = mean_normalize(ve, avg_v[i], max_v[i], min_v[i])
+            else:
+                print("ERROR: invalid norm_mode \"%i\" set in normalize_geometric_all_nodes_attributes()" % (norm_mode))
+                sys.exit()
+            vec[i] = ve
+        # Convert vector elements to strings.
+        str_vec = [str(att) for att in vec]
+        # Make , separated string out of vector elements.
+        new_str = ",".join(str_vec)
+        # Updata ana list with normalized values.
+        ana[i_el] = new_str
 
 
 ################################################################################

@@ -3,7 +3,7 @@
 from lib import gp2lib
 
 # Input data folder to load data from.
-data_folder = "EWSR1_K562_rep1_GRCh38_peaks_extlr30_extcon150_thr3.4_m0_out"
+data_folder = "AGGF1"
 
 anl, agi, ae, ana, labels, sfvl = gp2lib.load_geometric_data(data_folder,
                                          use_str_elem_up=True,
@@ -15,17 +15,19 @@ anl, agi, ae, ana, labels, sfvl = gp2lib.load_geometric_data(data_folder,
                                          use_sf=False,
                                          use_entr=False,
                                          all_nt_uc=False,
-                                         center_vp=False,
-                                         vp_ext=0,
+                                         center_vp=True,
+                                         vp_ext=30,
                                          add_1h_to_g=False,
                                          gm_data=False,
                                          bpp_mode=2,
                                          con_ext=50,
                                          bpp_cutoff=0.5)
 
+# Normalize node feature vectors.
+gp2lib.normalize_geometric_all_nodes_attributes(ana, norm_mode=0)
+
 
 """
-
 Returned geometric lists:
 anl :  all_node_labels
 agi :  all_graph_indicators
