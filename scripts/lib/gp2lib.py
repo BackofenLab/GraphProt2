@@ -1913,7 +1913,7 @@ def extract_viewpoint_regions_from_fasta(seqs_dic,
     >>> vp_s, vp_e = extract_viewpoint_regions_from_fasta(seqs_dic, center_vp=True, vp_ext=3)
     >>> vp_s["id2"] == 1
     True
-    >>> vp_e["id2"] == 9
+    >>> vp_e["id2"] == 6
     True
     """
     if not vp_s_dic:
