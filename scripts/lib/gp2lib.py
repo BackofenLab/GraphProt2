@@ -453,6 +453,8 @@ def load_geometric_data(data_folder,
             print("INPUT_ERROR: missing \"%s\"" % (neg_region_labels_file))
             sys.exit()
 
+    print("Read in sequences ... ")
+
     # Read in FASTA sequences.
     pos_seqs_dic = False
     neg_seqs_dic = False
@@ -540,6 +542,12 @@ def load_geometric_data(data_folder,
     # Region labels (exon intron).
     pos_region_labels_dic = False
     neg_region_labels_dic = False
+
+    # Number of sequences read in.
+    c_pos_seq = len(pos_seqs_dic)
+    c_neg_seq = len(neg_seqs_dic)
+    c_seq = c_pos_seq + c_neg_seq
+    print("Number of sequences: %i (pos: %i, neg: %i)" %(c_seq, c_pos_seq, c_neg_seq))
 
     print("Read in dataset dictionaries ... ")
 
@@ -635,7 +643,7 @@ def load_geometric_data(data_folder,
                     sys.exit()
         # Construct positives label vector.
         labels = []
-        for seq_id, seq in sorted(seqs_dic.items()):
+        for seq_id, seq in sorted(pos_seqs_dic.items()):
             label = id2l_dic[seq_id]
             labels.append(label)
         # Add negatives to label vector.
