@@ -323,6 +323,7 @@ def load_geometric_data(data_folder,
                         gm_data=False,
                         con_ext = 50,
                         sf_norm=True,
+                        load_subset="all",
                         add_1h_to_g=False,
                         fix_vp_len=False):
 
@@ -343,7 +344,7 @@ def load_geometric_data(data_folder,
                            Length of list = #positives+#negatives
     sfv_list               Site feature vectors list
 
-    Function parameters:
+    Function parameters (needs to be updated):
         use_up : if true add unpaired probabilities to graph + one-hot
         use_con : if true add conservation scores to graph + one-hot
         use_str_elem_up: add str elements unpaired probs to graph + one-hot
@@ -366,6 +367,7 @@ def load_geometric_data(data_folder,
         add_1h_to_g : add one-hot encodings to graph node vectors
         fix_vp_len : Use only viewpoint regions with same length (= max length)
 
+
     """
 
     # Input files.
@@ -385,6 +387,11 @@ def load_geometric_data(data_folder,
     neg_entr_file = "%s/negatives.entr" % (data_folder)
     pos_region_labels_file = "%s/positives.exon_intron_labels" % (data_folder)
     neg_region_labels_file = "%s/negatives.exon_intron_labels" % (data_folder)
+    # Train / test set IDs files.
+    pos_train_file = "%s/positives.train" % (data_folder)
+    pos_test_file = "%s/positives.test" % (data_folder)
+    neg_train_file = "%s/positives.train" % (data_folder)
+    neg_test_file = "%s/positives.test" % (data_folder)
 
     # Check inputs.
     if not os.path.isdir(data_folder):
@@ -447,8 +454,47 @@ def load_geometric_data(data_folder,
             sys.exit()
 
     # Read in FASTA sequences.
-    pos_seqs_dic = read_fasta_into_dic(pos_fasta_file)
-    neg_seqs_dic = read_fasta_into_dic(neg_fasta_file)
+    pos_seqs_dic = False
+    neg_seqs_dic = False
+    if load_subset == "all":
+        pos_seqs_dic = read_fasta_into_dic(pos_fasta_file)
+        neg_seqs_dic = read_fasta_into_dic(neg_fasta_file)
+    elif load_subset == "test":
+        # Check for files.
+        if not os.path.isfile(pos_test_file):
+            print("INPUT_ERROR: missing \"%s\"" % (pos_test_file))
+            sys.exit()
+        if not os.path.isfile(neg_test_file):
+            print("INPUT_ERROR: missing \"%s\"" % (neg_test_file))
+            sys.exit()
+        # Load from files.
+        test_ids = read_ids_into_dic(pos_test_file)
+        test_ids = read_ids_into_dic(neg_test_file, ids_dic=test_ids)
+        pos_seqs_dic = read_fasta_into_dic(pos_fasta_file, ids_dic=test_ids)
+        neg_seqs_dic = read_fasta_into_dic(neg_fasta_file, ids_dic=test_ids)
+    elif load_subset == "train":
+        # Check for files.
+        if not os.path.isfile(pos_train_file):
+            print("INPUT_ERROR: missing \"%s\"" % (pos_train_file))
+            sys.exit()
+        if not os.path.isfile(neg_train_file):
+            print("INPUT_ERROR: missing \"%s\"" % (neg_train_file))
+            sys.exit()
+        # Load from files.
+        train_ids = read_ids_into_dic(pos_train_file)
+        train_ids = read_ids_into_dic(neg_train_file, ids_dic=train_ids)
+        pos_seqs_dic = read_fasta_into_dic(pos_fasta_file, ids_dic=train_ids)
+        neg_seqs_dic = read_fasta_into_dic(neg_fasta_file, ids_dic=train_ids)
+    else:
+        print("INPUT_ERROR: invalid load_subset setting")
+        sys.exit()
+    if not pos_seqs_dic:
+        print("ERROR: pos_seqs_dic empty")
+        sys.exit()
+    if not neg_seqs_dic:
+        print("ERROR: neg_seqs_dic empty")
+        sys.exit()
+
     # Get viewpoint regions.
     pos_vp_s, pos_vp_e = extract_viewpoint_regions_from_fasta(pos_seqs_dic,
                                                               center_vp=center_vp,
@@ -1320,6 +1366,7 @@ def load_data(data_folder,
               center_vp=False,
               vp_ext=0,
               sf_norm=True,
+              load_subset="all",
               add_1h_to_g=False,
               onehot2d=False,
               fix_vp_len=False):
@@ -1374,6 +1421,11 @@ def load_data(data_folder,
     neg_entr_file = "%s/negatives.entr" % (data_folder)
     pos_region_labels_file = "%s/positives.exon_intron_labels" % (data_folder)
     neg_region_labels_file = "%s/negatives.exon_intron_labels" % (data_folder)
+    # Train / test set IDs files.
+    pos_train_file = "%s/positives.train" % (data_folder)
+    pos_test_file = "%s/positives.test" % (data_folder)
+    neg_train_file = "%s/positives.train" % (data_folder)
+    neg_test_file = "%s/positives.test" % (data_folder)
 
     # Check options.
     if all_nt_uc and use_us_ds_labels:
@@ -1442,8 +1494,47 @@ def load_data(data_folder,
     print("Read in sequences ... ")
 
     # Read in FASTA sequences.
-    pos_seqs_dic = read_fasta_into_dic(pos_fasta_file)
-    neg_seqs_dic = read_fasta_into_dic(neg_fasta_file)
+    pos_seqs_dic = False
+    neg_seqs_dic = False
+    if load_subset == "all":
+        pos_seqs_dic = read_fasta_into_dic(pos_fasta_file)
+        neg_seqs_dic = read_fasta_into_dic(neg_fasta_file)
+    elif load_subset == "test":
+        # Check for files.
+        if not os.path.isfile(pos_test_file):
+            print("INPUT_ERROR: missing \"%s\"" % (pos_test_file))
+            sys.exit()
+        if not os.path.isfile(neg_test_file):
+            print("INPUT_ERROR: missing \"%s\"" % (neg_test_file))
+            sys.exit()
+        # Load from files.
+        test_ids = read_ids_into_dic(pos_test_file)
+        test_ids = read_ids_into_dic(neg_test_file, ids_dic=test_ids)
+        pos_seqs_dic = read_fasta_into_dic(pos_fasta_file, ids_dic=test_ids)
+        neg_seqs_dic = read_fasta_into_dic(neg_fasta_file, ids_dic=test_ids)
+    elif load_subset == "train":
+        # Check for files.
+        if not os.path.isfile(pos_train_file):
+            print("INPUT_ERROR: missing \"%s\"" % (pos_train_file))
+            sys.exit()
+        if not os.path.isfile(neg_train_file):
+            print("INPUT_ERROR: missing \"%s\"" % (neg_train_file))
+            sys.exit()
+        # Load from files.
+        train_ids = read_ids_into_dic(pos_train_file)
+        train_ids = read_ids_into_dic(neg_train_file, ids_dic=train_ids)
+        pos_seqs_dic = read_fasta_into_dic(pos_fasta_file, ids_dic=train_ids)
+        neg_seqs_dic = read_fasta_into_dic(neg_fasta_file, ids_dic=train_ids)
+    else:
+        print("ERROR: invalid load_subset setting")
+        sys.exit()
+    if not pos_seqs_dic:
+        print("ERROR: pos_seqs_dic empty")
+        sys.exit()
+    if not neg_seqs_dic:
+        print("ERROR: neg_seqs_dic empty")
+        sys.exit()
+
     # Get viewpoint regions.
     pos_vp_s, pos_vp_e = extract_viewpoint_regions_from_fasta(pos_seqs_dic,
                                                               center_vp=center_vp,
@@ -1659,6 +1750,7 @@ def load_data(data_folder,
 
 def read_fasta_into_dic(fasta_file,
                         seqs_dic=False,
+                        ids_dic=False,
                         skip_n_seqs=True):
     """
     Read in FASTA sequences, store in dictionary and return dictionary.
@@ -1687,18 +1779,22 @@ def read_fasta_into_dic(fasta_file,
                     print ("ERROR: non-unique FASTA header \"%s\" in \"%s\"" % (seq_id, fasta_file))
                     sys.exit()
                 else:
-                    seqs_dic[seq_id] = ""
+                    if ids_dic:
+                        if seq_id in ids_dic:
+                            seqs_dic[seq_id] = ""
+                    else:
+                        seqs_dic[seq_id] = ""
             elif re.search("[ACGTUN]+", line, re.I):
                 m = re.search("([ACGTUN]+)", line, re.I)
+                if seq_id in seqs_dic:
+                    # Convert to RNA, concatenate sequence.
+                    seqs_dic[seq_id] += m.group(1).replace("T","U").replace("t","u")
                 # If sequences with N nucleotides should be skipped.
                 if skip_n_seqs:
                     if "n" in m.group(1) or "N" in m.group(1):
                         print ("WARNING: sequence with seq_id \"%s\" in file \"%s\" contains N nucleotides. Discarding sequence ... " % (seq_id, fasta_file))
                         del seqs_dic[seq_id]
                         continue
-                if seq_id in seqs_dic:
-                    # Convert to RNA, concatenate sequence.
-                    seqs_dic[seq_id] += m.group(1).replace("T","U").replace("t","u")
     f.closed
     return seqs_dic
 
@@ -3423,6 +3519,29 @@ def convert_seqs_to_one_hot(seqs_dic, vp_s_dic, vp_e_dic,
 
 ################################################################################
 
+def read_ids_into_dic(ids_file,
+                      ids_dic=False):
+    """
+    Read in IDs file, where each line stores one ID.
+
+    >>> test_ids_file = "test_data/test.ids"
+    >>> ids_dic = read_ids_into_dic(test_ids_file)
+    >>> print(ids_dic)
+    {'clip1': 1, 'clip2': 1, 'clip3': 1}
+
+    """
+    if not ids_dic:
+        ids_dic = {}
+    # Read in file content.
+    with open(ids_file) as f:
+        for line in f:
+            row_id = line.strip()
+            ids_dic[row_id] = 1
+    f.closed
+    return ids_dic
+
+
+################################################################################
 
 
 

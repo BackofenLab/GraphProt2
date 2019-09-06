@@ -3,7 +3,7 @@
 from lib import gp2lib
 
 # Input data folder to load data from.
-data_folder = "AGGF1"
+data_folder = "test20_out"
 
 anl, agi, ae, ana, labels, sfvl = gp2lib.load_geometric_data(data_folder,
                                          use_str_elem_up=True,
@@ -14,7 +14,7 @@ anl, agi, ae, ana, labels, sfvl = gp2lib.load_geometric_data(data_folder,
                                          use_con=True,
                                          use_sf=False,
                                          use_entr=False,
-                                         all_nt_uc=False,
+                                         all_nt_uc=True,
                                          center_vp=True,
                                          vp_ext=30,
                                          add_1h_to_g=False,
