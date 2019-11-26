@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 from MyNets import FunnelGNN, FunnelGNN_EdgeAttr
-
+import numpy as np
 
 def train(epoch, device, model, optimizer, train_loader):
     model.train()
@@ -34,6 +34,19 @@ def test(loader, device, model):
             loss_all += loss.item() * data.num_graphs
 
     return loss_all / len(loader.dataset), correct / len(loader.dataset)
+
+
+def get_scores(loader, device, model):
+    model.eval()
+    score_all = []
+    with torch.no_grad():
+        for data in loader:
+            data = data.to(device)
+            output = model(data.x, data.edge_index, data.batch)
+            output = torch.exp(output)
+            output = output.cpu().detach().numpy()[:, 1]
+            score_all.extend(output)
+    return np.vstack(score_all)
 
 
 def select_model(args, dataset, train_loader, val_loader, models_folder, device):
