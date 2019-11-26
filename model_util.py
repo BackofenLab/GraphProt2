@@ -46,7 +46,7 @@ def get_scores(loader, device, model):
             output = torch.exp(output)
             output = output.cpu().detach().numpy()[:, 1]
             score_all.extend(output)
-    return np.vstack(score_all)
+    return score_all
 
 
 def select_model(args, dataset, train_loader, val_loader, models_folder, device):
