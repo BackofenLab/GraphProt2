@@ -1,7 +1,11 @@
 import torch
 import torch.nn.functional as F
-from MyNets import FunnelGNN, FunnelGNN_EdgeAttr
+from MyNets import FunnelGNN
 import numpy as np
+import os
+from torch_geometric.datasets import TUDataset
+from torch_geometric.data import DataLoader
+
 
 def train(epoch, device, model, optimizer, train_loader):
     model.train()
@@ -84,3 +88,64 @@ def select_model(args, dataset, train_loader, val_loader, models_folder, device)
                     opt_weight_decay = weight_decay
                     opt_lr = lr
     return opt_node_hidden_dim, opt_weight_decay, opt_lr
+
+def create_profile_dataset(dataset_name=None, rna_seq=None, w_size=50, dataset_folder=None):
+    raw_folder = dataset_folder + "/raw"
+    processed_folder = dataset_folder + "/processed"
+
+    dict_nodelabel_id = {'A': 0, 'T': 1, 'G': 2, 'C': 3}
+    if not os.path.exists(dataset_folder):
+        os.makedirs(dataset_folder)
+        os.makedirs(raw_folder)
+        os.makedirs(processed_folder)
+
+    list_graph_indicators = []
+    list_edges = []
+    list_node_labels = []
+    n_idx = 1
+
+    for g_idx in range(len(rna_seq)-w_size + 1):
+        # graph indicators
+        seq = rna_seq[g_idx:g_idx+w_size]
+        n_seq = len(seq)
+        list_graph_indicators.extend([g_idx + 1] * n_seq)
+        # edges
+        for n_idx_temp in range(n_seq):
+            if n_idx_temp != (n_seq - 1):
+                list_edges.append((n_idx_temp + n_idx, n_idx_temp + 1 + n_idx))
+                list_edges.append((n_idx_temp + 1 + n_idx, n_idx_temp + n_idx))
+            list_node_labels.append(dict_nodelabel_id[seq[n_idx_temp]])
+        n_idx += n_seq
+
+    f = open(raw_folder + "/" + dataset_name + "_graph_indicator.txt", 'w')
+    f.writelines([str(e) + "\n" for e in list_graph_indicators])
+    f.close()
+
+    f = open(raw_folder + "/" + dataset_name + "_A.txt", 'w')
+    f.writelines([str(e[0]) + ", " + str(e[1]) + "\n" for e in list_edges])
+    f.close()
+
+    f = open(raw_folder + "/" + dataset_name + "_node_labels.txt", 'w')
+    f.writelines([str(e) + "\n" for e in list_node_labels])
+    f.close()
+
+    print("Done")
+
+
+def get_scores_profile(rna_name=None, rna_seq=None, list_w_size=[3, 5, 7], model=None, device=None, batch_size=None,
+                       geometric_folder=None):
+
+    all_scores = []
+    for w_size in list_w_size:
+        dataset_name = rna_name + "_" + str(w_size)
+        dataset_folder = geometric_folder + "/" + dataset_name
+        create_profile_dataset(dataset_name=dataset_name, rna_seq=rna_seq, w_size=w_size, dataset_folder=dataset_folder)
+        processed_file = dataset_folder + '/processed/data.pt'
+        if os.path.exists(processed_file):
+            os.remove(processed_file)
+        dataset = TUDataset(dataset_folder, name=dataset_name, use_node_attr=False)
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+        scores = get_scores(loader, device, model)
+        scores = [scores[0]]*int(w_size/2) + scores + [scores[-1]]*int(w_size/2)
+        all_scores.append(scores)
+    return list(np.mean(all_scores, axis=0))
