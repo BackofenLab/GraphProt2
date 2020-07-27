@@ -400,10 +400,10 @@ def get_whole_site_scores(top_pos_list, args,
             reg_e = len(list_node_labels)
         if reg_s < 0:
             reg_s = 0
-        sl_node_labels = list_node_labels[reg_s, reg_e]
+        sl_node_labels = list_node_labels[reg_s:reg_e]
         sl_node_attr = []
         if use_node_attr:
-            sl_node_attr = list_node_attr[reg_s, reg_e]
+            sl_node_attr = list_node_attr[reg_s:reg_e]
         g_idx += 1
         g_len = len(sl_node_labels)
         # Graph indicators.
@@ -445,125 +445,8 @@ def get_whole_site_scores(top_pos_list, args,
     scores = get_scores(loader, device, model,
                         min_max_norm=True)
     assert scores, "scores list empty"
+    assert len(top_pos_list) == len(scores), "length scores != length top_pos_list"
     return scores
-
-
-################################################################################
-
-def create_pyg_dataset(save_dataset_name=None,
-                       x=None,
-                       list_node_labels=None,
-                       dataset_folder=None):
-    """
-    Store single graph (list of node lables + optionall list of node
-    attributes) in PyG format on HD.
-    """
-
-    raw_folder = dataset_folder + "/raw"
-    processed_folder = dataset_folder + "/processed"
-    if os.path.exists(dataset_folder):
-        shutil.rmtree(dataset_folder)
-        os.makedirs(dataset_folder)
-        os.makedirs(raw_folder)
-        os.makedirs(processed_folder)
-    else:
-        os.makedirs(dataset_folder)
-        os.makedirs(raw_folder)
-        os.makedirs(processed_folder)
-
-
-
-
-
-
-
-
-
-    list_graph_indicators = []
-    list_all_edges = []
-    list_all_node_labels = []
-    list_all_node_attributes = []
-    n_idx = 1
-
-    list_graph_indicators = [1]*len(list_node_labels)
-
-
-all_graph_indicators.extend([g_idx+1]*n_nodes)
-
-all_nodes_labels.append(dict_label_idx[new_c])
-
-                # Join elements separate by , to string and append to list.
-                all_nodes_attributes.append(",".join(node_attribute))
-
-            # Add backbone edge.
-            if g_i > 0:
-                all_edges.append((g_i-1+n_idx, g_i+n_idx))
-                all_edges.append((g_i+n_idx, g_i-1+n_idx))
-            # Increment graph node index.
-            g_i += 1
-
-
-
-
-
-
-
-
-    # RAW output files.
-    agi_file = raw_out_folder + "/" + data_id + "_graph_indicator.txt"
-    anl_file = raw_out_folder + "/" + data_id + "_node_labels.txt"
-    ana_file = raw_out_folder + "/" + data_id + "_node_attributes.txt"
-    ae_file = raw_out_folder + "/" + data_id + "_A.txt"
-    # Write to files.
-    f = open(agi_file, 'w')
-    f.writelines([str(e) + "\n" for e in agi])
-    f.close()
-    f = open(anl_file, 'w')
-    f.writelines([str(e) + "\n" for e in anl])
-    f.close()
-    if ana:
-        f = open(ana_file, 'w')
-        f.writelines([s + "\n" for s in ana])
-        f.close()
-    else:
-        if os.path.exists(ana_file):
-            os.remove(ana_file)
-    f = open(ae_file, 'w')
-    f.writelines([str(e[0]) + ", " + str(e[1]) + "\n" for e in ae])
-    f.close()
-
-
-
-    for g_idx in range(len(list_node_labels)-w_size + 1):
-        # graph indicators
-        if x:
-            list_all_node_attributes.extend(x[g_idx:g_idx+w_size])
-        list_all_node_labels.extend(list_node_labels[g_idx:g_idx+w_size])
-        list_graph_indicators.extend([g_idx + 1]*w_size)
-        # edges
-        for n_idx_temp in range(w_size):
-            if n_idx_temp != (w_size - 1):
-                list_all_edges.append((n_idx_temp + n_idx, n_idx_temp + 1 + n_idx))
-                list_all_edges.append((n_idx_temp + 1 + n_idx, n_idx_temp + n_idx))
-        n_idx += w_size
-
-    f = open(raw_folder + "/" + save_dataset_name + "_graph_indicator.txt", 'w')
-    f.writelines([str(e) + "\n" for e in list_graph_indicators])
-    f.close()
-
-    f = open(raw_folder + "/" + save_dataset_name + "_A.txt", 'w')
-    f.writelines([str(e[0]) + ", " + str(e[1]) + "\n" for e in list_all_edges])
-    f.close()
-
-    f = open(raw_folder + "/" + save_dataset_name + "_node_labels.txt", 'w')
-    f.writelines([str(e) + "\n" for e in list_all_node_labels])
-    f.close()
-    if x:
-        f = open(raw_folder + "/" + save_dataset_name + "_node_attributes.txt", 'w')
-        f.writelines([s + "\n" for s in list_all_node_attributes])
-        f.close()
-
-
 
 
 ################################################################################

@@ -1530,16 +1530,14 @@ def main_predict(args):
     model_folder = args.model_in_folder
 
     # Output files.
-    ws_scores_out = out_folder + "/" + "whole_site_scores.txt"
-    score_profiles_out = out_folder + "/" + "profiles.txt"
+    ws_scores_out = out_folder + "/" + "whole_site_scores.out"
+    score_profiles_out = out_folder + "/" + "profiles.out"
     peak_regions_bed = out_folder + "/" + "peak_regions.bed"
-    peak_region_ref_bed = out_folder + "/" + "peak_regions.ref.bed"
+    peak_regions_ref_bed = out_folder + "/" + "peak_regions.ref.bed"
     top_prof_sites_bed = out_folder + "/" + "top_profile_sites.bed"
     top_prof_sites_ref_bed = out_folder + "/" + "top_profile_sites.ref.bed"
     top_prof_sites_merged_bed = out_folder + "/" + "top_profile_sites.merged.bed"
     top_prof_sites_merged_ref_bed = out_folder + "/" + "top_profile_sites.merged.ref.bed"
-
-
 
     # PyG internal data ID, also name of data subfolder.
     data_id = "data"
@@ -1577,7 +1575,7 @@ def main_predict(args):
     # Read in prediction sequences.
     test_fa_in = args.in_folder + "/" + "test.fa"
     assert os.path.exists(test_fa_in), "--in folder does not contain %s"  %(test_fa_in)
-    test_seqs_dic = read_fasta_into_dic(test_fa_in)
+    test_seqs_dic = gp2lib.read_fasta_into_dic(test_fa_in)
     i = 0
     idx2id_dic = {}
     for seq_id, seq in sorted(test_seqs_dic.items()):
@@ -1590,7 +1588,9 @@ def main_predict(args):
     id2e_dic = {}
     id2pol_dic = {}
     test_bed_in = args.in_folder + "/" + "test.bed"
+    only_seq = True
     if os.path.exists(test_bed_in):
+        only_seq = False
         with open(bed_file) as f:
             for line in f:
                 row = line.strip()
@@ -1692,8 +1692,6 @@ select best overlapping site (or two lists, one without best selection, one with
 
         print("CALEB: I have something for you ... ")
 
-
-
         # 1-hot string to nucleotide label.
         hot2l_dic = {'1000': 5,
                      '0100': 6,
@@ -1729,12 +1727,11 @@ select best overlapping site (or two lists, one without best selection, one with
         PEAKROUT = open(peak_regions_ref_bed, "w")
         TOPOUT = open(top_prof_sites_bed, "w")
         TOPROUT = open(top_prof_sites_ref_bed, "w")
-        TOPMROUT = open(top_prof_sites_merged_bed, "w")
-        TOPMROUT = open(top_prof_sites_merged_ref_bed, "w")
         # Peak count.
         peak_i = 0
 
-        print("Compute profile scores ... ")
+        print("Compute profile scores and top sites ... ")
+
         for i,g in enumerate(dataset):
             x = g.x
             x = x.tolist()
@@ -1799,12 +1796,13 @@ select best overlapping site (or two lists, one without best selection, one with
             for i,sc in enumerate(profile_scores):
                 nt = seqs_list[i]
                 pos = i + 1
-                PROFOUT.write(">%i\t%s\t%f\n" %(pos, nt, sc))
+                PROFOUT.write("%i\t%s\t%f\n" %(pos, nt, sc))
 
-            chr_id = id2chr_dic[seq_id]
-            site_pol = id2pol_dic[seq_id]
-            ref_s = id2s_dic[site_id]
-            ref_e = id2e_dic[site_id]
+            if not only_seq:
+                chr_id = id2chr_dic[seq_id]
+                site_pol = id2pol_dic[seq_id]
+                ref_s = id2s_dic[site_id]
+                ref_e = id2e_dic[site_id]
 
             # Output peak regions.
             top_pos_list = []
@@ -1814,12 +1812,13 @@ select best overlapping site (or two lists, one without best selection, one with
                 top_pos = peak_reg[2]
                 top_sc = peak_reg[3]
                 top_pos_list.append(top_pos)
-                new_s, new_e = gp2lib.bed_convert_coords(peak_s, peak_e, ref_s, ref_e, site_pol)
-                new_top_s, new_top_e = gp2lib.bed_convert_coords(top_pos-1, top_pos, ref_s, ref_e, site_pol)
                 peak_i += 1
                 peak_id = "peak_%i" %(peak_i)
-                PEAKOUT.write("%s\t%i\t%i\t%s;%i,%f\t0\t+\n" %(seq_id, peak_s, peak_e, peak_id, top_pos, top_sc))
-                PEAKROUT.write("%s\t%i\t%i\t%s;%i,%f\t0\t%s\n" %(chr_id, new_s, new_e, peak_id, top_pos, top_sc, site_pol))
+                PEAKOUT.write("%s\t%i\t%i\t%s,%i,%f\t0\t+\n" %(seq_id, peak_s, peak_e, peak_id, top_pos, top_sc))
+                if not only_seq:
+                    new_s, new_e = gp2lib.bed_convert_coords(peak_s, peak_e, ref_s, ref_e, site_pol)
+                    new_top_s, new_top_e = gp2lib.bed_convert_coords(top_pos-1, top_pos, ref_s, ref_e, site_pol)
+                    PEAKROUT.write("%s\t%i\t%i\t%s,%i,%f\t0\t%s\n" %(chr_id, new_s, new_e, peak_id, new_top_e, top_sc, site_pol))
 
             # Predict top-scoring sites.
             top_site_scores = model_util.get_whole_site_scores(top_pos_list, args,
@@ -1831,56 +1830,38 @@ select best overlapping site (or two lists, one without best selection, one with
                                               device=device,
                                               batch_size=batch_size,
                                               geometric_folder=out_folder)
-            #
-
-            for top_pos in top_pos_list:
+            # Report top profile sites.
+            for i,top_pos in enumerate(top_pos_list):
+                top_sc = top_site_scores[i]
                 reg_s = top_pos - args.peak_ext - 1
                 reg_e = top_pos + args.peak_ext
                 if reg_e > len(list_node_labels):
                     reg_e = len(list_node_labels)
                 if reg_s < 0:
                     reg_s = 0
-                sl_node_labels = list_node_labels[reg_s, reg_e]
-                sl_node_attr = []
-                if use_node_attr:
-                    sl_node_attr = list_node_attr[reg_s, reg_e]
-                # Predict whole site score.
+                TOPOUT.write("%s\t%i\t%i\t%s,%i\t%f\t+\n" %(seq_id, reg_s, reg_e, seq_id, top_pos, top_sc))
+                if not only_seq:
+                    new_s, new_e = gp2lib.bed_convert_coords(reg_s, reg_e, ref_s, ref_e, site_pol)
+                    new_top_s, new_top_e = gp2lib.bed_convert_coords(top_pos-1, top_pos, ref_s, ref_e, site_pol)
+                    TOPROUT.write("%s\t%i\t%i\t%s,%i\t%f\t+\n" %(chr_id, new_s, new_e, seq_id, new_top_e, top_sc))
 
+        PROFOUT.close()
+        PEAKOUT.close()
+        PEAKROUT.close()
+        TOPOUT.close()
+        TOPROUT.close()
 
-
-        WSOUT.close()
-
-        PROFOUT = open(score_profiles_out, "w")
-        PEAKOUT = open(peak_regions_bed, "w")
-        PEAKROUT = open(peak_regions_ref_bed, "w")
-        TOPOUT = open(top_prof_sites_bed, "w")
-        TOPROUT = open(top_prof_sites_ref_bed, "w")
-        TOPMROUT = open(top_prof_sites_merged_bed, "w")
-        TOPMROUT = open(top_prof_sites_merged_ref_bed, "w")
-
-
-
-    assert len(profile_scores_ll) == len(pos_site_probs), "differing list lengths for profile_scores_ll and pos_site_probs (%i != %i)" %(len(profile_scores_ll), len(pos_site_probs))
-
-    #print("profile_scores_ll[0]:", profile_scores_ll[0])
-    #print("seqs_ll[0]:", seqs_ll[0])
-    #print("eia_ll[0]:", eia_ll[0])
-    #print("pc_ll[0]:", pc_ll[0])
-
-    gi2sc_dic = {}
-    for i, pr in enumerate(pos_site_probs):
-        gi2sc_dic[i] = pr
-
-
-
-
-
-
-
-
-
-
-
+        # Select best sites from overlapping sites.
+        gp2lib.bed_sort_merge_output_top_entries(top_prof_sites_bed, top_prof_sites_merged_bed)
+        if only_seq:
+            if os.path.exists(peak_regions_ref_bed):
+                os.remove(peak_regions_ref_bed)
+            if os.path.exists(top_prof_sites_ref_bed):
+                os.remove(top_prof_sites_ref_bed)
+            if os.path.exists(top_prof_sites_merged_ref_bed):
+                os.remove(top_prof_sites_merged_ref_bed)
+        else:
+            gp2lib.bed_sort_merge_output_top_entries(top_prof_sites_ref_bed, top_prof_sites_merged_ref_bed)
 
 
     """
@@ -1894,7 +1875,13 @@ select best overlapping site (or two lists, one without best selection, one with
         print("Whole site predictions output file:\n%s" %(ws_scores_out))
     if args.mode == 2:
         print("Predicted profiles output file:\n%s" %(score_profiles_out))
-        print("Top-scoring profile sites output .bed:\n%s" %(top_scoring_sites_bed))
+        print("Peak regions .bed:\n%s" %(peak_regions_bed))
+        print("Top-scoring profile sites .bed:\n%s" %(top_prof_sites_bed))
+        print("Top select-best-in-case-of-overlaps profile sites .bed:\n%s" %(top_prof_sites_merged_bed))
+        if not only_seq:
+            print("Peak regions on reference .bed:\n%s" %(peak_region_ref_bed))
+            print("Top-scoring profile sites on reference .bed:\n%s" %(top_prof_sites_ref_bed))
+            print("Top select-best-in-case-of-overlaps profile sites on reference .bed:\n%s" %(top_prof_sites_merged_ref_bed))
     print("")
 
 

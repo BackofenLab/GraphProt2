@@ -677,7 +677,7 @@ def read_ids_into_dic(ids_file,
 
 ################################################################################
 
-bed_convert_coords(reg_s, reg_e, ref_s, ref_e, pol):
+def bed_convert_coords(reg_s, reg_e, ref_s, ref_e, pol):
     """
     Convert BED coordinates derived from a region within a subsequence
     of the reference (chromsome or transcript) to chromosome or
@@ -699,14 +699,14 @@ bed_convert_coords(reg_s, reg_e, ref_s, ref_e, pol):
         chromosomal regions)
 
     >>> bed_convert_coords(10, 20, 1000, 2000, "+")
-    [1010, 1020]
+    (1010, 1020)
     >>> bed_convert_coords(10, 20, 1000, 2000, "-")
-    [1980, 1990]
+    (1980, 1990)
 
     """
     assert pol == "+" or pol == "-", "invalid polarity given"
-    assert reg_s > reg_e, "Invalid BED coordinates given: reg_s <= reg_e"
-    assert ref_s > ref_e, "Invalid BED coordinates given: ref_s <= ref_e"
+    assert reg_s < reg_e, "Invalid BED coordinates given: reg_s >= reg_e"
+    assert ref_s < ref_e, "Invalid BED coordinates given: ref_s >= ref_e"
     new_s = ref_s + reg_s
     new_e = ref_s + reg_e
     if pol == "-":
@@ -2788,9 +2788,9 @@ def bed_sort_merge_output_top_entries(in_bed, out_bed,
             cols = line.strip().split("\t")
             ids = cols[3].split(";")
             best_id = "-"
-            best_sc = 0
+            best_sc = -666666
             if rev_filter:
-                best_sc = 6666666
+                best_sc = 666666
             for site_id in ids:
                 assert site_id in id2sc_dic, "site ID \"%s\" not found in id2sc_dic" % (site_id)
                 site_sc = id2sc_dic[site_id]
