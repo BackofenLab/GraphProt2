@@ -295,8 +295,8 @@ def setup_argument_parser():
                    dest="list_win_sizes",
                    type = int,
                    nargs='+',
-                   default = [7],
-                   help = "Windows size(s) for calculating position-wise scoring profiles. Provide multiple sizes (e.g. --win-size 5 7 9) to compute average profiles (default: 7)")
+                   default = [5, 11],
+                   help = "Windows size(s) for calculating position-wise scoring profiles. Provide multiple sizes (e.g. --win-size 5 7 9) to compute average profiles (default: 5 11)")
     p_pr.add_argument("--peak-ext",
                    dest = "peak_ext",
                    type = int,
@@ -314,7 +314,7 @@ def setup_argument_parser():
                    type = float,
                    metavar='float',
                    default = 0.5,
-                   help = "Minimum profile position score for extracting top-scoring sites (default: 0.5)")
+                   help = "Minimum profile position score for extracting peak regions and top-scoring sites (default: 0.5)")
 
     """
     Training set generation mode.
@@ -752,7 +752,7 @@ def main_train(args):
     #processed_file = geometric_cv_data_path + '/processed/data.pt'
     geometric_cv_data_path = data_out_folder
 
-    print("Loading PyTorch geometric raw data again ... ")
+    print("Load PyG data again ... ")
     print("CALEB: your bad day just got worse ... ")
 
     dataset = TUDataset(geometric_cv_data_path, name=data_id, use_node_attr=use_node_attr)
@@ -1500,10 +1500,6 @@ def main_predict(args):
     1) create pyg dataset from prediction folder, like in model training
     2) Then like in eval, predict on this set, either whole sites, or profiles.
 
-
-    2DO:
-    Store features.out in model training folder too
-
     """
 
     print("Running for you in PREDICT mode ... ")
@@ -1532,6 +1528,18 @@ def main_predict(args):
     if not os.path.exists(out_folder):
         os.makedirs(out_folder)
     model_folder = args.model_in_folder
+
+    # Output files.
+    ws_scores_out = out_folder + "/" + "whole_site_scores.txt"
+    score_profiles_out = out_folder + "/" + "profiles.txt"
+    peak_regions_bed = out_folder + "/" + "peak_regions.bed"
+    peak_region_ref_bed = out_folder + "/" + "peak_regions.ref.bed"
+    top_prof_sites_bed = out_folder + "/" + "top_profile_sites.bed"
+    top_prof_sites_ref_bed = out_folder + "/" + "top_profile_sites.ref.bed"
+    top_prof_sites_merged_bed = out_folder + "/" + "top_profile_sites.merged.bed"
+    top_prof_sites_merged_ref_bed = out_folder + "/" + "top_profile_sites.merged.ref.bed"
+
+
 
     # PyG internal data ID, also name of data subfolder.
     data_id = "data"
@@ -1566,52 +1574,98 @@ def main_predict(args):
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+    # Read in prediction sequences.
+    test_fa_in = args.in_folder + "/" + "test.fa"
+    assert os.path.exists(test_fa_in), "--in folder does not contain %s"  %(test_fa_in)
+    test_seqs_dic = read_fasta_into_dic(test_fa_in)
+    i = 0
+    idx2id_dic = {}
+    for seq_id, seq in sorted(test_seqs_dic.items()):
+        idx2id_dic[i] = seq_id
+        i += 1
+
+    # Read in region information.
+    id2chr_dic = {}
+    id2s_dic = {}
+    id2e_dic = {}
+    id2pol_dic = {}
+    test_bed_in = args.in_folder + "/" + "test.bed"
+    if os.path.exists(test_bed_in):
+        with open(bed_file) as f:
+            for line in f:
+                row = line.strip()
+                cols = line.strip().split("\t")
+                chr_id = cols[0]
+                site_s = int(cols[1])
+                site_e = int(cols[2])
+                site_id = cols[3]
+                site_pol = cols[5]
+                id2chr_dic[site_id] = chr_id
+                id2s_dic[site_id] = site_s
+                id2e_dic[site_id] = site_e
+                id2pol_dic[site_id] = site_pol
+        f.closed
+
+    # Load whole site data and store in PyG format.
+    gp2lib.load_ws_predict_data(args,
+                                data_id=data_id,
+                                add_info_out=True)
+
+    # Use node attributes?
+    use_node_attr = True
+    ana_file = raw_out_folder + "/" + data_id + "_node_attributes.txt"
+    if not os.path.exists(ana_file):
+        use_node_attr = False
+    if not use_node_attr:
+        print("Node attributes disabled ... ")
+
+    geometric_cv_data_path = data_out_folder
+
+    print("Load PyG data again ... ")
+    print("CALEB: your bad day just got worse ... ")
+
+    dataset = TUDataset(geometric_cv_data_path, name=data_id, use_node_attr=use_node_attr)
+    assert len(dataset), "read-in dataset empty"
+    print("# dataset features:  %i" %(dataset.num_features))
+    print("Dataset size:        %i" %(len(dataset)))
+
+    # Load model.
+    print("Load model ... ")
+    model = FunnelGNN(input_dim=dataset.num_features, node_hidden_dim=node_hidden_dim,
+                      fc_hidden_dim=fc_hidden_dim, out_dim=2).to(device)
+    model.load_state_dict(torch.load(model_file))
+
     """
     CASE 1: whole site predictions.
 
-    - load prediction data from graphprot2 predict and store in PyG format.
-    - Run whole site prediction on generated graph data.
+    - Load prediction data from graphprot2 predict and store in PyG format.
+    - Run whole site predictions on generated graph data.
     - Output whole site scores.
 
     """
 
     # Whole site predictions.
     if args.mode == 1:
-        # Load whole site data and store in PyG format.
-        gp2lib.load_ws_predict_data(args,
-                                     data_id=data_id,
-                                     add_info_out=True)
-
-        # Use node attributes?
-        use_node_attr = True
-        ana_file = raw_out_folder + "/" + data_id + "_node_attributes.txt"
-        if not os.path.exists(ana_file):
-            use_node_attr = False
-        if not use_node_attr:
-            print("Node attributes disabled ... ")
-
-        geometric_cv_data_path = data_out_folder
-
-        print("Loading PyTorch geometric raw data again ... ")
-        print("CALEB: your bad day just got worse ... ")
-
-        dataset = TUDataset(geometric_cv_data_path, name=data_id, use_node_attr=use_node_attr)
-        assert len(dataset), "read-in dataset empty"
-        print("# dataset features:  %i" %(dataset.num_features))
-        print("Dataset size:        %i" %(len(dataset)))
 
         #predict_dataset = MyDataset(dataset)
         #predict_loader = DataLoader(predict_dataset, batch_size=batch_size, shuffle=False)
         predict_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
-        # Load model.
-        model = FunnelGNN(input_dim=dataset.num_features, node_hidden_dim=node_hidden_dim,
-                          fc_hidden_dim=fc_hidden_dim, out_dim=2).to(device)
-        model.load_state_dict(torch.load(model_file))
-
         # Get whole site scores.
+        print("Do the whole site predictions ... ")
         ws_scores = model_util.get_scores(predict_loader, device, model,
                                           min_max_norm=True)
+
+        # Checks.
+        assert len(ws_scores) == len(test_seqs_dic), "# test sequences != # whole site scores (%i != %i)" %(len(ws_scores), len(test_seqs_dic))
+        # Output whole site scores.
+        WSOUT = open(ws_scores_out, "w")
+        for i,sc in enumerate(ws_scores):
+            seq_id = idx2id_dic[i]
+            WSOUT.write("%s\t%f\n" %(seq_id, sc))
+
+        WSOUT.close()
+
         # Get site scores.
         #print("Get positive whole site scores (class 1 probabilities) ... ")
         #pos_site_probs = model_util.get_site_probs(predict_loader, device, model)
@@ -1620,17 +1674,228 @@ def main_predict(args):
     """
     CASE 2: profile + peak predictions.
 
-    - predict position-wise scoring profiles using one ore more
+    - predict batch_sizeposition-wise scoring profiles using one ore more
       windows (args.win_size)
     - Extract peaks from profiles, predict on peaks extended by peak_ext
       and con_ext, and report best peaks (choose best scoring in case of
       overlapping peaks)
 
+Profile predictions done already, use code from eval
+Then extract from scoring lists peak regions (above thr).
+Extend them again, make subgraphs, predict scores for these,
+select best overlapping site (or two lists, one without best selection, one with)
+
     """
 
     # Profile and peak predictions.
     if args.mode == 2:
+
         print("CALEB: I have something for you ... ")
+
+
+
+        # 1-hot string to nucleotide label.
+        hot2l_dic = {'1000': 5,
+                     '0100': 6,
+                     '0010': 7,
+                     '0001': 8}
+        hot2nt_dic = {'1000': "A",
+                      '0100': "C",
+                      '0010': "G",
+                      '0001': "U"}
+
+        # Get character counts for sequences.
+        cc_dic = gp2lib.seqs_dic_count_chars(test_seqs_dic)
+        # Currently only allow A,C,G,U for profile predictions.
+        allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1}
+        for nt in allowed_nt_dic:
+            if nt not in cc_dic:
+                assert False, "graphprot2 predict profiles currently only works with uppercase (ACGU) sequences"
+        c_dist_nts = len(cc_dic)
+        assert c_dist_nts == 4, "graphprot2 predict profiles currently only works with uppercase (ACGU) sequences"
+
+        profile_scores_ll = []
+
+        # Max win size.
+        max_w_size = 3
+        for w_size in args.list_win_sizes:
+            if w_size > max_w_size:
+                max_w_size = w_size
+        # For removing len(max_w_extlr) start and end positions of profiles.
+        max_w_extlr = int(max_w_size/2)
+
+        PROFOUT = open(score_profiles_out, "w")
+        PEAKOUT = open(peak_regions_bed, "w")
+        PEAKROUT = open(peak_regions_ref_bed, "w")
+        TOPOUT = open(top_prof_sites_bed, "w")
+        TOPROUT = open(top_prof_sites_ref_bed, "w")
+        TOPMROUT = open(top_prof_sites_merged_bed, "w")
+        TOPMROUT = open(top_prof_sites_merged_ref_bed, "w")
+        # Peak count.
+        peak_i = 0
+
+        print("Compute profile scores ... ")
+        for i,g in enumerate(dataset):
+            x = g.x
+            x = x.tolist()
+            g_l = len(x)
+            # Sequence ID.
+            seq_id = idx2id_dic[i]
+            # List of node attributes.
+            list_node_attr = []
+            # List of node labels.
+            list_node_labels = []
+            # List of nt labels.
+            seqs_list = []
+
+            for v in x:
+                if use_node_attr:
+                    nav = [str(e) for e in v[:-4]]
+                    list_node_attr.append(",".join(nav))
+                # Nucleotides.
+                seq_1h = [int(e) for e in v[-4:]]
+                seq_1h_s = [str(e) for e in seq_1h]
+                seq_1h_s = "".join(seq_1h_s)
+                assert seq_1h_s in hot2l_dic, "seq_1h_s %s not in hot2l_dic" %(seq_1h_s)
+                n_i = hot2l_dic[seq_1h_s]
+                list_node_labels.append(n_i)
+                # Get sequence nucleotides list.
+                nt = hot2nt_dic[seq_1h_s]
+                seqs_list.append(nt)
+
+            # Tickets please.
+            assert list_node_labels, "list_node_labels empty"
+
+            # Skip sequences containing < 4 different nucleotides.
+            if len(set(list_node_labels)) != 4:
+                print("Sequence %s contains < 4 individual nucleotides. Skip this sequence ... " %(seq_id))
+                continue
+
+            # Get position-wise profile scores for graph.
+            profile_scores = model_util.get_scores_profile(dataset_name=data_id,
+                                                    x=list_node_attr,
+                                                    list_node_labels=list_node_labels,
+                                                    list_w_sizes=args.list_win_sizes,
+                                                    use_node_attr=use_node_attr,
+                                                    model=model,
+                                                    device=device,
+                                                    zero_sc_ends=True,
+                                                    batch_size=batch_size,
+                                                    geometric_folder=out_folder)
+
+            # Get peak positions.
+            peak_list = gp2lib.list_extract_peaks(profile_scores,
+                                                  max_merge_dist=0,
+                                                  coords="bed",
+                                                  sc_thr=args.sc_thr)
+
+            # If not peaks found (above --thr score).
+            if not peak_list:
+                print("WARNING: no peaks extracted from sequence %s ... " %(seq_id))
+                continue
+
+            # Output profile.
+            PROFOUT.write(">%s\n" %(seq_id))
+            for i,sc in enumerate(profile_scores):
+                nt = seqs_list[i]
+                pos = i + 1
+                PROFOUT.write(">%i\t%s\t%f\n" %(pos, nt, sc))
+
+            chr_id = id2chr_dic[seq_id]
+            site_pol = id2pol_dic[seq_id]
+            ref_s = id2s_dic[site_id]
+            ref_e = id2e_dic[site_id]
+
+            # Output peak regions.
+            top_pos_list = []
+            for peak_reg in peak_list:
+                peak_s = peak_reg[0]
+                peak_e = peak_reg[1]
+                top_pos = peak_reg[2]
+                top_sc = peak_reg[3]
+                top_pos_list.append(top_pos)
+                new_s, new_e = gp2lib.bed_convert_coords(peak_s, peak_e, ref_s, ref_e, site_pol)
+                new_top_s, new_top_e = gp2lib.bed_convert_coords(top_pos-1, top_pos, ref_s, ref_e, site_pol)
+                peak_i += 1
+                peak_id = "peak_%i" %(peak_i)
+                PEAKOUT.write("%s\t%i\t%i\t%s;%i,%f\t0\t+\n" %(seq_id, peak_s, peak_e, peak_id, top_pos, top_sc))
+                PEAKROUT.write("%s\t%i\t%i\t%s;%i,%f\t0\t%s\n" %(chr_id, new_s, new_e, peak_id, top_pos, top_sc, site_pol))
+
+            # Predict top-scoring sites.
+            top_site_scores = model_util.get_whole_site_scores(top_pos_list, args,
+                                              dataset_name=data_id,
+                                              list_node_attr=list_node_attr,
+                                              list_node_labels=list_node_labels,
+                                              use_node_attr=use_node_attr,
+                                              model=model,
+                                              device=device,
+                                              batch_size=batch_size,
+                                              geometric_folder=out_folder)
+            #
+
+            for top_pos in top_pos_list:
+                reg_s = top_pos - args.peak_ext - 1
+                reg_e = top_pos + args.peak_ext
+                if reg_e > len(list_node_labels):
+                    reg_e = len(list_node_labels)
+                if reg_s < 0:
+                    reg_s = 0
+                sl_node_labels = list_node_labels[reg_s, reg_e]
+                sl_node_attr = []
+                if use_node_attr:
+                    sl_node_attr = list_node_attr[reg_s, reg_e]
+                # Predict whole site score.
+
+
+
+        WSOUT.close()
+
+        PROFOUT = open(score_profiles_out, "w")
+        PEAKOUT = open(peak_regions_bed, "w")
+        PEAKROUT = open(peak_regions_ref_bed, "w")
+        TOPOUT = open(top_prof_sites_bed, "w")
+        TOPROUT = open(top_prof_sites_ref_bed, "w")
+        TOPMROUT = open(top_prof_sites_merged_bed, "w")
+        TOPMROUT = open(top_prof_sites_merged_ref_bed, "w")
+
+
+
+    assert len(profile_scores_ll) == len(pos_site_probs), "differing list lengths for profile_scores_ll and pos_site_probs (%i != %i)" %(len(profile_scores_ll), len(pos_site_probs))
+
+    #print("profile_scores_ll[0]:", profile_scores_ll[0])
+    #print("seqs_ll[0]:", seqs_ll[0])
+    #print("eia_ll[0]:", eia_ll[0])
+    #print("pc_ll[0]:", pc_ll[0])
+
+    gi2sc_dic = {}
+    for i, pr in enumerate(pos_site_probs):
+        gi2sc_dic[i] = pr
+
+
+
+
+
+
+
+
+
+
+
+
+
+    """
+    Output file summary.
+
+    """
+    print("")
+    print("PREDICTION OUTPUT FILES")
+    print("=======================")
+    if args.mode == 1:
+        print("Whole site predictions output file:\n%s" %(ws_scores_out))
+    if args.mode == 2:
+        print("Predicted profiles output file:\n%s" %(score_profiles_out))
+        print("Top-scoring profile sites output .bed:\n%s" %(top_scoring_sites_bed))
+    print("")
 
 
 ################################################################################

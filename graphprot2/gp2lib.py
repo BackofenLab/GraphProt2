@@ -677,6 +677,46 @@ def read_ids_into_dic(ids_file,
 
 ################################################################################
 
+bed_convert_coords(reg_s, reg_e, ref_s, ref_e, pol):
+    """
+    Convert BED coordinates derived from a region within a subsequence
+    of the reference (chromsome or transcript) to chromosome or
+    transcript reference coordinates. Return start + end (BED format)
+    positions.
+
+    reg_s:
+        Region within subsequence start position,
+        with 0 to len(subsequence) coordinates
+    reg_e:
+        Region within subsequence end position,
+        with 0 to len(subsequence) coordinates
+    ref_s:
+        Subsequence start position on reference sequence
+    ref_e:
+        Subsequence end position on reference sequence
+    pol:
+        Polarity on reference (use + for transcripts, + or - for
+        chromosomal regions)
+
+    >>> bed_convert_coords(10, 20, 1000, 2000, "+")
+    [1010, 1020]
+    >>> bed_convert_coords(10, 20, 1000, 2000, "-")
+    [1980, 1990]
+
+    """
+    assert pol == "+" or pol == "-", "invalid polarity given"
+    assert reg_s > reg_e, "Invalid BED coordinates given: reg_s <= reg_e"
+    assert ref_s > ref_e, "Invalid BED coordinates given: ref_s <= ref_e"
+    new_s = ref_s + reg_s
+    new_e = ref_s + reg_e
+    if pol == "-":
+        new_s = ref_e - reg_e
+        new_e = ref_e - reg_s
+    return new_s, new_e
+
+
+################################################################################
+
 def list_extract_peaks(in_list,
                        max_merge_dist=0,
                        coords="list",
@@ -8678,9 +8718,9 @@ def load_ws_predict_data(args,
         CIOUT.write("%s\n" %(ch_info))
     CIOUT.close()
 
-    print("Convert data to PyTorch geometric raw format ... ")
+    print("Convert data to PyG format ... ")
 
-    # Convert data to PyTorch geometric raw format.
+    # Convert data to PyTorch geometric format.
     anl, agi, ae, ana, g_idx, n_idx = generate_geometric_data(test_seqs_dic,
                                                         test_vp_dic,
                                                         pc_con_dic=test_pc_con_dic,
@@ -8696,7 +8736,7 @@ def load_ws_predict_data(args,
                                                         bps_mode=bps_mode,
                                                         plfold_bpp_cutoff=bps_cutoff)
 
-    print("Output PyTorch geometric raw data ... ")
+    print("Store PyG data on HD ... ")
 
     # RAW output files.
     agi_file = raw_out_folder + "/" + data_id + "_graph_indicator.txt"
@@ -8720,7 +8760,8 @@ def load_ws_predict_data(args,
     f = open(ae_file, 'w')
     f.writelines([str(e[0]) + ", " + str(e[1]) + "\n" for e in ae])
     f.close()
-
+    # Return test sequences dic.
+    return test_seqs_dic
 
 ################################################################################
 
@@ -9031,9 +9072,9 @@ def load_geo_training_data(args,
         CIOUT.write("%s\n" %(ch_info))
     CIOUT.close()
 
-    print("Convert data to PyTorch geometric raw format ... ")
+    print("Convert data to PyG format ... ")
 
-    # Convert data to PyTorch geometric raw format.
+    # Convert data to PyTorch geometric format.
     pos_anl, pos_agi, pos_ae, pos_ana, g_idx, n_idx = generate_geometric_data(pos_seqs_dic,
                                                                 pos_vp_dic,
                                                                 pc_con_dic=pos_pc_con_dic,
@@ -9104,7 +9145,7 @@ def load_geo_training_data(args,
     ae = pos_ae + neg_ae # graph edges.
     ana = pos_ana + neg_ana # node attributes.
 
-    print("Output PyTorch geometric raw data ... ")
+    print("Store PyG data on HD ... ")
 
     # RAW output files.
     agi_file = raw_out_folder + "/" + data_id + "_graph_indicator.txt"

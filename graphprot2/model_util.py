@@ -354,15 +354,230 @@ def select_model(args, dataset, train_loader, val_loader, models_folder, device)
 
 ################################################################################
 
+def get_whole_site_scores(top_pos_list, args,
+                          dataset_name=None,
+                          list_node_attr=None,
+                          list_node_labels=None,
+                          use_node_attr=False,
+                          model=None,
+                          device=None,
+                          batch_size=None,
+                          geometric_folder=None):
+    """
+    Extract sites from a list of top positions, and predict whole site
+    scores for sites centered on these positions. Use args.peak_ext and
+    args.con_ext to define sites.
+
+    """
+    # Checks.
+    assert top_pos_list, "given top_pos_list empty"
+    dataset_folder = geometric_folder + "/" + dataset_name
+    save_dataset_name = dataset_name
+    raw_folder = dataset_folder + "/raw"
+    processed_folder = dataset_folder + "/processed"
+    if os.path.exists(dataset_folder):
+        shutil.rmtree(dataset_folder)
+        os.makedirs(dataset_folder)
+        os.makedirs(raw_folder)
+        os.makedirs(processed_folder)
+    else:
+        os.makedirs(dataset_folder)
+        os.makedirs(raw_folder)
+        os.makedirs(processed_folder)
+
+    list_graph_indicators = []
+    list_all_edges = []
+    list_all_node_labels = []
+    list_all_node_attributes = []
+    n_idx = 1
+    g_idx = 0
+
+    # Generate PyG data for top sites.
+    for top_pos in top_pos_list:
+        reg_s = top_pos - args.peak_ext - 1
+        reg_e = top_pos + args.peak_ext
+        if reg_e > len(list_node_labels):
+            reg_e = len(list_node_labels)
+        if reg_s < 0:
+            reg_s = 0
+        sl_node_labels = list_node_labels[reg_s, reg_e]
+        sl_node_attr = []
+        if use_node_attr:
+            sl_node_attr = list_node_attr[reg_s, reg_e]
+        g_idx += 1
+        g_len = len(sl_node_labels)
+        # Graph indicators.
+        list_graph_indicators.extend([g_idx]*g_len)
+        # Nodel labels.
+        list_all_node_labels.extend(sl_node_labels)
+        # Node attributes.
+        if use_node_attr:
+            list_all_node_attributes.extend(sl_node_attr)
+        # Edges.
+        for n_idx_temp in range(g_len):
+            if n_idx_temp != (g_len - 1):
+                list_all_edges.append((n_idx_temp + n_idx, n_idx_temp + 1 + n_idx))
+                list_all_edges.append((n_idx_temp + 1 + n_idx, n_idx_temp + n_idx))
+        n_idx += g_len
+
+    f = open(raw_folder + "/" + save_dataset_name + "_graph_indicator.txt", 'w')
+    f.writelines([str(e) + "\n" for e in list_graph_indicators])
+    f.close()
+
+    f = open(raw_folder + "/" + save_dataset_name + "_A.txt", 'w')
+    f.writelines([str(e[0]) + ", " + str(e[1]) + "\n" for e in list_all_edges])
+    f.close()
+
+    f = open(raw_folder + "/" + save_dataset_name + "_node_labels.txt", 'w')
+    f.writelines([str(e) + "\n" for e in list_all_node_labels])
+    f.close()
+    if use_node_attr:
+        f = open(raw_folder + "/" + save_dataset_name + "_node_attributes.txt", 'w')
+        f.writelines([s + "\n" for s in list_all_node_attributes])
+        f.close()
+
+    # Predict top sites.
+    top_site_scores = []
+    # Read in top sites dataset.
+    dataset = TUDataset(dataset_folder, name=save_dataset_name, use_node_attr=use_node_attr)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    # Score top sites.
+    scores = get_scores(loader, device, model,
+                        min_max_norm=True)
+    assert scores, "scores list empty"
+    return scores
+
+
+################################################################################
+
+def create_pyg_dataset(save_dataset_name=None,
+                       x=None,
+                       list_node_labels=None,
+                       dataset_folder=None):
+    """
+    Store single graph (list of node lables + optionall list of node
+    attributes) in PyG format on HD.
+    """
+
+    raw_folder = dataset_folder + "/raw"
+    processed_folder = dataset_folder + "/processed"
+    if os.path.exists(dataset_folder):
+        shutil.rmtree(dataset_folder)
+        os.makedirs(dataset_folder)
+        os.makedirs(raw_folder)
+        os.makedirs(processed_folder)
+    else:
+        os.makedirs(dataset_folder)
+        os.makedirs(raw_folder)
+        os.makedirs(processed_folder)
+
+
+
+
+
+
+
+
+
+    list_graph_indicators = []
+    list_all_edges = []
+    list_all_node_labels = []
+    list_all_node_attributes = []
+    n_idx = 1
+
+    list_graph_indicators = [1]*len(list_node_labels)
+
+
+all_graph_indicators.extend([g_idx+1]*n_nodes)
+
+all_nodes_labels.append(dict_label_idx[new_c])
+
+                # Join elements separate by , to string and append to list.
+                all_nodes_attributes.append(",".join(node_attribute))
+
+            # Add backbone edge.
+            if g_i > 0:
+                all_edges.append((g_i-1+n_idx, g_i+n_idx))
+                all_edges.append((g_i+n_idx, g_i-1+n_idx))
+            # Increment graph node index.
+            g_i += 1
+
+
+
+
+
+
+
+
+    # RAW output files.
+    agi_file = raw_out_folder + "/" + data_id + "_graph_indicator.txt"
+    anl_file = raw_out_folder + "/" + data_id + "_node_labels.txt"
+    ana_file = raw_out_folder + "/" + data_id + "_node_attributes.txt"
+    ae_file = raw_out_folder + "/" + data_id + "_A.txt"
+    # Write to files.
+    f = open(agi_file, 'w')
+    f.writelines([str(e) + "\n" for e in agi])
+    f.close()
+    f = open(anl_file, 'w')
+    f.writelines([str(e) + "\n" for e in anl])
+    f.close()
+    if ana:
+        f = open(ana_file, 'w')
+        f.writelines([s + "\n" for s in ana])
+        f.close()
+    else:
+        if os.path.exists(ana_file):
+            os.remove(ana_file)
+    f = open(ae_file, 'w')
+    f.writelines([str(e[0]) + ", " + str(e[1]) + "\n" for e in ae])
+    f.close()
+
+
+
+    for g_idx in range(len(list_node_labels)-w_size + 1):
+        # graph indicators
+        if x:
+            list_all_node_attributes.extend(x[g_idx:g_idx+w_size])
+        list_all_node_labels.extend(list_node_labels[g_idx:g_idx+w_size])
+        list_graph_indicators.extend([g_idx + 1]*w_size)
+        # edges
+        for n_idx_temp in range(w_size):
+            if n_idx_temp != (w_size - 1):
+                list_all_edges.append((n_idx_temp + n_idx, n_idx_temp + 1 + n_idx))
+                list_all_edges.append((n_idx_temp + 1 + n_idx, n_idx_temp + n_idx))
+        n_idx += w_size
+
+    f = open(raw_folder + "/" + save_dataset_name + "_graph_indicator.txt", 'w')
+    f.writelines([str(e) + "\n" for e in list_graph_indicators])
+    f.close()
+
+    f = open(raw_folder + "/" + save_dataset_name + "_A.txt", 'w')
+    f.writelines([str(e[0]) + ", " + str(e[1]) + "\n" for e in list_all_edges])
+    f.close()
+
+    f = open(raw_folder + "/" + save_dataset_name + "_node_labels.txt", 'w')
+    f.writelines([str(e) + "\n" for e in list_all_node_labels])
+    f.close()
+    if x:
+        f = open(raw_folder + "/" + save_dataset_name + "_node_attributes.txt", 'w')
+        f.writelines([s + "\n" for s in list_all_node_attributes])
+        f.close()
+
+
+
+
+################################################################################
+
 def get_scores_profile(dataset_name=None,
                        x=None, list_node_labels=None,
                        list_w_sizes=[3, 5, 7],
                        use_node_attr=False,
+                       zero_sc_ends=False,
                        model=None, device=None, batch_size=None,
                        geometric_folder=None):
 
     """
-    Calculate profile scores by outputting subgraphs in PTG raw format,
+    Calculate profile scores by outputting subgraphs in PyG format,
     read in and score them. Return mean profile scores in case of several
     window sizes given, otherwise single window size scores.
 
@@ -384,7 +599,10 @@ def get_scores_profile(dataset_name=None,
         scores = get_scores(loader, device, model,
                             min_max_norm=True)
         # Add scores at end to get full site length scores list.
-        scores = [scores[0]]*int(w_size/2) + scores + [scores[-1]]*int(w_size/2)
+        if zero_sc_ends:
+            scores = [0]*int(w_size/2) + scores + [0]*int(w_size/2)
+        else:
+            scores = [scores[0]]*int(w_size/2) + scores + [scores[-1]]*int(w_size/2)
         all_scores.append(scores)
     scores_mean = list(np.mean(all_scores, axis=0))
     # Return mean scores (if only one win_size equals to win_size scores).

@@ -219,7 +219,7 @@ graphprot2 eval --in test_train_out --out test_eval_out
 To do whole site predictions with the created model, we first generate a prediction dataset:
 
 ```
-graphprot2 gp --in test/test_profile.fa --out test_gp_profile_out
+graphprot2 gp --in test/test_ws.fa --out test_gp_ws_out
 ```
 
 We then predict whole sites (`--mode 1`) by:
