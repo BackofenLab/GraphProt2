@@ -782,8 +782,8 @@ Depending on the executed program mode, various output files are generated:
 - Reports on dataset statistics (.html) for `graphprot2 gt` and `graphprot2 gp`
 - Sequence and additional feature profiles (png, pdf) for `graphprot2 eval`
 - Sequence and additional feature logos (.png, .pdf) for `graphprot2 eval`
-- Whole site predictions (.txt) for `graphprot2 predict`
-- Position-wise scoring profiles and top-scoring sites (.txt) for `graphprot2 predict`
+- Whole site predictions (.out) for `graphprot2 predict`
+- Position-wise scoring profiles (.out), peak regions and top-scoring sites (.bed) for `graphprot2 predict`
 
 
 #### HTML reports
