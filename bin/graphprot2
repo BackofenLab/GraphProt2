@@ -295,8 +295,8 @@ def setup_argument_parser():
                    dest="list_win_sizes",
                    type = int,
                    nargs='+',
-                   default = [5, 11],
-                   help = "Windows size(s) for calculating position-wise scoring profiles. Provide multiple sizes (e.g. --win-size 5 7 9) to compute average profiles (default: 5 11)")
+                   default = [11],
+                   help = "Windows size(s) for calculating position-wise scoring profiles. Provide multiple sizes (e.g. --win-size 5 7 9) to compute average profiles (default: 11)")
     p_pr.add_argument("--peak-ext",
                    dest = "peak_ext",
                    type = int,
@@ -1532,8 +1532,9 @@ def main_predict(args):
     # Output files.
     ws_scores_out = out_folder + "/" + "whole_site_scores.out"
     score_profiles_out = out_folder + "/" + "profiles.out"
-    peak_regions_bed = out_folder + "/" + "peak_regions.bed"
-    peak_regions_ref_bed = out_folder + "/" + "peak_regions.ref.bed"
+    score_profiles2_out = out_folder + "/" + "profiles2.out"
+    peak_regions_bed = out_folder + "/" + "peak_regions.bed" # OK.
+    peak_regions_ref_bed = out_folder + "/" + "peak_regions.ref.bed" # OK.
     top_prof_sites_bed = out_folder + "/" + "top_profile_sites.bed"
     top_prof_sites_ref_bed = out_folder + "/" + "top_profile_sites.ref.bed"
     top_prof_sites_merged_bed = out_folder + "/" + "top_profile_sites.merged.bed"
@@ -1723,6 +1724,7 @@ select best overlapping site (or two lists, one without best selection, one with
         max_w_extlr = int(max_w_size/2)
 
         PROFOUT = open(score_profiles_out, "w")
+        PROF2OUT = open(score_profiles2_out, "w")
         PEAKOUT = open(peak_regions_bed, "w")
         PEAKROUT = open(peak_regions_ref_bed, "w")
         TOPOUT = open(top_prof_sites_bed, "w")
@@ -1798,6 +1800,35 @@ select best overlapping site (or two lists, one without best selection, one with
                 pos = i + 1
                 PROFOUT.write("%i\t%s\t%f\n" %(pos, nt, sc))
 
+            # Predict sliding windows.
+            window_scores = model_util.get_window_scores(args.list_win_sizes,
+                                              dataset_name=data_id,
+                                              list_node_attr=list_node_attr,
+                                              list_node_labels=list_node_labels,
+                                              use_node_attr=use_node_attr,
+                                              model=model,
+                                              device=device,
+                                              batch_size=batch_size,
+                                              geometric_folder=out_folder)
+
+            # Get peak positions.
+            win_peak_list = gp2lib.list_extract_peaks(window_scores,
+                                                      max_merge_dist=0,
+                                                      coords="bed",
+                                                      sc_thr=args.sc_thr)
+
+            # If not peaks found (above --thr score).
+            if not win_peak_list:
+                print("WARNING: no window peaks extracted from sequence %s ... " %(seq_id))
+                continue
+
+            # Output profile.
+            PROF2OUT.write(">%s\n" %(seq_id))
+            for i,sc in enumerate(window_scores):
+                nt = seqs_list[i]
+                pos = i + 1
+                PROF2OUT.write("%i\t%s\t%f\n" %(pos, nt, sc))
+
             if not only_seq:
                 chr_id = id2chr_dic[seq_id]
                 site_pol = id2pol_dic[seq_id]
@@ -1846,6 +1877,7 @@ select best overlapping site (or two lists, one without best selection, one with
                     TOPROUT.write("%s\t%i\t%i\t%s,%i\t%f\t+\n" %(chr_id, new_s, new_e, seq_id, new_top_e, top_sc))
 
         PROFOUT.close()
+        PROF2OUT.close()
         PEAKOUT.close()
         PEAKROUT.close()
         TOPOUT.close()

@@ -354,6 +354,112 @@ def select_model(args, dataset, train_loader, val_loader, models_folder, device)
 
 ################################################################################
 
+def get_window_scores(list_w_sizes,
+                      dataset_name=None,
+                      list_node_attr=None,
+                      list_node_labels=None,
+                      use_node_attr=False,
+                      model=None,
+                      device=None,
+                      batch_size=None,
+                      geometric_folder=None):
+    """
+    Predict whole site scores in a sliding window fashion, starting from
+    first position with pos_ext on one side only, and ending at last position
+    with pos_ext on upstream side. Several window sizes can also be given,
+    resulting in position-wise scores averaged over all window scores at
+    a certain position.
+
+    """
+    # Checks.
+    assert list_w_sizes, "given list_w_sizes empty"
+    dataset_folder = geometric_folder + "/" + dataset_name
+    save_dataset_name = dataset_name
+    raw_folder = dataset_folder + "/raw"
+    processed_folder = dataset_folder + "/processed"
+    if os.path.exists(dataset_folder):
+        shutil.rmtree(dataset_folder)
+        os.makedirs(dataset_folder)
+        os.makedirs(raw_folder)
+        os.makedirs(processed_folder)
+    else:
+        os.makedirs(dataset_folder)
+        os.makedirs(raw_folder)
+        os.makedirs(processed_folder)
+
+    list_graph_indicators = []
+    list_all_edges = []
+    list_all_node_labels = []
+    list_all_node_attributes = []
+    n_idx = 1
+    g_idx = 0
+    g_len = len(list_node_labels)
+    c_w_sizes = len(list_w_sizes)
+
+    for w_size in list_w_sizes:
+        # Extension left / right.
+        extlr = int(w_size/2)
+        # For each position in graph.
+        for i in range(g_len):
+            reg_s = i - extlr
+            reg_e = i + extlr + 1
+            if reg_e > g_len:
+                reg_e = g_len
+            if reg_s < 0:
+                reg_s = 0
+            sl_node_labels = list_node_labels[reg_s:reg_e]
+            sl_node_attr = []
+            if use_node_attr:
+                sl_node_attr = list_node_attr[reg_s:reg_e]
+            g_idx += 1
+            sl_len = len(sl_node_labels)
+            # Graph indicators.
+            list_graph_indicators.extend([g_idx]*sl_len)
+            # Nodel labels.
+            list_all_node_labels.extend(sl_node_labels)
+            # Node attributes.
+            if use_node_attr:
+                list_all_node_attributes.extend(sl_node_attr)
+            # Edges.
+            for n_idx_temp in range(sl_len):
+                if n_idx_temp != (sl_len - 1):
+                    list_all_edges.append((n_idx_temp + n_idx, n_idx_temp + 1 + n_idx))
+                    list_all_edges.append((n_idx_temp + 1 + n_idx, n_idx_temp + n_idx))
+            n_idx += sl_len
+    assert list_graph_indicators, "list_graph_indicators empty"
+
+    f = open(raw_folder + "/" + save_dataset_name + "_graph_indicator.txt", 'w')
+    f.writelines([str(e) + "\n" for e in list_graph_indicators])
+    f.close()
+
+    f = open(raw_folder + "/" + save_dataset_name + "_A.txt", 'w')
+    f.writelines([str(e[0]) + ", " + str(e[1]) + "\n" for e in list_all_edges])
+    f.close()
+
+    f = open(raw_folder + "/" + save_dataset_name + "_node_labels.txt", 'w')
+    f.writelines([str(e) + "\n" for e in list_all_node_labels])
+    f.close()
+    if use_node_attr:
+        f = open(raw_folder + "/" + save_dataset_name + "_node_attributes.txt", 'w')
+        f.writelines([s + "\n" for s in list_all_node_attributes])
+        f.close()
+
+    # Predict top sites.
+    # Read in top sites dataset.
+    dataset = TUDataset(dataset_folder, name=save_dataset_name, use_node_attr=use_node_attr)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    # Score top sites.
+    scores = get_scores(loader, device, model,
+                        min_max_norm=True)
+    assert scores, "scores list empty"
+    assert g_len*c_w_sizes == len(scores), "length scores != length of list of node labels"
+    all_scores = [scores[i:i + g_len] for i in range(0, len(scores), g_len)]
+    scores_mean = list(np.mean(all_scores, axis=0))
+    return scores_mean
+
+
+################################################################################
+
 def get_whole_site_scores(top_pos_list, args,
                           dataset_name=None,
                           list_node_attr=None,
@@ -437,7 +543,6 @@ def get_whole_site_scores(top_pos_list, args,
         f.close()
 
     # Predict top sites.
-    top_site_scores = []
     # Read in top sites dataset.
     dataset = TUDataset(dataset_folder, name=save_dataset_name, use_node_attr=use_node_attr)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
