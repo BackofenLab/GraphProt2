@@ -302,13 +302,7 @@ def setup_argument_parser():
                    type = int,
                    metavar='int',
                    default = 30,
-                   help = "Up- and downstream peak position extension (uppercase characters) for peak scoring and extraction from profiles (default: 30)")
-    p_pr.add_argument("--con-ext",
-                   dest = "con_ext",
-                   type = int,
-                   metavar='int',
-                   default = False,
-                   help = "Up- and downstream peak region extension (lowercase characters) for peak scoring and extraction from profiles (default: false)")
+                   help = "Up- and downstream peak position extension for extracting top-scoring sites from fixed-window profiles (default: 30)")
     p_pr.add_argument("--thr",
                    dest="sc_thr",
                    type = float,
@@ -1503,6 +1497,10 @@ def main_predict(args):
     """
 
     print("Running for you in PREDICT mode ... ")
+    if args.mode == 1:
+        print("Predicting whole sites ... ")
+    if args.mode == 2:
+        print("Predicting profiles and top-scoring sites ... ")
 
     assert os.path.isdir(args.in_folder), "--in folder does not exist"
     assert os.path.isdir(args.model_in_folder), "--model-in folder does not exist"
@@ -1557,6 +1555,10 @@ def main_predict(args):
     print("Model training input folder:       %s" %(model_folder))
     print("Prediction set input folder:       %s" %(in_folder))
     print("Prediction results output folder:  %s" %(out_folder))
+    if args.mode == 2:
+        print("Profile window size(s):           ", args.list_win_sizes)
+        print("Top-scoring sites --peak-ext:      %i" %(args.peak_ext))
+
 
     # Output mode settings.
     settings_file = out_folder + "/settings.graphprot2_predict.out"
@@ -1724,7 +1726,6 @@ select best overlapping site (or two lists, one without best selection, one with
         max_w_extlr = int(max_w_size/2)
 
         PROFOUT = open(score_profiles_out, "w")
-        PROF2OUT = open(score_profiles2_out, "w")
         PEAKOUT = open(peak_regions_bed, "w")
         PEAKROUT = open(peak_regions_ref_bed, "w")
         TOPOUT = open(top_prof_sites_bed, "w")
@@ -1764,43 +1765,14 @@ select best overlapping site (or two lists, one without best selection, one with
 
             # Tickets please.
             assert list_node_labels, "list_node_labels empty"
+            len_nodes = len(list_node_labels)
 
             # Skip sequences containing < 4 different nucleotides.
             if len(set(list_node_labels)) != 4:
                 print("Sequence %s contains < 4 individual nucleotides. Skip this sequence ... " %(seq_id))
                 continue
 
-            # Get position-wise profile scores for graph.
-            profile_scores = model_util.get_scores_profile(dataset_name=data_id,
-                                                    x=list_node_attr,
-                                                    list_node_labels=list_node_labels,
-                                                    list_w_sizes=args.list_win_sizes,
-                                                    use_node_attr=use_node_attr,
-                                                    model=model,
-                                                    device=device,
-                                                    zero_sc_ends=True,
-                                                    batch_size=batch_size,
-                                                    geometric_folder=out_folder)
-
-            # Get peak positions.
-            peak_list = gp2lib.list_extract_peaks(profile_scores,
-                                                  max_merge_dist=0,
-                                                  coords="bed",
-                                                  sc_thr=args.sc_thr)
-
-            # If not peaks found (above --thr score).
-            if not peak_list:
-                print("WARNING: no peaks extracted from sequence %s ... " %(seq_id))
-                continue
-
-            # Output profile.
-            PROFOUT.write(">%s\n" %(seq_id))
-            for i,sc in enumerate(profile_scores):
-                nt = seqs_list[i]
-                pos = i + 1
-                PROFOUT.write("%i\t%s\t%f\n" %(pos, nt, sc))
-
-            # Predict sliding windows.
+            # Predict sliding window profiles.
             window_scores = model_util.get_window_scores(args.list_win_sizes,
                                               dataset_name=data_id,
                                               list_node_attr=list_node_attr,
@@ -1810,24 +1782,24 @@ select best overlapping site (or two lists, one without best selection, one with
                                               device=device,
                                               batch_size=batch_size,
                                               geometric_folder=out_folder)
-
-            # Get peak positions.
-            win_peak_list = gp2lib.list_extract_peaks(window_scores,
-                                                      max_merge_dist=0,
-                                                      coords="bed",
-                                                      sc_thr=args.sc_thr)
+            assert len_nodes == len(window_scores), "# nodes != # window scores"
+            # Get peak regions + positions.
+            peak_list = gp2lib.list_extract_peaks(window_scores,
+                                                  max_merge_dist=0,
+                                                  coords="bed",
+                                                  sc_thr=args.sc_thr)
 
             # If not peaks found (above --thr score).
-            if not win_peak_list:
-                print("WARNING: no window peaks extracted from sequence %s ... " %(seq_id))
+            if not peak_list:
+                print("WARNING: no profile peaks extracted from sequence %s ... " %(seq_id))
                 continue
 
             # Output profile.
-            PROF2OUT.write(">%s\n" %(seq_id))
+            PROFOUT.write(">%s\n" %(seq_id))
             for i,sc in enumerate(window_scores):
                 nt = seqs_list[i]
                 pos = i + 1
-                PROF2OUT.write("%i\t%s\t%f\n" %(pos, nt, sc))
+                PROFOUT.write("%i\t%s\t%f\n" %(pos, nt, sc))
 
             if not only_seq:
                 chr_id = id2chr_dic[seq_id]
@@ -1836,13 +1808,11 @@ select best overlapping site (or two lists, one without best selection, one with
                 ref_e = id2e_dic[site_id]
 
             # Output peak regions.
-            top_pos_list = []
             for peak_reg in peak_list:
                 peak_s = peak_reg[0]
                 peak_e = peak_reg[1]
                 top_pos = peak_reg[2]
                 top_sc = peak_reg[3]
-                top_pos_list.append(top_pos)
                 peak_i += 1
                 peak_id = "peak_%i" %(peak_i)
                 PEAKOUT.write("%s\t%i\t%i\t%s,%i,%f\t0\t+\n" %(seq_id, peak_s, peak_e, peak_id, top_pos, top_sc))
@@ -1851,8 +1821,8 @@ select best overlapping site (or two lists, one without best selection, one with
                     new_top_s, new_top_e = gp2lib.bed_convert_coords(top_pos-1, top_pos, ref_s, ref_e, site_pol)
                     PEAKROUT.write("%s\t%i\t%i\t%s,%i,%f\t0\t%s\n" %(chr_id, new_s, new_e, peak_id, new_top_e, top_sc, site_pol))
 
-            # Predict top-scoring sites.
-            top_site_scores = model_util.get_whole_site_scores(top_pos_list, args,
+            # Predict fixed (args.peak_ext) window profiles.
+            fixed_win_scores = model_util.get_window_scores([args.peak_ext],
                                               dataset_name=data_id,
                                               list_node_attr=list_node_attr,
                                               list_node_labels=list_node_labels,
@@ -1861,23 +1831,35 @@ select best overlapping site (or two lists, one without best selection, one with
                                               device=device,
                                               batch_size=batch_size,
                                               geometric_folder=out_folder)
-            # Report top profile sites.
-            for i,top_pos in enumerate(top_pos_list):
-                top_sc = top_site_scores[i]
-                reg_s = top_pos - args.peak_ext - 1
-                reg_e = top_pos + args.peak_ext
-                if reg_e > len(list_node_labels):
-                    reg_e = len(list_node_labels)
-                if reg_s < 0:
-                    reg_s = 0
-                TOPOUT.write("%s\t%i\t%i\t%s,%i\t%f\t+\n" %(seq_id, reg_s, reg_e, seq_id, top_pos, top_sc))
+            assert len_nodes == len(fixed_win_scores), "# nodes != # fixed window scores"
+            # Get peak regions + positions.
+            fixed_win_peak_list = gp2lib.list_extract_peaks(fixed_win_scores,
+                                                  max_merge_dist=0,
+                                                  coords="bed",
+                                                  sc_thr=args.sc_thr)
+
+            # If not peaks found (above --thr score).
+            if not fixed_win_peak_list:
+                print("WARNING: no fixed window (--peak-ext) profile peaks extracted from sequence %s ... " %(seq_id))
+                continue
+
+            # Output peak regions.
+            for peak_reg in fixed_win_peak_list:
+                top_pos = peak_reg[2]
+                top_sc = peak_reg[3]
+                win_s = top_pos - args.peak_ext - 1
+                win_e = top_pos + args.peak_ext
+                if win_e > len_nodes:
+                    win_e = len_nodes
+                if win_s < 0:
+                    win_s = 0
+                TOPOUT.write("%s\t%i\t%i\t%s,%i\t%f\t+\n" %(seq_id, win_s, win_e, seq_id, top_pos, top_sc))
                 if not only_seq:
-                    new_s, new_e = gp2lib.bed_convert_coords(reg_s, reg_e, ref_s, ref_e, site_pol)
+                    new_s, new_e = gp2lib.bed_convert_coords(win_s, win_e, ref_s, ref_e, site_pol)
                     new_top_s, new_top_e = gp2lib.bed_convert_coords(top_pos-1, top_pos, ref_s, ref_e, site_pol)
                     TOPROUT.write("%s\t%i\t%i\t%s,%i\t%f\t+\n" %(chr_id, new_s, new_e, seq_id, new_top_e, top_sc))
 
         PROFOUT.close()
-        PROF2OUT.close()
         PEAKOUT.close()
         PEAKROUT.close()
         TOPOUT.close()
