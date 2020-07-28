@@ -89,7 +89,7 @@ def setup_argument_parser():
                    dest = "only_seq",
                    default = False,
                    action = "store_true",
-                   help = "Use only sequence feature. By default all features present in --in are used as node attributes (default: false)")
+                   help = "Use only sequence feature. By default all features present in --in are used as node attributes (default: False)")
     p_trf.add_argument("--use-phastcons",
                    dest = "use_pc_con",
                    default = False,
@@ -128,9 +128,9 @@ def setup_argument_parser():
     p_trf.add_argument("--bps-mode",
                    dest = "bps_mode",
                    type = int,
-                   default = 2,
-                   choices = [1,2,3],
-                   help="Defines which base pairs are added to the graphs. --bpp-mode 1 : all base pairs in viewpoint+context. --bpp-mode 2 : base pairs with start or end in viewpoint region. --bpp-mode 3 : only base pairs with start+end in viewpoint (default: 2)")
+                   default = 1,
+                   choices = [1,2],
+                   help="Defines which base pairs are added to the graphs. --bpp-mode 1 : base pairs with start or end in viewpoint region. --bpp-mode 2 : only base pairs with start+end in viewpoint (default: 1)")
     p_trf.add_argument("--bps-prob-cutoff",
                    dest = "bps_cutoff",
                    type = float,
@@ -377,7 +377,7 @@ def setup_argument_parser():
                    dest="rev_filter",
                    default = False,
                    action = "store_true",
-                   help = "Reverse --thr filtering (i.e. the lower the better, e.g. for p-values) (default: false)")
+                   help = "Reverse --thr filtering (i.e. the lower the better, e.g. for p-values) (default: False)")
     p_gt.add_argument("--max-len",
                    dest = "max_len",
                    type = int,
@@ -2017,6 +2017,9 @@ def main_gt(args):
     if gp2lib.fasta_check_fasta_file(args.in_sites):
         # Read in sequences (this also checks for unique headers + converts to RNA).
         pos_seqs_dic = gp2lib.read_fasta_into_dic(args.in_sites)
+        # Get viewpoint region start+end dictionaries.
+        id2vpse_dic = gp2lib.extract_viewpoint_regions_from_fasta(pos_seqs_dic,
+                                                                  get_se_dic=True)
         # If negative sequences are given, no shuffling of positive sequences necessary to produce negatives.
         if args.in_neg_sites:
             assert os.path.exists(args.in_neg_sites), "--neg-in file \"%s\" not found" %(args.in_neg_sites)
@@ -2029,6 +2032,7 @@ def main_gt(args):
             # Shuffle positives to generate negatives.
             neg_seqs_dic = gp2lib.ushuffle_sequences(pos_seqs_dic,
                                                      new_ids=True,
+                                                     id2vpse_dic=id2vpse_dic,
                                                      id_prefix="shuff_neg",
                                                      ushuffle_k=args.shuffle_k)
         # Output processed sequences.
@@ -2075,6 +2079,7 @@ def main_gt(args):
             # Generate report.
             gp2lib.gp2_gt_generate_html_report(pos_seqs_dic, neg_seqs_dic, args.out_folder,
                                                "s", gp2lib_path,
+                                               id2ucr_dic=id2vpse_dic,
                                                plots_subfolder=plots_subfolder,
                                                html_report_out=html_report_out,
                                                pos_str_stats_dic=pos_str_stats_dic,
@@ -3394,6 +3399,8 @@ def main_gp(args):
         # Read in sequences (this also checks for unique headers + converts to RNA).
         print("Processing --in FASTA sequences ... ")
         test_seqs_dic = gp2lib.read_fasta_into_dic(args.in_sites)
+        id2vpse_dic = gp2lib.extract_viewpoint_regions_from_fasta(test_seqs_dic,
+                                                                  get_se_dic=True)
         # Output sequences.
         gp2lib.fasta_output_dic(test_seqs_dic, test_fasta_out)
 
@@ -3433,6 +3440,7 @@ def main_gp(args):
             # Generate report.
             gp2lib.gp2_gp_generate_html_report(test_seqs_dic, args.out_folder,
                                                "s", gp2lib_path,
+                                               id2ucr_dic=id2vpse_dic,
                                                plots_subfolder=plots_subfolder,
                                                html_report_out=html_report_out,
                                                test_str_stats_dic=test_str_stats_dic,

@@ -268,12 +268,18 @@ def extract_viewpoint_regions_from_fasta(seqs_dic,
                                          vp_s_dic=False,
                                          vp_e_dic=False,
                                          center_vp=False,
+                                         get_se_dic=False,
                                          vp_ext=False):
     """
-    Extract viewpoint start end end positions from FASTA dictionary.
+    Extract viewpoint start and end positions from FASTA dictionary.
     Return dictionaries for start+end (1-based indices, key:fasta_id).
     Set center_vp to center the extracted viewpoints, and vp_ext to
     bring all viewpoints to same length 1+2*vp_ext
+
+    get_se_dic:
+        Store viewpoint starts and ends for each ID in dictionary with
+        format: ID -> [start, end], return this dictionary instead of
+        two vp dics.
 
     >>> seqs_dic = {"id1": "acguACGUacgu", "id2": "ACGUacgu"}
     >>> vp_s, vp_e = extract_viewpoint_regions_from_fasta(seqs_dic)
@@ -300,11 +306,15 @@ def extract_viewpoint_regions_from_fasta(seqs_dic,
     True
     >>> vp_e["id2"] == 6
     True
+    >>> extract_viewpoint_regions_from_fasta(seqs_dic, get_se_dic=True)
+    {'id1': [5,8], 'id2': [1,4]}
+
     """
     if not vp_s_dic:
         vp_s_dic = {}
     if not vp_e_dic:
         vp_e_dic = {}
+    id2se_dic = {}
     # Sanity check vp_ext.
     if vp_ext:
         if vp_ext < 0 or vp_ext > 100:
@@ -336,12 +346,19 @@ def extract_viewpoint_regions_from_fasta(seqs_dic,
                 if vp_e > l_seq:
                     vp_e = l_seq
             # Store coordinates in hash.
-            vp_s_dic[seq_id] = vp_s
-            vp_e_dic[seq_id] = vp_e
+            if get_se_dic:
+                id2se_dic[seq_id] = [vp_s, vp_e]
+            else:
+                vp_s_dic[seq_id] = vp_s
+                vp_e_dic[seq_id] = vp_e
         else:
             print ("ERROR: viewpoint extraction failed for \"%s\"" % (seq_id))
             sys.exit()
-    return vp_s_dic, vp_e_dic
+    if get_se_dic:
+        assert id2se_dic, "id2se_dic empty"
+        return id2se_dic
+    else:
+        return vp_s_dic, vp_e_dic
 
 
 ################################################################################
@@ -548,25 +565,17 @@ def read_bpp_into_dic(bpp_file, vp_dic,
     Return dictionary with base pair+probability list for each sequence
     (key: sequence id, value: "bp_start-bp_end,bp_prob").
     bps_mode: define which base pairs get extracted.
-    bps_mode=1 : all bps in extended vp region vp_s-con_ext - vp_e+con_ext
-    bps_mode=2 : bps in extended vp region with start or end in base vp
-    bps_mode=3 : only bps with start+end in base vp
+    bps_mode=1 : bps in extended vp region with start or end in base vp
+    bps_mode=2 : only bps with start+end in base vp
 
     >>> bpp_test = "test_data/test.bpp"
     >>> vp_dic = {"CLIP_01": [150, 250]}
     >>> d = read_bpp_into_dic(bpp_test, vp_dic, con_ext=50, bps_mode=1)
     >>> print(d)
-    {'CLIP_01': ['110-140,0.22', '130-150,0.33', '160-200,0.44', '240-260,0.55', '270-290,0.66']}
+    {'CLIP_01': ['130-150,0.33', '160-200,0.44', '240-260,0.55']}
     >>> d = read_bpp_into_dic(bpp_test, vp_dic, con_ext=50, bps_mode=2)
     >>> print(d)
-    {'CLIP_01': ['130-150,0.33', '160-200,0.44', '240-260,0.55']}
-    >>> d = read_bpp_into_dic(bpp_test, vp_dic, con_ext=50, bps_mode=3)
-    >>> print(d)
     {'CLIP_01': ['160-200,0.44']}
-    >>> bpp_test = "test_data/test2.bpp"
-    >>> d = read_bpp_into_dic(bpp_test, vp_dic, con_ext=50, bps_mode=1)
-    >>> print(d)
-    {}
 
     """
     if not bpp_dic:
@@ -587,16 +596,13 @@ def read_bpp_into_dic(bpp_file, vp_dic,
                 bpp = float(m.group(3))
                 bpp_se = "%s-%s,%s" % (s,e,bpp)
                 if bps_mode == 1:
-                    if s >= (vp_dic[seq_id][0]-con_ext) and e <= (vp_dic[seq_id][1]+con_ext):
-                        bpp_dic[seq_id].append(bpp_se)
-                elif bps_mode == 2:
                     if (s >= (vp_dic[seq_id][0]-con_ext) and (e <= (vp_dic[seq_id][1]) and e >= vp_dic[seq_id][0])) or (e <= (vp_dic[seq_id][1]+con_ext) and (s <= (vp_dic[seq_id][1]) and s >= vp_dic[seq_id][0])):
                         bpp_dic[seq_id].append(bpp_se)
-                elif bps_mode == 3:
+                elif bps_mode == 2:
                     if s >= vp_dic[seq_id][0] and e <= vp_dic[seq_id][1]:
                         bpp_dic[seq_id].append(bpp_se)
                 else:
-                    assert False, "ERROR: invalid bps_mode given (valid values: 1,2,3)"
+                    assert False, "ERROR: invalid bps_mode given (valid values: 1,2)"
     f.closed
     return bpp_dic
 
@@ -5103,6 +5109,7 @@ def random_order_dic_keys_into_list(in_dic):
 
 def ushuffle_sequences(seqs_dic,
                        new_ids=False,
+                       id2vpse_dic=False,
                        id_prefix="CLIP",
                        ushuffle_k=1):
 
@@ -5133,11 +5140,15 @@ def ushuffle_sequences(seqs_dic,
     b'agcgagctgttactat'
 
     new_ids:
-    Assign new IDs to shuffled sequences.
+        Assign new IDs to shuffled sequences.
     id_prefix:
-    Use this ID prefix for the new sequence IDs (if new_ids=True).
+        Use this ID prefix for the new sequence IDs (if new_ids=True).
     ushuffle_k:
-    Supply ushuffle_k for k-nucleotide shuffling.
+        Supply ushuffle_k for k-nucleotide shuffling.
+    id2vpse_dic:
+        Dictionary with sequence ID -> [viewpoint_start, viewpoint_end].
+        Use it to restore lowercase uppercase regions for each sequence,
+        after shuffling.
 
     """
     from ushuffle import shuffle
@@ -5146,10 +5157,17 @@ def ushuffle_sequences(seqs_dic,
     c_ids = 0
     for seq_id in seqs_dic:
         seq = seqs_dic[seq_id]
+        seq = seq.upper()
+        if id2vpse_dic: # note: 1-based coords inside dic.
+            assert seq_id in id2vpse_dic, "sequence ID %s not in id2vpse_dic" %(seq_id)
+            vp_s = id2vpse_dic[seq_id][0]
+            vp_e = id2vpse_dic[seq_id][1]
         c_ids += 1
         new_id = seq_id
         if new_ids:
             new_id = id_prefix + "_" + str(c_ids)
+            if id2vpse_dic:
+                id2vpse_dic[new_id] = [vp_s, vp_e]
         if len(seq) < 3:
             new_seqs_dic[new_id] = seq
         else:
@@ -5157,7 +5175,11 @@ def ushuffle_sequences(seqs_dic,
             seq_bo = seq.encode('ASCII')
             shuff_seq_bo = shuffle(seq_bo, ushuffle_k)
             shuff_seq = shuff_seq_bo.decode('ASCII')
-            new_seqs_dic[new_id] = shuff_seq
+            # Restore lowercase uppercase structure of original positive sequence.
+            if id2vpse_dic:
+                new_seqs_dic[new_id] = add_lowercase_context_to_sequences(shuff_seq, vp_s, vp_e)
+            else:
+                new_seqs_dic[new_id] = shuff_seq
     assert new_seqs_dic, "generated new_seqs_dic dictionary empty?"
     return new_seqs_dic
 
@@ -8613,7 +8635,7 @@ def load_ws_predict_data(args,
                     con_ext = int(cols[1])
         f.closed
     # Get base pair settings.
-    bps_mode = 2
+    bps_mode = 1
     bps_cutoff = 0.5
     train_settings_file = args.model_in_folder + "/settings.graphprot2_train.out"
     if os.path.exists(train_settings_file):
@@ -9357,19 +9379,15 @@ def generate_geometric_data(seqs_dic, vp_dic,
                 if bpp_value < plfold_bpp_cutoff: continue
                 # Add edge if bpp value >= threshold.
                 if bps_mode == 1:
-                    if p1 >= ex_s and p2 <= ex_e:
-                        all_edges.append((g_p1+n_idx, g_p2+n_idx))
-                        all_edges.append((g_p2+n_idx, g_p1+n_idx))
-                elif bps_mode == 2:
                     if (p1 >= ex_s and p2 <= vp_e and p2 >= vp_s) or (p2 <= ex_e and p1 <= vp_e and p1 >= vp_s):
                         all_edges.append((g_p1+n_idx, g_p2+n_idx))
                         all_edges.append((g_p2+n_idx, g_p1+n_idx))
-                elif bps_mode == 3:
+                elif bps_mode == 2:
                     if p1 >= vp_s and p2 <= vp_e:
                         all_edges.append((g_p1+n_idx, g_p2+n_idx))
                         all_edges.append((g_p2+n_idx, g_p1+n_idx))
                 else:
-                    assert False, "ERROR: invalid bps_mode given (valid values: 1,2,3)"
+                    assert False, "ERROR: invalid bps_mode given (valid values: 1,2)"
         n_idx += n_nodes
         # Append graph to list.
         g_idx += 1
