@@ -2362,7 +2362,13 @@ def main_gt(args):
         # Check if scores are there.
         sc2c_dic = gp2lib.bed_get_score_to_count_dic(tmp1_bed)
         # Throw this error in case no col5 scores are present (e.g. each row with score 0).
-        assert len(sc2c_dic) != 1, "removing overlaps by selecting entries with best BED column 5 scores useless since --in BED file contains only one column 5 score. Set --allow-overlaps to skip removal of overlaps or assign column 5 scores to --in BED regions"
+        if len(sc2c_dic) == 1:
+            print("WARNING: --in BED regions all contain the same column 5 score!")
+            print("         To select best sites in case of overlaps, please add")
+            print("            distinct BED column 5 scores to --in BED file.")
+            print("                    Enabling --allow-overlaps ... ")
+            args.allow_overlaps = True
+        #assert len(sc2c_dic) != 1, "removing overlaps by selecting entries with best BED column 5 scores useless since --in BED file contains only one distinct column 5 score. Set --allow-overlaps to skip removal of overlaps or assign column 5 scores to --in BED regions"
         # Merge overlapping sites, selecting best scoring site for each overlap group.
         gp2lib.bed_sort_merge_output_top_entries(tmp1_bed, tmp2_bed,
                                                  rev_filter=args.rev_filter)
@@ -2809,6 +2815,14 @@ def main_gt(args):
                                        id2out_dic=pos_context_seqs_dic)
     gp2lib.bed_write_row_dic_into_file(id2row_neg_dic, neg_bed_out,
                                        id2out_dic=neg_context_seqs_dic)
+    # Delete negative entries not selected for final set.
+    del_ids = []
+    for neg_id in id2row_neg_dic:
+        if neg_id not in neg_context_seqs_dic:
+            del_ids.append(neg_id)
+    for neg_id in del_ids:
+        del id2row_neg_dic[neg_id]
+
     # Report numbers.
     neg_pos_ratio = c_final_neg / c_final_pos
     print("Obtained negatives to positives ratio:  %.3f" %(neg_pos_ratio))
@@ -2959,8 +2973,9 @@ def main_gt(args):
         """
         # Calculate structure features for positives.
         print("Get secondary structure information for positives ... ")
-        gp2lib.calc_ext_str_features(id2row_dic, id2ucr_dic, chr_len_dic,
+        gp2lib.calc_ext_str_features(id2row_dic, chr_len_dic,
                                      pos_bpp_out, pos_str_elem_p_out, args,
+                                     id2ucr_dic=id2ucr_dic,
                                      stats_dic=pos_str_stats_dic,
                                      bp_check_seqs_dic=pos_context_seqs_dic,
                                      tr_regions=transcript_regions,
@@ -2968,16 +2983,14 @@ def main_gt(args):
         # Calculate structure features for negatives.
         if transcript_regions and round_two:
             tr_seqs_dic = neg_tr_seqs_dic
-        print("Get secondary structure information for positives ... ")
-        gp2lib.calc_ext_str_features(id2row_neg_dic, id2ucr_dic, chr_len_dic,
+        print("Get secondary structure information for negatives ... ")
+        gp2lib.calc_ext_str_features(id2row_neg_dic, chr_len_dic,
                                      neg_bpp_out, neg_str_elem_p_out, args,
+                                     id2ucr_dic=id2ucr_dic,
                                      stats_dic=neg_str_stats_dic,
                                      bp_check_seqs_dic=neg_context_seqs_dic,
                                      tr_regions=transcript_regions,
                                      tr_seqs_dic=tr_seqs_dic)
-
-
-    sys.exit()
 
     """
     2) Conservation scores.

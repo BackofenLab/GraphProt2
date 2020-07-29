@@ -11707,8 +11707,9 @@ overlapping with the region.
 
 ################################################################################
 
-def calc_ext_str_features(id2bedrow_dic, id2ucr_dic, chr_len_dic,
+def calc_ext_str_features(id2bedrow_dic, chr_len_dic,
                           out_bpp, out_str, args,
+                          id2ucr_dic=False,
                           stats_dic=None,
                           bp_check_seqs_dic=False,
                           tr_regions=False,
@@ -11734,11 +11735,9 @@ def calc_ext_str_features(id2bedrow_dic, id2ucr_dic, chr_len_dic,
 
     """
     assert id2bedrow_dic, "id2bedrow_dic empty"
-    assert id2ucr_dic, "id2ucr_dic empty"
     assert chr_len_dic, "chr_len_dic empty"
-    assert len(id2bedrow_dic) == len(id2ucr_dic), "length id2bedrow_dic != length id2ucr_dic"
 
-    print("Prepare structure calculations ... ")
+    print("Extend sequences by --plfold-w for structure calculations ... ")
 
     # Store added part lengths on both sides (us, ds).
     id2extlen_dic = {}
@@ -11756,8 +11755,12 @@ def calc_ext_str_features(id2bedrow_dic, id2ucr_dic, chr_len_dic,
         site_sc = cols[4]
         site_pol = cols[5]
         site_len = site_e - site_s
-        vp_s = id2ucr_dic[site_id][0]
-        vp_e = id2ucr_dic[site_id][1]
+        vp_s = 1
+        vp_e = site_len
+        if id2ucr_dic:
+            assert site_id in id2ucr_dic, "site ID %s not in id2ucr_dic" %(site_id)
+            vp_s = id2ucr_dic[site_id][0]
+            vp_e = id2ucr_dic[site_id][1]
         vp_len = vp_e - vp_s + 1
         us_len = vp_s - 1
         ds_len = site_len - vp_e
@@ -11768,13 +11771,28 @@ def calc_ext_str_features(id2bedrow_dic, id2ucr_dic, chr_len_dic,
             ds_site_ext = args.plfold_w - ds_len
         ext_site_s = site_s - us_site_ext
         ext_site_e = site_e + ds_site_ext
+        if site_pol == "-":
+            ext_site_s = site_s - ds_site_ext
+            ext_site_e = site_e + us_site_ext
         seq_len = chr_len_dic[seq_id]
         if ext_site_s < 0:
             us_site_ext = us_site_ext + ext_site_s
+            if site_pol == "-":
+                ds_site_ext = ds_site_ext + ext_site_s
+                if ds_site_ext < 0:
+                    ds_site_ext == 0
+                if us_site_ext < 0:
+                    us_site_ext == 0
             ext_site_s = 0
         if ext_site_e > seq_len:
-            diff = seq_len - ext_site_e
+            diff = ext_site_e - seq_len
             ds_site_ext = ds_site_ext - diff
+            if site_pol == "-":
+                us_site_ext = us_site_ext - diff
+            if ds_site_ext < 0:
+                ds_site_ext == 0
+            if us_site_ext < 0:
+                us_site_ext == 0
             ext_site_e = seq_len
         id2newlen_dic[site_id] = ext_site_e - ext_site_s
         id2extrow_dic[site_id] = "%s\t%i\t%i\t%s\t%s\t%s" %(seq_id, ext_site_s, ext_site_e, site_id, site_sc, site_pol)
@@ -11810,7 +11828,7 @@ def calc_ext_str_features(id2bedrow_dic, id2ucr_dic, chr_len_dic,
         for ref_id in refid_dic:
             assert ref_id in tr_seqs_dic, "reference ID %s not in tr_seqs_dic" %(ref_id)
         # Get extended sequences.
-        seqs_dic = extract_transcript_sequences(bed_dic, seq_dic)
+        seqs_dic = extract_transcript_sequences(id2extrow_dic, tr_seqs_dic)
         # Write sequences to FASTA.
         fasta_output_dic(seqs_dic, tmp_fa)
     else:
@@ -11901,8 +11919,8 @@ def calc_ext_str_features(id2bedrow_dic, id2ucr_dic, chr_len_dic,
     BPPOUT.close()
 
     # Remove tmp files.
-    if os.path.exists(tmp_fa):
-        os.remove(tmp_fa)
+    #if os.path.exists(tmp_fa):
+    #    os.remove(tmp_fa)
     if os.path.exists(tmp_bed):
         os.remove(tmp_bed)
     if os.path.exists(tmp_bpp_out):
@@ -11915,6 +11933,7 @@ def calc_ext_str_features(id2bedrow_dic, id2ucr_dic, chr_len_dic,
 
 def polish_fasta_seqs(in_fa, len_dic,
                       vp_dic=False,
+                      report=False,
                       repl_alphabet=["A","C","G","U"]):
     """
     Read in FASTA sequences, check lengths, and replace N's with
@@ -11934,6 +11953,8 @@ def polish_fasta_seqs(in_fa, len_dic,
         assert len(seq) == len_dic[seq_id], "sequence length != len_dic length (%i != %i)" %(len(seq), len_dic[seq_id])
         new_seq = seq
         if re.search("N", seq):
+            if report:
+                print("WARNING: N nucleotides encountered for sequence ID %s. Apply polishing ... " %(seq_id))
             new_seq = ""
             for c in seq:
                 new_c = c
@@ -11945,7 +11966,7 @@ def polish_fasta_seqs(in_fa, len_dic,
             vp_s = vp_dic[seq_id][0]
             vp_e = vp_dic[seq_id][1]
             new_seq = update_sequence_viewpoint(new_seq, vp_s, vp_e)
-        FAOUT.write(">%s\n%s" %(seq_id,new_seq))
+        FAOUT.write(">%s\n%s\n" %(seq_id,new_seq))
     FAOUT.close()
 
 
