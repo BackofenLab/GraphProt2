@@ -2187,6 +2187,10 @@ def main_gt(args):
         exp_site_length = exp_site_length + 2 * args.con_ext
         if exp_site_length > max_site_length:
             assert False, "use reasonable site extension values (--seq-ext + --con-ext) (<= --max-len)"
+        if args.add_str:
+            assert args.con_ext <= args.plfold_l, "--con-ext needs to be <= --plfold-l"
+    if args.add_str:
+        assert args.plfold_l < args.plfold_w, "--plfold-l must be smaller than --plfold-w"
 
     # Input checks.
     assert os.path.exists(args.in_sites), "--in BED file \"%s\" not found" %(args.in_sites)
@@ -2429,7 +2433,8 @@ def main_gt(args):
     - Read in positive + negative region lengths.
 
     """
-
+    # If requested number of negatives could not be extracted.
+    round_two = False
     if not args.in_neg_sites:
         # Collect masking files and merge them to BED.
         print("Collect regions for masking (== no negatives from these regions) ... ")
@@ -2451,8 +2456,6 @@ def main_gt(args):
         check = gp2lib.bed_generate_random_negatives(shuffle_in_bed, chr_lengths_file, random_negatives_bed,
                                                      incl_bed=regions_with_positives_bed,
                                                      excl_bed=mask_negatives_bed)
-        # If requested number of negatives could not be extracted.
-        round_two = False
         if not check:
             print("# random negatives extracted < # requested. Expand extraction space ... ")
             round_two = True
@@ -2571,8 +2574,12 @@ def main_gt(args):
         gp2lib.bed_extract_sequences_from_2bit(negatives_with_context_bed, neg_tmp_fasta, args.in_2bit,
                                                lc_repeats=args.rep_reg_annot)
         # Read in sequences.
-        pos_context_seqs_dic = gp2lib.read_fasta_into_dic(pos_tmp_fasta)
-        neg_context_seqs_dic = gp2lib.read_fasta_into_dic(neg_tmp_fasta)
+        pos_context_seqs_dic = gp2lib.read_fasta_into_dic(pos_tmp_fasta,
+                                                          skip_data_id="positive",
+                                                          report=2)
+        neg_context_seqs_dic = gp2lib.read_fasta_into_dic(neg_tmp_fasta,
+                                                          skip_data_id="negative",
+                                                          report=2)
 
     # Compare region lengths with sequence lengths, delete mismatches.
     print("Compare extracted sequence lengths to site lengths ... ")
@@ -2932,7 +2939,7 @@ def main_gt(args):
     # Secondary structure stats dictionaries.
 
     if args.add_str:
-
+        """
         # Calculate structure features for positives.
         print("Get secondary structure information for positives ... ")
         gp2lib.calc_str_elem_up_bpp(pos_fasta_out, pos_bpp_out, pos_str_elem_p_out,
@@ -2949,6 +2956,28 @@ def main_gt(args):
                                     plfold_u=args.plfold_u,
                                     plfold_l=args.plfold_l,
                                     plfold_w=args.plfold_w)
+        """
+        # Calculate structure features for positives.
+        print("Get secondary structure information for positives ... ")
+        gp2lib.calc_ext_str_features(id2row_dic, id2ucr_dic, chr_len_dic,
+                                     pos_bpp_out, pos_str_elem_p_out, args,
+                                     stats_dic=pos_str_stats_dic,
+                                     bp_check_seqs_dic=pos_context_seqs_dic,
+                                     tr_regions=transcript_regions,
+                                     tr_seqs_dic=tr_seqs_dic)
+        # Calculate structure features for negatives.
+        if transcript_regions and round_two:
+            tr_seqs_dic = neg_tr_seqs_dic
+        print("Get secondary structure information for positives ... ")
+        gp2lib.calc_ext_str_features(id2row_neg_dic, id2ucr_dic, chr_len_dic,
+                                     neg_bpp_out, neg_str_elem_p_out, args,
+                                     stats_dic=neg_str_stats_dic,
+                                     bp_check_seqs_dic=neg_context_seqs_dic,
+                                     tr_regions=transcript_regions,
+                                     tr_seqs_dic=tr_seqs_dic)
+
+
+    sys.exit()
 
     """
     2) Conservation scores.

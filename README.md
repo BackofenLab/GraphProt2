@@ -647,15 +647,15 @@ GraphProt2 currently supports the following position-wise features which can be 
 |   Feature       | Sequences | Genomic regions | Transcript regions |
 | :--------------: | :--------------: | :--------------: | :--------------: |
 | **structure**    | YES | YES | YES |
-| **conservation scores**    | YES | YES | YES |
-| **exon-intron annotation**    | YES | YES | YES |
-| **transcript region annotation**    | YES | YES | YES |
-| **repeat region annotation**    | YES | YES | YES |
+| **conservation scores**    | NO | YES | YES |
+| **exon-intron annotation**    | NO | YES | NO |
+| **transcript region annotation**    | NO | YES | YES |
+| **repeat region annotation**    | NO | YES | YES |
 
 
 #### Secondary structure information
 
-GraphProt2 can include two kinds of structure information for a given RNA sequence: 1) base pairs and 2) unpaired probabilities for different loop contexts (probabilities for the nucleotide being paired or inside external, hairpin, internal or multi loops). Both are calculated using the ViennaRNA Python 3 API (ViennaRNA 2.4.14) and RNAplfold with its sliding window approach, with user-definable parameters (by default these are window size = 150, maximum base pair span length = 100, and probabilities for regions of length u = 3). The base pairs with a probability $\geq$ a set threshold (default = 0.5) are then added to the sequence graph as edges between the nodes that represent the end points of the base pair, and the unpaired probability values are added to the node feature vectors. Alternatively, the user can also provide custom base pair information (`--bp-in` option, for `graphprot2 gt` and `graphprot2 gp`), e.g. derived from experimental data. For more details see mode options `--str`, `--use-bps`, `--use-str-elem-p`, `--bps-mode`, and `--bps-prob-cutoff`.
+GraphProt2 can include two kinds of structure information for a given RNA sequence: 1) base pairs and 2) unpaired probabilities for different loop contexts (probabilities for the nucleotide being paired or inside external, hairpin, internal or multi loops). Both are calculated using the ViennaRNA Python 3 API (ViennaRNA 2.4.14) and RNAplfold with its sliding window approach, with user-definable parameters (by default these are window size = 150, maximum base pair span length = 100, and probabilities for regions of length u = 3). The base pairs with a probability \>= a set threshold (default = 0.5) are then added to the sequence graph as edges between the nodes that represent the end points of the base pair, and the unpaired probability values are added to the node feature vectors. Alternatively, the user can also provide custom base pair information (`--bp-in` option, for `graphprot2 gt` and `graphprot2 gp`), e.g. derived from experimental data. For more details see mode options `--str`, `--use-bps`, `--use-str-elem-p`, `--bps-mode`, and `--bps-prob-cutoff`.
 
 
 #### Conservation scores

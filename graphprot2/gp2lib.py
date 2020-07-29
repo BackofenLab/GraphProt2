@@ -100,6 +100,8 @@ def read_fasta_into_dic(fasta_file,
                         seqs_dic=False,
                         ids_dic=False,
                         dna=False,
+                        report=1,
+                        skip_data_id="set",
                         skip_n_seqs=True):
     """
     Read in FASTA sequences, store in dictionary and return dictionary.
@@ -135,15 +137,26 @@ def read_fasta_into_dic(fasta_file,
                     else:
                         # Convert to RNA, concatenate sequence.
                         seqs_dic[seq_id] += m.group(1).replace("T","U").replace("t","u")
-                # If sequences with N nucleotides should be skipped.
-                if skip_n_seqs:
-                    if "n" in m.group(1) or "N" in m.group(1):
-                        print ("WARNING: sequence with seq_id \"%s\" in file \"%s\" contains N nucleotides. Discarding sequence ... " % (seq_id, fasta_file))
-                        del seqs_dic[seq_id]
-                        continue
     f.closed
     # Check if sequences read in.
     assert seqs_dic, "no sequences read in (input FASTA file \"%s\" empty or mal-formatted?)" %(fasta_file)
+    # If sequences with N nucleotides should be skipped.
+    c_skipped_n_ids = 0
+    if skip_n_seqs:
+        del_ids = []
+        for seq_id in seqs_dic:
+            seq = seqs_dic[seq_id]
+            if re.search("N", seq, re.I):
+                if report == 1:
+                    print ("WARNING: sequence with seq_id \"%s\" in file \"%s\" contains N nucleotides. Discarding sequence ... " % (seq_id, fasta_file))
+                c_skipped_n_ids += 1
+                del_ids.append(seq_id)
+        for seq_id in del_ids:
+            del seqs_dic[seq_id]
+        assert seqs_dic, "no sequences remaining after deleting N containing sequences (input FASTA file \"%s\")" %(fasta_file)
+        if c_skipped_n_ids:
+            if report == 2:
+                print("# of N-containing %s regions discarded:  %i" %(skip_data_id, c_skipped_n_ids))
     return seqs_dic
 
 
@@ -233,7 +246,7 @@ def char_vectorizer(char,
 
 def update_sequence_viewpoint_regions(seqs_dic, vp_s_dic, vp_e_dic):
     """
-    Update sequence viewpoint regions, ie regions marked by vp_s_dic and
+    Update sequence viewpoint regions, i.e. regions marked by vp_s_dic and
     vp_e_dic, converting nucleotides to uppercase.
 
     >>> seqs_dic = {"S1" : "acgtACGTacgt"}
@@ -260,6 +273,31 @@ def update_sequence_viewpoint_regions(seqs_dic, vp_s_dic, vp_e_dic):
         ds_seq = seq[vp_e:].lower()
         # Store new sequence in given dictionary.
         seqs_dic[seq_id] = us_seq + vp_seq + ds_seq
+
+
+################################################################################
+
+def update_sequence_viewpoint(seq, vp_s, vp_e):
+    """
+    Update sequence viewpoint, i.e. region marked by vp_s (start) and vp_e
+    (end), converting viewpoint to uppercase, and rest to lowercase.
+    NOTE that vp_s and vp_e are expected to be 1-based index.
+
+    >>> seq = "acgtACGTacgt"
+    >>> update_sequence_viewpoint(seq, 4, 9)
+    acgTACGTAcgt
+    >>> seq = "acgtacgtACGTac"
+    >>> update_sequence_viewpoint(seq, 5, 16)
+    acgtACGTACGTAC
+
+    """
+    assert seq, "seq empty"
+    assert vp_s <= vp_e, "vp_s > vp_e"
+    us_seq = seq[:vp_s-1].lower()
+    vp_seq = seq[vp_s-1:vp_e].upper()
+    ds_seq = seq[vp_e:].lower()
+    new_seq = us_seq + vp_seq + ds_seq
+    return new_seq
 
 
 ################################################################################
@@ -11665,6 +11703,250 @@ overlapping with the region.
     OUTHTML = open(html_out,"w")
     OUTHTML.write("%s\n" %(md2html))
     OUTHTML.close()
+
+
+################################################################################
+
+def calc_ext_str_features(id2bedrow_dic, id2ucr_dic, chr_len_dic,
+                          out_bpp, out_str, args,
+                          stats_dic=None,
+                          bp_check_seqs_dic=False,
+                          tr_regions=False,
+                          tr_seqs_dic=False):
+    """
+    Calculate structure features (base pairs and structural element
+    probabilities) by using extended sequences, and then prune them to
+    viewpoint + context parts to match remaining feature lists.
+
+    id2bedrow_dic:
+        Site ID to BED region (tab separated)
+    id2ucr_dic:
+        Site ID -> [viewpoint_start, viewpoint_end]
+        1-based coords.
+    chr_len_dic:
+        Reference sequence lengths dictionary.
+    out_bpp:
+        output .bpp.str file.
+    out_str:
+        Output .elem_p.str file.
+    args:
+        Arguments from graphprot2 gt / gp.
+
+    """
+    assert id2bedrow_dic, "id2bedrow_dic empty"
+    assert id2ucr_dic, "id2ucr_dic empty"
+    assert chr_len_dic, "chr_len_dic empty"
+    assert len(id2bedrow_dic) == len(id2ucr_dic), "length id2bedrow_dic != length id2ucr_dic"
+
+    print("Prepare structure calculations ... ")
+
+    # Store added part lengths on both sides (us, ds).
+    id2extlen_dic = {}
+    id2newvp_dic = {}
+    id2extrow_dic = {}
+    refid_dic = {}
+    id2newlen_dic = {} # new extended site lengths.
+    for site_id in id2bedrow_dic:
+        cols = id2bedrow_dic[site_id].split("\t")
+        seq_id = cols[0]
+        assert seq_id in chr_len_dic, "sequence ID %s not in chr_len_dic" %(seq_id)
+        site_s = int(cols[1])
+        site_e = int(cols[2])
+        site_id = cols[3]
+        site_sc = cols[4]
+        site_pol = cols[5]
+        site_len = site_e - site_s
+        vp_s = id2ucr_dic[site_id][0]
+        vp_e = id2ucr_dic[site_id][1]
+        vp_len = vp_e - vp_s + 1
+        us_len = vp_s - 1
+        ds_len = site_len - vp_e
+        us_site_ext = args.plfold_w
+        ds_site_ext = args.plfold_w
+        if args.con_ext:
+            us_site_ext = args.plfold_w - us_len
+            ds_site_ext = args.plfold_w - ds_len
+        ext_site_s = site_s - us_site_ext
+        ext_site_e = site_e + ds_site_ext
+        seq_len = chr_len_dic[seq_id]
+        if ext_site_s < 0:
+            us_site_ext = us_site_ext + ext_site_s
+            ext_site_s = 0
+        if ext_site_e > seq_len:
+            diff = seq_len - ext_site_e
+            ds_site_ext = ds_site_ext - diff
+            ext_site_e = seq_len
+        id2newlen_dic[site_id] = ext_site_e - ext_site_s
+        id2extrow_dic[site_id] = "%s\t%i\t%i\t%s\t%s\t%s" %(seq_id, ext_site_s, ext_site_e, site_id, site_sc, site_pol)
+        # Plus strand.
+        new_vp_s = vp_s + us_site_ext
+        new_vp_e = vp_e + us_site_ext
+        id2extlen_dic[site_id] = [us_site_ext, ds_site_ext]
+        if site_pol == "-":
+            # Minus strand.
+            new_vp_s = vp_s + ds_site_ext
+            new_vp_e = vp_e + ds_site_ext
+            id2extlen_dic[site_id] = [ds_site_ext, us_site_ext]
+        refid_dic[seq_id] = 1
+        id2newvp_dic[site_id] = [new_vp_s, new_vp_e]
+
+    # Checks.
+    assert id2extrow_dic, "id2extrow_dic empty"
+
+    # tmp files.
+    random_id = uuid.uuid1()
+    tmp_fa = str(random_id) + ".tmp.fa"
+    random_id = uuid.uuid1()
+    tmp_bed = str(random_id) + ".tmp.bed"
+    random_id = uuid.uuid1()
+    tmp_bpp_out = str(random_id) + ".tmp.bpp.str"
+    random_id = uuid.uuid1()
+    tmp_elem_p_out = str(random_id) + ".tmp.elem_p.str"
+
+    # If transcript regions.
+    if tr_regions:
+        # Checks.
+        assert tr_seqs_dic, "tr_seqs_dic empty"
+        for ref_id in refid_dic:
+            assert ref_id in tr_seqs_dic, "reference ID %s not in tr_seqs_dic" %(ref_id)
+        # Get extended sequences.
+        seqs_dic = extract_transcript_sequences(bed_dic, seq_dic)
+        # Write sequences to FASTA.
+        fasta_output_dic(seqs_dic, tmp_fa)
+    else:
+        # Genomic regions.
+        bed_write_row_dic_into_file(id2extrow_dic, tmp_bed)
+        # Extract sequences.
+        bed_extract_sequences_from_2bit(tmp_bed, tmp_fa, args.in_2bit)
+
+    # Check extracted sequences, replace N's with random nucleotides.
+    polish_fasta_seqs(tmp_fa, id2newlen_dic,
+                      vp_dic=id2newvp_dic)
+    calc_str_elem_up_bpp(tmp_fa, tmp_bpp_out, tmp_elem_p_out,
+                                stats_dic=stats_dic,
+                                id2ucr_dic=id2newvp_dic,
+                                plfold_u=args.plfold_u,
+                                plfold_l=args.plfold_l,
+                                plfold_w=args.plfold_w)
+
+    print("Post-process structure files ... ")
+
+    # Refine elem_p.str.
+    str_elem_p_dic = read_str_elem_p_into_dic(tmp_elem_p_out,
+                                              p_to_str=True)
+    assert str_elem_p_dic, "str_elem_p_dic empty"
+    SEPOUT = open(out_str,"w")
+    for site_id in str_elem_p_dic:
+        us_ext = id2extlen_dic[site_id][0]
+        ds_ext = id2extlen_dic[site_id][1]
+        # Checks.
+        len_ll = len(str_elem_p_dic[site_id])
+        total_ext = us_ext + ds_ext
+        assert len_ll > total_ext, "len_ll <= total_ext for site ID %s" %(site_id)
+        new_ll = str_elem_p_dic[site_id][us_ext:-ds_ext]
+        SEPOUT.write(">%s\n" %(site_id))
+        for l in new_ll:
+            s = "\t".join(l)
+            SEPOUT.write("%s\n" %(s))
+    SEPOUT.close()
+
+    # Refine .bpp.str.
+    seq_id = ""
+    us_ext = 0
+    ds_ext = 0
+    max_len = 0
+
+    # Pairing rules for sanity checking new base pair coords.
+    bp_nts_dic = {
+        "A" : ["U"],
+        "C" : ["G"],
+        "G" : ["C","U"],
+        "U" : ["A","G"]
+    }
+
+    BPPOUT = open(out_bpp,"w")
+    with open(tmp_bpp_out) as f:
+        for line in f:
+            if re.search(">.+", line):
+                m = re.search(">(.+)", line)
+                seq_id = m.group(1)
+                us_ext = id2extlen_dic[seq_id][0]
+                ds_ext = id2extlen_dic[seq_id][1]
+                # Original length.
+                max_len = id2newlen_dic[seq_id] - us_ext - ds_ext
+                BPPOUT.write(">%s\n" %(seq_id))
+            else:
+                m = re.search("(\d+)\t(\d+)\t(.+)", line)
+                s = int(m.group(1))
+                e = int(m.group(2))
+                bpp = m.group(3)
+                new_s = s - us_ext
+                new_e = e - us_ext
+                # Filter.
+                if new_s < 1:
+                    continue
+                if new_e < 1:
+                    continue
+                if new_s > max_len:
+                    continue
+                if new_e > max_len:
+                    continue
+                if bp_check_seqs_dic:
+                    seq = bp_check_seqs_dic[seq_id].upper()
+                    nt1 = seq[new_s-1]
+                    nt2 = seq[new_e-1]
+                    nt2_list = bp_nts_dic[nt1]
+                    assert nt2 in nt2_list, "invalid base pair coordinates encountered for site ID %s (%s cannot pair with %s)" %(seq_id, nt1, nt2)
+                BPPOUT.write("%i\t%i\t%s\n" %(new_s, new_e, bpp))
+    BPPOUT.close()
+
+    # Remove tmp files.
+    if os.path.exists(tmp_fa):
+        os.remove(tmp_fa)
+    if os.path.exists(tmp_bed):
+        os.remove(tmp_bed)
+    if os.path.exists(tmp_bpp_out):
+        os.remove(tmp_bpp_out)
+    if os.path.exists(tmp_elem_p_out):
+        os.remove(tmp_elem_p_out)
+
+
+################################################################################
+
+def polish_fasta_seqs(in_fa, len_dic,
+                      vp_dic=False,
+                      repl_alphabet=["A","C","G","U"]):
+    """
+    Read in FASTA sequences, check lengths, and replace N's with
+    nucleotide characters from repl_alphabet. Overwrite original in_fa
+    with polished content.
+
+    """
+    import random
+    assert len_dic, "len_dic empty"
+    # Read in FASTA.
+    seqs_dic = read_fasta_into_dic(in_fa)
+    assert len(seqs_dic) == len(len_dic), "len(seqs_dic) != len(len_dic)"
+    FAOUT = open(in_fa,"w")
+    for seq_id in seqs_dic:
+        seq = seqs_dic[seq_id].upper()
+        assert seq_id in len_dic, "sequence ID %s not in seqs_dic" %(seq_id)
+        assert len(seq) == len_dic[seq_id], "sequence length != len_dic length (%i != %i)" %(len(seq), len_dic[seq_id])
+        new_seq = seq
+        if re.search("N", seq):
+            new_seq = ""
+            for c in seq:
+                new_c = c
+                if c == "N":
+                    new_c = random.choice(repl_alphabet)
+                new_seq += new_c
+        if vp_dic:
+            assert seq_id in vp_dic, "sequence ID %s not in vp_dic" %(seq_id)
+            vp_s = vp_dic[seq_id][0]
+            vp_e = vp_dic[seq_id][1]
+            new_seq = update_sequence_viewpoint(new_seq, vp_s, vp_e)
+        FAOUT.write(">%s\n%s" %(seq_id,new_seq))
+    FAOUT.close()
 
 
 ################################################################################
