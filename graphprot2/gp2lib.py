@@ -10593,7 +10593,7 @@ def process_custom_bp_file(bpp_file, bpp_out, seq_dic,
                     seq_id_max_dic[seq_id] = e
                 bpp_dic[seq_id].append([s, e, bpp])
     f.closed
-    assert bpp_dic, "no base pairs read in from --bp-in"
+    assert bpp_diload_geo_training_datac, "no base pairs read in from --bp-in"
     # Pairing rules.
     bp_nts_dic = {
         "A" : ["U"],
@@ -10619,6 +10619,7 @@ def process_custom_bp_file(bpp_file, bpp_out, seq_dic,
         assert min_s >= 1, "--bp-in ID \"%s\" minimum start index < 1"
         assert max_e <= seq_l, "--bp-in ID \"%s\" maximum end index > --in sequence length (%i > %i)" %(max_e, seq_l)
         # Check for valid base pairs.
+        seq = seq.upper()
         seq_list = list(seq)
         for row in bpp_dic[seq_id]:
             s = row[0] - 1
@@ -11224,7 +11225,7 @@ def gp2_gp_generate_html_report(test_seqs_dic, out_folder,
     """
     if id2ucr_dic:
         for seq_id in test_seqs_dic:
-            seq = test_seqs_dic[pos_id]
+            seq = test_seqs_dic[seq_id]
             uc_s = id2ucr_dic[seq_id][0]
             uc_e = id2ucr_dic[seq_id][1]
             test_seqs_dic[seq_id] = seq[uc_s-1:uc_e]
@@ -11902,7 +11903,7 @@ def calc_ext_str_features(id2bedrow_dic, chr_len_dic,
                 us_site_ext == 0
             ext_site_e = seq_len
         id2newlen_dic[site_id] = ext_site_e - ext_site_s
-        id2extrow_dic[site_id] = "%s\t%i\t%i\t%s\t%s\t%s" %(seq_id, ext_site_s, ext_site_e, site_id, site_sc, site_pol)
+        id2extrow_dic[site_id] = "%s\t%i\t%i\t%s\t0\t%s" %(seq_id, ext_site_s, ext_site_e, site_id, site_pol)
         # Plus strand.
         new_vp_s = vp_s + us_site_ext
         new_vp_e = vp_e + us_site_ext
@@ -11946,6 +11947,7 @@ def calc_ext_str_features(id2bedrow_dic, chr_len_dic,
 
     # Check extracted sequences, replace N's with random nucleotides.
     polish_fasta_seqs(tmp_fa, id2newlen_dic,
+                      vp_check_seqs_dic=bp_check_seqs_dic,
                       vp_dic=id2newvp_dic)
     calc_str_elem_up_bpp(tmp_fa, tmp_bpp_out, tmp_elem_p_out,
                                 stats_dic=stats_dic,
@@ -12040,6 +12042,7 @@ def calc_ext_str_features(id2bedrow_dic, chr_len_dic,
 
 def polish_fasta_seqs(in_fa, len_dic,
                       vp_dic=False,
+                      vp_check_seqs_dic=False,
                       report=False,
                       repl_alphabet=["A","C","G","U"]):
     """
@@ -12073,8 +12076,34 @@ def polish_fasta_seqs(in_fa, len_dic,
             vp_s = vp_dic[seq_id][0]
             vp_e = vp_dic[seq_id][1]
             new_seq = update_sequence_viewpoint(new_seq, vp_s, vp_e)
+            if vp_check_seqs_dic:
+                assert seq_id in vp_check_seqs_dic, "sequence ID %s not in vp_check_seqs_dic" %(seq_id)
+                vp_seq1 = seq_get_vp_region(new_seq)
+                vp_seq2 = seq_get_vp_region(vp_check_seqs_dic[seq_id])
+                assert vp_seq1, "uppercase sequence region extraction failed for vp_seq1 (ID: %s, seq: %s)" %(seq_id, new_seq)
+                assert vp_seq2, "uppercase sequence region extraction failed for vp_seq2 (ID: %s, seq: %s)" %(seq_id, vp_check_seqs_dic[seq_id])
+                assert vp_seq1 == vp_seq2, "vp_seq1 != vp_seq2 for ID %s (\"%s\" != \"%s\")" %(seq_id, vp_seq1, vp_seq2)
         FAOUT.write(">%s\n%s\n" %(seq_id,new_seq))
     FAOUT.close()
+
+
+################################################################################
+
+def seq_get_vp_region(seq):
+    """
+    Get viewpoint (uppercase region) from a sequence.
+
+    >>> seq = "acguAACCGGacgu"
+    >>> seq_get_vp_region(seq)
+    'AACCGG'
+
+    """
+    assert seq, "seq empty"
+    vp_seq = False
+    m = re.search("[acgun]*([ACGUN]+)", seq)
+    if m:
+        vp_seq = m.group(1)
+    return vp_seq
 
 
 ################################################################################

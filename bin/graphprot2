@@ -115,6 +115,11 @@ def setup_argument_parser():
                    default = False,
                    action = "store_true",
                    help = "Add repeat region annotations. Set --use-x to define which features to add on top of sequence feature (by default all --in features are used)")
+    p_trf.add_argument("--use-context",
+                   dest = "use_context",
+                   default = False,
+                   action = "store_true",
+                   help = "Add lowercase context annotation. Requires graphprot gt --con-ext set to be effective. Set --use-x to define which features to add on top of sequence feature (by default all --in features are used)")
     p_trf.add_argument("--use-str-elem-p",
                    dest = "use_str_elem_p",
                    default = False,
@@ -3800,16 +3805,16 @@ def main_gp(args):
         # Process positive sequences.
         for seq_id in test_seqs_dic:
             assert seq_id in id2pl_dic, "site ID \"%s\" missing in id2pl_dic" %(seq_id)
-            uslc_len = id2pl_dic[pos_id][0]
-            uc_len = id2pl_dic[pos_id][1]
-            dslc_len = id2pl_dic[pos_id][2]
+            uslc_len = id2pl_dic[seq_id][0]
+            uc_len = id2pl_dic[seq_id][1]
+            dslc_len = id2pl_dic[seq_id][2]
             seq = test_seqs_dic[seq_id]
             uc_s = uslc_len + 1
             uc_e = uslc_len + uc_len
             new_seq = gp2lib.add_lowercase_context_to_sequences(seq, uc_s, uc_e,
                                                       convert_to_rna=True)
             test_seqs_dic[seq_id] = new_seq
-            id2ucr_dic[pos_id] = [uc_s, uc_e]
+            id2ucr_dic[seq_id] = [uc_s, uc_e]
 
     # Length statistics for final positives + negatives.
     final_len_list = []
