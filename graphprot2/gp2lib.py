@@ -1594,6 +1594,81 @@ def get_core_id_to_part_counts_dic(ids_dic,
 
 ################################################################################
 
+def bed_core_id_to_part_counts_dic(in_bed):
+    """
+    Get core ID to part count dictionary.
+    E.g. for
+    id1_p1, id1_p2
+    we get:
+    id1 -> 2
+    Works for _p (split region parts) and _e (exon regions) ID extensions.
+
+    >>> test_bed = "test_data/test8.bed"
+    >>> bed_core_id_to_part_counts_dic(test_bed)
+    {'reg1': 1, 'reg2': 2, 'reg3': 1}
+
+    """
+    id2c_dic = {}
+    with open(in_bed) as f:
+        for line in f:
+            row = line.strip()
+            cols = line.strip().split("\t")
+            site_id = cols[3]
+            # Check if site ID is split site ID with _e or _p.
+            if re.search('.+_[pe]\d+$', site_id):
+                m = re.search('(.+)_[pe]\d+$', site_id)
+                core_id = m.group(1)
+                if core_id in id2c_dic:
+                    id2c_dic[core_id] += 1
+                else:
+                    id2c_dic[core_id] = 1
+            else:
+                assert site_id not in id2c_dic, "non-unique site ID \"%s\" in BED file \"%s\"" %(site_id, in_bed)
+                id2c_dic[site_id] = 1
+    f.closed
+    assert id2c_dic, "id2c_dic empty"
+    return id2c_dic
+
+
+################################################################################
+
+def bed_check_for_part_ids(in_bed):
+    """
+    Check for part IDs in given BED file in_bed.
+    E.g. IDs like
+    id1_p1, id1_p2
+    Works for _p (split region parts) and _e (exon regions) ID extensions.
+    Return True if part IDs found, else False.
+
+    >>> test_bed = "test_data/test8.bed"
+    >>> bed_check_for_part_ids(test_bed)
+    True
+
+    """
+    id2c_dic = {}
+    part_ids_found = False
+    with open(in_bed) as f:
+        for line in f:
+            row = line.strip()
+            cols = line.strip().split("\t")
+            site_id = cols[3]
+            if re.search('.+_[pe]\d+$', site_id):
+                m = re.search('(.+)_[pe]\d+$', site_id)
+                core_id = m.group(1)
+                if core_id in id2c_dic:
+                    part_ids_found = True
+                    break
+                else:
+                    id2c_dic[core_id] = 1
+            else:
+                assert site_id not in id2c_dic, "non-unique site ID \"%s\" in BED file \"%s\"" %(site_id, in_bed)
+                id2c_dic[site_id] = 1
+    f.closed
+    return part_ids_found
+
+
+################################################################################
+
 def extract_conservation_scores(in_bed, out_con, con_bw,
                                 stats_dic=None,
                                 id2ucr_dic=False,
@@ -9672,7 +9747,8 @@ def revise_in_sites(in_bed, out_bed,
 
 ################################################################################
 
-def process_test_sites(in_bed, out_bed, chr_len_dic, args,
+def process_test_sites(in_bed, out_bed, chr_len_dic,
+                       id2pl_dic, args,
                        transcript_regions=False,
                        count_dic=None,
                        id_prefix="CLIP"):
@@ -9728,11 +9804,34 @@ def process_test_sites(in_bed, out_bed, chr_len_dic, args,
                 site_pol = "+"
             new_s = site_s
             new_e = site_e
+
             # IDs.
             c_out += 1
             new_site_id = id_prefix + "_" + str(c_out)
             if args.keep_ids:
                 new_site_id = site_id
+
+            # Store future uppercase region length.
+            id2pl_dic[new_site_id] = [0, site_len, 0]
+            # --con-ext lowercase context extension.
+            if args.con_ext:
+                seq_ext_s = new_s
+                seq_ext_e = new_e
+                new_s = new_s - args.con_ext
+                new_e = new_e + args.con_ext
+                # Truncate sites at reference ends.
+                if new_s < 0:
+                    new_s = 0
+                if new_e > chr_len_dic[chr_id]:
+                    new_e = chr_len_dic[chr_id]
+                us_lc_len = seq_ext_s - new_s
+                ds_lc_len = new_e - seq_ext_e
+                id2pl_dic[new_site_id][0] = us_lc_len
+                id2pl_dic[new_site_id][2] = ds_lc_len
+                if site_pol == "-":
+                    id2pl_dic[new_site_id][0] = ds_lc_len
+                    id2pl_dic[new_site_id][2] = us_lc_len
+
             # Check whether score is whole number.
             if not site_sc % 1:
                 site_sc = int(site_sc)
@@ -9759,7 +9858,7 @@ def process_test_sites(in_bed, out_bed, chr_len_dic, args,
 
 def process_in_sites(in_bed, out_bed, chr_len_dic, args,
                      transcript_regions=False,
-                     id2pl_dic=False,
+                     id2pl_dic=None,
                      count_dic=None,
                      id_prefix="CLIP"):
     """
@@ -9780,7 +9879,7 @@ def process_in_sites(in_bed, out_bed, chr_len_dic, args,
     # Filtered output BED file.
     BEDOUT = open(out_bed, "w")
     # Part lengths dictionary.
-    if not id2pl_dic:
+    if id2pl_dic is None:
         id2pl_dic = {}
     # Min length ext.
     min_len_ext = int( (args.min_len - 1) / 2)
@@ -9789,6 +9888,7 @@ def process_in_sites(in_bed, out_bed, chr_len_dic, args,
     c_filt_max_len = 0
     c_filt_ref = 0
     c_filt_thr = 0
+    c_chr_ends = 0
     c_out = 0
     with open(in_bed) as f:
         for line in f:
@@ -9867,19 +9967,11 @@ def process_in_sites(in_bed, out_bed, chr_len_dic, args,
             # Extend.
             new_s = new_s - args.seq_ext
             new_e = new_e + args.seq_ext
-            # Distinguish between transcript and chromosome ends.
-            if transcript_regions:
-                # Truncate sites at transcript ends.
-                if new_s < 0:
-                    new_s = 0
-                if new_e > chr_len_dic[chr_id]:
-                    new_e = chr_len_dic[chr_id]
-            else:
-                # Discard sites at chromosome ends.
-                if new_s < 0:
-                    continue
-                if new_e > chr_len_dic[chr_id]:
-                    continue
+            # Truncate sites at reference ends.
+            if new_s < 0:
+                new_s = 0
+            if new_e > chr_len_dic[chr_id]:
+                new_e = chr_len_dic[chr_id]
             # IDs.
             c_out += 1
             new_site_id = id_prefix + "_" + str(c_out)
@@ -9896,23 +9988,19 @@ def process_in_sites(in_bed, out_bed, chr_len_dic, args,
                     seq_ext_e = new_e
                     new_s = new_s - args.con_ext
                     new_e = new_e + args.con_ext
-                    # Distinguish between transcript and chromosome ends.
-                    if transcript_regions:
-                        # Truncate sites at transcript ends.
-                        if new_s < 0:
-                            new_s = 0
-                        if new_e > chr_len_dic[chr_id]:
-                            new_e = chr_len_dic[chr_id]
-                    else:
-                        # Discard sites at chromosome ends.
-                        if new_s < 0:
-                            continue
-                        if new_e > chr_len_dic[chr_id]:
-                            continue
+                    # Truncate sites at reference ends.
+                    if new_s < 0:
+                        new_s = 0
+                    if new_e > chr_len_dic[chr_id]:
+                        new_e = chr_len_dic[chr_id]
                     us_lc_len = seq_ext_s - new_s
                     ds_lc_len = new_e - seq_ext_e
                     id2pl_dic[new_site_id][0] = us_lc_len
                     id2pl_dic[new_site_id][2] = ds_lc_len
+                    if site_pol == "-":
+                        id2pl_dic[new_site_id][0] = ds_lc_len
+                        id2pl_dic[new_site_id][2] = us_lc_len
+
             # Store site length in list.
             new_site_len = new_e - new_s
             # Check whether score is whole number.
@@ -11045,6 +11133,7 @@ def create_test_set_region_annot_plot(test_ra_dic, out_plot,
 def gp2_gp_generate_html_report(test_seqs_dic, out_folder,
                                 dataset_type, gp2lib_path,
                                 html_report_out=False,
+                                id2ucr_dic=False,
                                 plots_subfolder="plots_graphprot2_gp",
                                 test_str_stats_dic=False,
                                 test_phastcons_stats_dic=False,
@@ -11073,6 +11162,12 @@ def gp2_gp_generate_html_report(test_seqs_dic, out_folder,
         Phastcons scores statistics dictionary
     out_folder:
         graphprot2 gp results output folder, to store report in.
+    id2ucr_dic:
+        Sequence ID to uppercase sequence start + end, with format:
+        sequence_id -> [uppercase_start,uppercase_end]
+        where both positions are 1-based.
+        If given, use only subsequences defined by this dictionary for
+        generating sequence stats.
     rna:
         Set True if input sequences are RNA.
     html_report_out:
@@ -11121,6 +11216,18 @@ def gp2_gp_generate_html_report(test_seqs_dic, out_folder,
     eia_plot_out = plots_out_folder + "/" + eia_plot
     tra_plot_out = plots_out_folder + "/" + tra_plot
     rra_plot_out = plots_out_folder + "/" + rra_plot
+
+    """
+    If only uppercase part of sequences should be used for stats,
+    prune sequence dictionary based on uppercase region start
+    and end info stored in id2ucr_dic.
+    """
+    if id2ucr_dic:
+        for seq_id in test_seqs_dic:
+            seq = test_seqs_dic[pos_id]
+            uc_s = id2ucr_dic[seq_id][0]
+            uc_e = id2ucr_dic[seq_id][1]
+            test_seqs_dic[seq_id] = seq[uc_s-1:uc_e]
 
     print("Generate statistics for HTML report ... ")
 

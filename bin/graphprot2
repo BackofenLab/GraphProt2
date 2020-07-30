@@ -575,6 +575,12 @@ def setup_argument_parser():
                    default = False,
                    action = "store_true",
                    help = "Filter --in sites based on gene coverage (gene annotations from --gtf) (default: False)")
+    p_gp.add_argument("--con-ext",
+                   dest = "con_ext",
+                   type = int,
+                   metavar='int',
+                   default = False,
+                   help = "Up- and downstream context sequence extension of --in sites with lowercase characters for whole site prediction (graphprot predict --mode 2). Best use same --con-ext values in gp+gt+train modes. Note that statistics (--report) are produced only for uppercase sequence parts (default: False)")
     p_gp.add_argument("--report",
                    dest="report",
                    default = False,
@@ -1998,6 +2004,9 @@ def main_gt(args):
     FEATOUT = open(feat_table_out, "w")
     # Sequence feature.
     FEATOUT.write("fa\tC\tA,C,G,U\t-\n")
+    # Custom base pairs check.
+    if args.bp_in:
+        assert args.add_str, "--bp-in requires --str to be set for structure calculation"
 
     """
     CASE 1: sequences provided as input (--in FASTA)
@@ -2058,6 +2067,12 @@ def main_gt(args):
                                         plfold_u=args.plfold_u,
                                         plfold_l=args.plfold_l,
                                         plfold_w=args.plfold_w)
+            # If custom base pair information given.
+            if args.bp_in:
+                # Sanity check, process, and output custom base pair information file.
+                print("--bp-in file supplied. Check, process + overwrite positive base pairs ... ")
+                gp2lib.process_custom_bp_file(args.bp_in, pos_bpp_out, pos_seqs_dic,
+                                              stats_dic=pos_str_stats_dic)
             # Calculate structure features for negatives.
             print("Get secondary structure features for negative set ... ")
             gp2lib.calc_str_elem_up_bpp(neg_fasta_out, neg_bpp_out, neg_str_elem_p_out,
@@ -2980,6 +2995,12 @@ def main_gt(args):
                                      bp_check_seqs_dic=pos_context_seqs_dic,
                                      tr_regions=transcript_regions,
                                      tr_seqs_dic=tr_seqs_dic)
+        # If custom base pair information given.
+        if args.bp_in:
+            # Sanity check, process, and output custom base pair information file.
+            print("--bp-in file supplied. Check, process + overwrite positive base pairs ... ")
+            gp2lib.process_custom_bp_file(args.bp_in, pos_bpp_out, pos_context_seqs_dic,
+                                          stats_dic=pos_str_stats_dic)
         # Calculate structure features for negatives.
         if transcript_regions and round_two:
             tr_seqs_dic = neg_tr_seqs_dic
@@ -3555,6 +3576,11 @@ def main_gp(args):
     if args.exon_intron_n:
         assert args.exon_intron_annot, "--eia-n requires --eia to be effective"
 
+    # Check whether split regions are given and --con-ext.
+    if args.con_ext:
+        if gp2lib.bed_check_for_part_ids(args.in_sites):
+            assert False, "--in BED file column 4 contains part IDs (_e, _p endings, used to merge exons or in general two genomic regions). Please disable --con-ext or change IDs"
+
     # If --in column 4 IDs should be kept, check their uniqueness.
     if args.keep_ids:
         assert gp2lib.bed_check_unique_ids(args.in_sites), "--in BED file \"%s\" column 4 IDs not unique. Disable --keep-ids or provide unique IDs" %(args.in_sites)
@@ -3639,7 +3665,11 @@ def main_gp(args):
 
     # Process --in positives.
     count_stats_dic = {}
-    id2row_dic = gp2lib.process_test_sites(args.in_sites, tmp_bed, chr_len_dic, args,
+    # Lowercase uppercase lowercase part lengths.
+    id2pl_dic = {}
+
+    id2row_dic = gp2lib.process_test_sites(args.in_sites, tmp_bed, chr_len_dic,
+                                           id2pl_dic, args,
                                            transcript_regions=transcript_regions,
                                            count_dic=count_stats_dic,
                                            id_prefix="TEST")
@@ -3762,6 +3792,24 @@ def main_gp(args):
             seq = test_seqs_dic[seq_id]
             test_seqs_rep_lc_dic[seq_id] = seq
             test_seqs_dic[seq_id] = seq.upper()
+
+    # Make sequences lowercase-uppercase-lowercase.
+    id2ucr_dic = {}
+    if args.con_ext:
+        print("Make site sequence context (--con-ext) lowercase ... ")
+        # Process positive sequences.
+        for seq_id in test_seqs_dic:
+            assert seq_id in id2pl_dic, "site ID \"%s\" missing in id2pl_dic" %(seq_id)
+            uslc_len = id2pl_dic[pos_id][0]
+            uc_len = id2pl_dic[pos_id][1]
+            dslc_len = id2pl_dic[pos_id][2]
+            seq = test_seqs_dic[seq_id]
+            uc_s = uslc_len + 1
+            uc_e = uslc_len + uc_len
+            new_seq = gp2lib.add_lowercase_context_to_sequences(seq, uc_s, uc_e,
+                                                      convert_to_rna=True)
+            test_seqs_dic[seq_id] = new_seq
+            id2ucr_dic[pos_id] = [uc_s, uc_e]
 
     # Length statistics for final positives + negatives.
     final_len_list = []
@@ -3891,13 +3939,23 @@ def main_gp(args):
 
     if args.add_str:
 
+        # Calculate structure features for prediction set.
+        #print("Get secondary structure information ... ")
+        #gp2lib.calc_str_elem_up_bpp(test_fasta_out, test_bpp_out, test_str_elem_p_out,
+        #                            stats_dic=test_str_stats_dic,
+        #                            plfold_u=args.plfold_u,
+        #                            plfold_l=args.plfold_l,
+        #                            plfold_w=args.plfold_w)
         # Calculate structure features for positives.
         print("Get secondary structure information ... ")
-        gp2lib.calc_str_elem_up_bpp(test_fasta_out, test_bpp_out, test_str_elem_p_out,
-                                    stats_dic=test_str_stats_dic,
-                                    plfold_u=args.plfold_u,
-                                    plfold_l=args.plfold_l,
-                                    plfold_w=args.plfold_w)
+        gp2lib.calc_ext_str_features(id2row_dic, chr_len_dic,
+                                     test_bpp_out, test_str_elem_p_out, args,
+                                     id2ucr_dic=id2ucr_dic,
+                                     stats_dic=test_str_stats_dic,
+                                     bp_check_seqs_dic=test_seqs_dic,
+                                     tr_regions=transcript_regions,
+                                     tr_seqs_dic=tr_seqs_dic)
+
     # If custom base pair information given.
     if args.bp_in:
         # Sanity check, process, and output custom base pair information file.
@@ -4101,6 +4159,7 @@ def main_gp(args):
         gp2lib.gp2_gp_generate_html_report(test_seqs_dic,
                                            args.out_folder, dataset_type, gp2lib_path,
                                            html_report_out=html_report_out,
+                                           id2ucr_dic=id2ucr_dic,
                                            plots_subfolder=plots_subfolder,
                                            test_str_stats_dic=test_str_stats_dic,
                                            test_phastcons_stats_dic=test_phastcons_stats_dic,
