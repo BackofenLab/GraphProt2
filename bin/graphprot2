@@ -115,11 +115,6 @@ def setup_argument_parser():
                    default = False,
                    action = "store_true",
                    help = "Add repeat region annotations. Set --use-x to define which features to add on top of sequence feature (by default all --in features are used)")
-    p_trf.add_argument("--use-context",
-                   dest = "use_context",
-                   default = False,
-                   action = "store_true",
-                   help = "Add lowercase context annotation. Requires graphprot gt --con-ext set to be effective. Set --use-x to define which features to add on top of sequence feature (by default all --in features are used)")
     p_trf.add_argument("--use-str-elem-p",
                    dest = "use_str_elem_p",
                    default = False,
@@ -142,6 +137,11 @@ def setup_argument_parser():
                    metavar='float',
                    default = 0.5,
                    help = "Base pair probability cutoff for filtering base pairs added to the graph (default: 0.5)")
+    p_trf.add_argument("--uc-context",
+                   dest = "uc_context",
+                   default = False,
+                   action = "store_true",
+                   help = "Convert lowercase context (if present, added by graphprot2 gt --con-ext) to uppercase (default: False)")
 
     # Add advanced model definition arguments group.
     p_tra = p_tr.add_argument_group("model definition arguments")
@@ -982,6 +982,12 @@ def main_eval(args):
     f.closed
     if "use_bps" in gp2_train_param_dic:
         assert gp2_train_param_dic["use_bps"] == "False", "graphprot2 eval currently does not support --use-bps in grahprot2 train"
+    assert "con_ext" in gp2_train_param_dic, "con_ext info tag missing in %s" %(gp2_train_param_file)
+    # Get nucleotide alphabet + con_ext info.
+    con_ext = False
+    con_ext_str = gp2_train_param_dic["con_ext"]
+    if con_ext_str != "False": # if not False, must be INT.
+        con_ext = int(con_ext_str)
 
     # Check for node attributes data.
     use_node_attr = True
@@ -1169,37 +1175,51 @@ def main_eval(args):
     """
     batch_size = 50
     # 1-hot string to nucleotide label.
-    hot2l_dic = {'1000': 5,
-                 '0100': 6,
-                 '0010': 7,
-                 '0001': 8}
+    hot2l_dic = {'1000': 1,
+                 '0100': 2,
+                 '0010': 3,
+                 '0001': 4}
     hot2nt_dic = {'1000': "A",
                   '0100': "C",
                   '0010': "G",
                   '0001': "U"}
+    # If lowercase context model.
+    if con_ext:
+        hot2l_dic = {'10000000': 1,
+                     '01000000': 2,
+                     '00100000': 3,
+                     '00010000': 4,
+                     '00001000': 5,
+                     '00000100': 6,
+                     '00000010': 7,
+                     '00000001': 8}
+        hot2nt_dic = {'10000000': "A",
+                      '01000000': "C",
+                      '00100000': "G",
+                      '00010000': "U",
+                      '00001000': "a",
+                      '00000100': "c",
+                      '00000010': "g",
+                      '00000001': "u"}
 
     # Get character counts for sequences.
     cc_dic = gp2lib.seqs_dic_count_chars(pos_seqs_dic)
-    # Currently only allow A,C,G,U sequence positions do be evaluated.
+    # Check for invalid nucleotides characters.
     allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1}
-    for nt in allowed_nt_dic:
-        if nt not in cc_dic:
-            assert False, "graphprot2 eval currently only works with uppercase (ACGU) sequences"
-    c_dist_nts = len(cc_dic)
-    assert c_dist_nts == 4, "graphprot2 eval currently only works with uppercase (ACGU) sequences"
+    c_nts = 4
+    if con_ext:
+        allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1, 'a': 1, 'c': 1, 'g': 1, 'u': 1}
+        c_nts = 8
+    for nt in cc_dic:
+        if nt not in allowed_nt_dic:
+            assert False, "positive sequences with invalid character \"%s\" encountered (allowed characters: ACGU(acgu)" %(nt)
+    assert len(cc_dic) == c_nts, "# of nucleotide characters in positive set != expected # (%i != %i)" %(len(cc_dic), c_nts)
 
     profile_scores_ll = []
     seqs_ll = []
     eia_ll = []
     pc_ll = []
     pp_ll = []
-    # Max win size.
-    max_w_size = 3
-    for w_size in args.list_win_sizes:
-        if w_size > max_w_size:
-            max_w_size = w_size
-    # For removing len(max_w_extlr) start and end positions of profiles.
-    max_w_extlr = int(max_w_size/2)
 
     print("Compute profile scores ... ")
     for g in pos_graphs:
@@ -1218,7 +1238,7 @@ def main_eval(args):
 
         for v in x:
             if use_node_attr:
-                nav = v[:-4]
+                nav = v[:-c_nts]
                 # Exon intron labels list.
                 if "eia" in featid2ch_dic:
                     for ch in featid2ch_dic["eia"]:
@@ -1234,10 +1254,10 @@ def main_eval(args):
                     pp_list.append(v[v_i])
 
                 # assert len(nav) > c_dist_nts, "invalid number of node attributes (expects > 4, got %i)" %(len(nav))
-                new_nav = [str(e) for e in v[:-4]]
+                new_nav = [str(e) for e in v[:-c_nts]]
                 list_node_attr.append(",".join(new_nav))
 
-            seq_1h = [int(e) for e in v[-4:]]
+            seq_1h = [int(e) for e in v[-c_nts:]]
             seq_1h_s = [str(e) for e in seq_1h]
             seq_1h_s = "".join(seq_1h_s)
             assert seq_1h_s in hot2l_dic, "seq_1h_s %s not in hot2l_dic" %(seq_1h_s)
@@ -1257,31 +1277,32 @@ def main_eval(args):
             if "pp.con" in featid2ch_dic:
                 assert len(list_node_labels) == len(pp_list), "differing list lengths for list_node_labels and pp_list"
 
-        seqs_ll.append(seqs_list[max_w_extlr:-max_w_extlr])
+        seqs_ll.append(seqs_list)
         if eia_list:
-            eia_ll.append(eia_list[max_w_extlr:-max_w_extlr])
+            eia_ll.append(eia_list)
         if pc_list:
-            pc_ll.append(pc_list[max_w_extlr:-max_w_extlr])
+            pc_ll.append(pc_list)
         if pp_list:
-            pp_ll.append(pp_list[max_w_extlr:-max_w_extlr])
+            pp_ll.append(pp_list)
 
         # Skip sequences containing < 4 different nucleotides.
-        if len(set(list_node_labels)) != 4:
-            profile_scores_ll.append([])
-            continue
+        #if len(set(list_node_labels)) != 4:
+        #    profile_scores_ll.append([])
+        #    continue
 
         # Get position-wise profile scores for graph.
-        profile_scores = model_util.get_scores_profile(dataset_name=data_id,
-                                                x=list_node_attr,
-                                                list_node_labels=list_node_labels,
-                                                list_w_sizes=args.list_win_sizes,
-                                                use_node_attr=use_node_attr,
-                                                model=model,
-                                                device=device,
-                                                batch_size=batch_size,
-                                                geometric_folder=out_folder)
+        profile_scores = model_util.get_window_scores(args.list_win_sizes,
+                                          dataset_name=data_id,
+                                          list_node_attr=list_node_attr,
+                                          list_node_labels=list_node_labels,
+                                          use_node_attr=use_node_attr,
+                                          model=model,
+                                          device=device,
+                                          batch_size=batch_size,
+                                          lc_context=con_ext,
+                                          geometric_folder=out_folder)
 
-        profile_scores_ll.append(profile_scores[max_w_extlr:-max_w_extlr])
+        profile_scores_ll.append(profile_scores)
 
 
     assert len(profile_scores_ll) == len(pos_site_probs), "differing list lengths for profile_scores_ll and pos_site_probs (%i != %i)" %(len(profile_scores_ll), len(pos_site_probs))
@@ -2005,13 +2026,12 @@ def main_gt(args):
         SETOUT.write("%s\t%s\n" %(arg, str(getattr(args, arg))))
     SETOUT.close()
 
-    # Write generated feature infos to table.
-    FEATOUT = open(feat_table_out, "w")
-    # Sequence feature.
-    FEATOUT.write("fa\tC\tA,C,G,U\t-\n")
     # Custom base pairs check.
     if args.bp_in:
         assert args.add_str, "--bp-in requires --str to be set for structure calculation"
+
+    # Write generated feature infos to table.
+    FEATOUT = open(feat_table_out, "w")
 
     """
     CASE 1: sequences provided as input (--in FASTA)
@@ -2034,6 +2054,28 @@ def main_gt(args):
         # Get viewpoint region start+end dictionaries.
         id2vpse_dic = gp2lib.extract_viewpoint_regions_from_fasta(pos_seqs_dic,
                                                                   get_se_dic=True)
+        # Looking for lowercase context.
+        lc_context = False
+        for seq_id in id2vpse_dic:
+            seq_l = len(pos_seqs_dic[seq_id])
+            if id2vpse_dic[seq_id][1] != seq_l or id2vpse_dic[seq_id][0] != 1:
+                lc_context = True
+                break
+        # Sequence character counts.
+        seq_cc_dic = seqs_dic_count_chars(pos_seqs_dic)
+        if lc_context:
+            allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1, 'a': 1, 'c': 1, 'g': 1, 'u': 1}
+            for nt in seq_cc_dic:
+                if nt not in allowed_nt_dic:
+                    assert False, "--in sequences contain \"%s\" character (allowed characters: A C G U a c g u)" %(nt)
+            FEATOUT.write("fa\tC\tA,C,G,U,a,c,g,u\t-\n")
+        else:
+            allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1}
+            for nt in seq_cc_dic:
+                if nt not in allowed_nt_dic:
+                    assert False, "--in sequences contain \"%s\" character (allowed characters: A C G U)" %(nt)
+            FEATOUT.write("fa\tC\tA,C,G,U\t-\n")
+
         # If negative sequences are given, no shuffling of positive sequences necessary to produce negatives.
         if args.in_neg_sites:
             assert os.path.exists(args.in_neg_sites), "--neg-in file \"%s\" not found" %(args.in_neg_sites)
@@ -2933,6 +2975,10 @@ def main_gt(args):
         neg_rra_stats_dic = {}
 
     # Store feature infos.
+    if args.con_ext:
+        FEATOUT.write("fa\tC\tA,C,G,U,a,c,g,u\t-\n")
+    else:
+        FEATOUT.write("fa\tC\tA,C,G,U\t-\n")
     if args.add_str:
         FEATOUT.write("bpp.str\tN\tbp_prob\tprob\n")
         FEATOUT.write("elem_p.str\tN\tp_u,p_e,p_h,p_i,p_m,p_s\tprob\n")
@@ -3448,8 +3494,6 @@ def main_gp(args):
 
     # Write generated feature infos to table.
     FEATOUT = open(feat_table_out, "w")
-    # Sequence feature.
-    FEATOUT.write("fa\tC\tA,C,G,U\t-\n")
 
     """
     CASE 1: sequences provided as input (--in FASTA)
@@ -3471,6 +3515,28 @@ def main_gp(args):
                                                                   get_se_dic=True)
         # Output sequences.
         gp2lib.fasta_output_dic(test_seqs_dic, test_fasta_out)
+
+        # Looking for lowercase context.
+        lc_context = False
+        for seq_id in id2vpse_dic:
+            seq_l = len(test_seqs_dic[seq_id])
+            if id2vpse_dic[seq_id][1] != seq_l or id2vpse_dic[seq_id][0] != 1:
+                lc_context = True
+                break
+        # Sequence character counts.
+        seq_cc_dic = seqs_dic_count_chars(test_seqs_dic)
+        if lc_context:
+            allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1, 'a': 1, 'c': 1, 'g': 1, 'u': 1}
+            for nt in seq_cc_dic:
+                if nt not in allowed_nt_dic:
+                    assert False, "--in sequences contain \"%s\" character (allowed characters: A C G U a c g u)" %(nt)
+            FEATOUT.write("fa\tC\tA,C,G,U,a,c,g,u\t-\n")
+        else:
+            allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1}
+            for nt in seq_cc_dic:
+                if nt not in allowed_nt_dic:
+                    assert False, "--in sequences contain \"%s\" character (allowed characters: A C G U)" %(nt)
+            FEATOUT.write("fa\tC\tA,C,G,U\t-\n")
 
         # Secondary structure stats dictionaries.
         test_str_stats_dic = None
@@ -3902,6 +3968,10 @@ def main_gp(args):
         test_rra_stats_dic = {}
 
     # Store feature infos.
+    if args.con_ext:
+        FEATOUT.write("fa\tC\tA,C,G,U,a,c,g,u\t-\n")
+    else:
+        FEATOUT.write("fa\tC\tA,C,G,U\t-\n")
     if args.add_str:
         FEATOUT.write("elem_p.str\tN\tp_u,p_e,p_h,p_i,p_m,p_s\tprob\n")
     if args.add_str or args.bp_in:

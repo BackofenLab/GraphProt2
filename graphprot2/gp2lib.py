@@ -101,6 +101,7 @@ def read_fasta_into_dic(fasta_file,
                         ids_dic=False,
                         dna=False,
                         report=1,
+                        all_uc=False,
                         skip_data_id="set",
                         skip_n_seqs=True):
     """
@@ -115,7 +116,6 @@ def read_fasta_into_dic(fasta_file,
     if not seqs_dic:
         seqs_dic = {}
     seq_id = ""
-    seq = ""
     # Go through FASTA file, extract sequences.
     with open(fasta_file) as f:
         for line in f:
@@ -130,13 +130,17 @@ def read_fasta_into_dic(fasta_file,
                     seqs_dic[seq_id] = ""
             elif re.search("[ACGTUN]+", line, re.I):
                 m = re.search("([ACGTUN]+)", line, re.I)
+                seq = m.group(1)
                 if seq_id in seqs_dic:
                     if dna:
                         # Convert to DNA, concatenate sequence.
-                        seqs_dic[seq_id] += m.group(1).replace("U","T").replace("u","t")
+                        seq = seq.replace("U","T").replace("u","t")
                     else:
                         # Convert to RNA, concatenate sequence.
-                        seqs_dic[seq_id] += m.group(1).replace("T","U").replace("t","u")
+                        seq = seq.replace("T","U").replace("t","u")
+                    if all_uc:
+                        seq = seq.upper()
+                    seqs_dic[seq_id] += seq
     f.closed
     # Check if sequences read in.
     assert seqs_dic, "no sequences read in (input FASTA file \"%s\" empty or mal-formatted?)" %(fasta_file)
@@ -253,14 +257,14 @@ def update_sequence_viewpoint_regions(seqs_dic, vp_s_dic, vp_e_dic):
     >>> vp_s_dic = {"S1" : 4}
     >>> vp_e_dic = {"S1" : 9}
     >>> update_sequence_viewpoint_regions(seqs_dic, vp_s_dic, vp_e_dic)
-    >>> print(seqs_dic["S1"])
-    acgTACGTAcgt
+    >>> seqs_dic
+    {'S1': 'acgTACGTAcgt'}
     >>> seqs_dic = {"S2" : "acgtacgtACGTac"}
     >>> vp_s_dic = {"S2" : 5}
     >>> vp_e_dic = {"S2" : 16}
     >>> update_sequence_viewpoint_regions(seqs_dic, vp_s_dic, vp_e_dic)
-    >>> print(seqs_dic["S2"])
-    acgtACGTACGTAC
+    >>> seqs_dic
+    {'S2': 'acgtACGTACGTAC'}
 
     """
     for seq_id in seqs_dic:
@@ -285,10 +289,10 @@ def update_sequence_viewpoint(seq, vp_s, vp_e):
 
     >>> seq = "acgtACGTacgt"
     >>> update_sequence_viewpoint(seq, 4, 9)
-    acgTACGTAcgt
+    'acgTACGTAcgt'
     >>> seq = "acgtacgtACGTac"
     >>> update_sequence_viewpoint(seq, 5, 16)
-    acgtACGTACGTAC
+    'acgtACGTACGTAC'
 
     """
     assert seq, "seq empty"
@@ -345,7 +349,7 @@ def extract_viewpoint_regions_from_fasta(seqs_dic,
     >>> vp_e["id2"] == 6
     True
     >>> extract_viewpoint_regions_from_fasta(seqs_dic, get_se_dic=True)
-    {'id1': [5,8], 'id2': [1,4]}
+    {'id1': [5, 8], 'id2': [1, 4]}
 
     """
     if not vp_s_dic:
@@ -594,12 +598,12 @@ def min_max_normalize(x, max_x, min_x,
 
 def read_bpp_into_dic(bpp_file, vp_dic,
                       bpp_dic=False,
-                      con_ext=100,
+                      con_ext=False,
                       bps_mode=1):
     """
     Read in base pair probabilities and store information in list for
     each sequence, where region to extract values from is defined by
-    viewpoint (vp) start+end (+ con_ext == plfold L parameter, assuming L=100)
+    viewpoint (vp) start+end given in vp_dic.
     Return dictionary with base pair+probability list for each sequence
     (key: sequence id, value: "bp_start-bp_end,bp_prob").
     bps_mode: define which base pairs get extracted.
@@ -608,11 +612,9 @@ def read_bpp_into_dic(bpp_file, vp_dic,
 
     >>> bpp_test = "test_data/test.bpp"
     >>> vp_dic = {"CLIP_01": [150, 250]}
-    >>> d = read_bpp_into_dic(bpp_test, vp_dic, con_ext=50, bps_mode=1)
-    >>> print(d)
+    >>> read_bpp_into_dic(bpp_test, vp_dic, bps_mode=1)
     {'CLIP_01': ['130-150,0.33', '160-200,0.44', '240-260,0.55']}
-    >>> d = read_bpp_into_dic(bpp_test, vp_dic, con_ext=50, bps_mode=2)
-    >>> print(d)
+    >>> read_bpp_into_dic(bpp_test, vp_dic, bps_mode=2)
     {'CLIP_01': ['160-200,0.44']}
 
     """
@@ -634,7 +636,8 @@ def read_bpp_into_dic(bpp_file, vp_dic,
                 bpp = float(m.group(3))
                 bpp_se = "%s-%s,%s" % (s,e,bpp)
                 if bps_mode == 1:
-                    if (s >= (vp_dic[seq_id][0]-con_ext) and (e <= (vp_dic[seq_id][1]) and e >= vp_dic[seq_id][0])) or (e <= (vp_dic[seq_id][1]+con_ext) and (s <= (vp_dic[seq_id][1]) and s >= vp_dic[seq_id][0])):
+                    #if (s >= (vp_dic[seq_id][0]-con_ext) and (e <= (vp_dic[seq_id][1]) and e >= vp_dic[seq_id][0])) or (e <= (vp_dic[seq_id][1]+con_ext) and (s <= (vp_dic[seq_id][1]) and s >= vp_dic[seq_id][0])):
+                    if (e >= vp_dic[seq_id][0] and e <= vp_dic[seq_id][1]) or (s >= vp_dic[seq_id][0] and s <= vp_dic[seq_id][1]):
                         bpp_dic[seq_id].append(bpp_se)
                 elif bps_mode == 2:
                     if s >= vp_dic[seq_id][0] and e <= vp_dic[seq_id][1]:
@@ -8769,7 +8772,6 @@ def load_ws_predict_data(args,
             assert os.path.exists(test_bpp_in), "--in folder does not contain %s"  %(test_bpp_in)
             print("Read in base pair data ... ")
             test_bpp_dic = read_bpp_into_dic(test_bpp_in, test_vp_dic,
-                                            con_ext=con_ext,
                                             bps_mode=bps_mode)
         if fid == "eia":
             feat_id = "eia"
@@ -8865,7 +8867,6 @@ def load_ws_predict_data(args,
                                                         tra_dic=test_tra_dic,
                                                         str_elem_p_dic=test_str_elem_p_dic,
                                                         bpp_dic=test_bpp_dic,
-                                                        con_ext=con_ext,
                                                         add_ids_out_file=test_add_ids_out_file,
                                                         add_seqs_out_file=test_add_seqs_out_file,
                                                         bps_mode=bps_mode,
@@ -8898,6 +8899,26 @@ def load_ws_predict_data(args,
     # Return test sequences dic.
     return test_seqs_dic
 
+
+################################################################################
+
+def make_seqs_dic_uc(seqs_dic):
+    """
+    Make all sequences (dictionary with key==sequence ID and value==sequence)
+    inside given seqs_dic uppercase.
+
+    >>> seqs_dic = {'id1':'acguACGUacgu'}
+    >>> make_seqs_dic_uc(seqs_dic)
+    >>> seqs_dic
+    {'id1': 'ACGUACGUACGU'}
+
+    """
+    assert seqs_dic, "given seqs_dic empty"
+    for seq_id in seqs_dic:
+        seq = seqs_dic[seq_id].upper()
+        seqs_dic[seq_id] = seq
+
+
 ################################################################################
 
 def load_geo_training_data(args,
@@ -8906,10 +8927,8 @@ def load_geo_training_data(args,
                            id2set_dic=False):
 
     """
-    Load training data from data folder generated by GraphProt2 train and
+    Load training data from data folder generated by GraphProt2 gt and
     store data in PyG format.
-
-    Needs a data ID in args to construct output folder.
 
     features.out example:
     fa	C	A,C,G,U	-
@@ -8999,13 +9018,58 @@ def load_geo_training_data(args,
     neg_fa_in = args.in_folder + "/" + "negatives.fa"
     assert os.path.exists(pos_fa_in), "--in folder does not contain %s"  %(pos_fa_in)
     assert os.path.exists(neg_fa_in), "--in folder does not contain %s"  %(neg_fa_in)
-    pos_seqs_dic = read_fasta_into_dic(pos_fa_in)
-    neg_seqs_dic = read_fasta_into_dic(neg_fa_in)
-    assert pos_seqs_dic, "no sequences read in from FASTA file \"%s\"" %(pos_fa_in)
-    assert neg_seqs_dic, "no sequences read in from FASTA file \"%s\"" %(neg_fa_in)
+
     # Check sequence feature.
     assert "fa" in fid2type_dic, "feature ID \"fa\" not in feature file"
-    assert fid2cat_dic["fa"] == ["A", "C", "G", "U"], "sequence feature alphabet != A,C,G,U"
+    seqs_all_uc = False
+    if fid2cat_dic["fa"] == ["A", "C", "G", "U"]:
+        seqs_all_uc = True
+    elif fid2cat_dic["fa"] == ["A", "C", "G", "U", "a", "c", "g", "u"]:
+        if args.uc_context:
+            seqs_all_uc = True
+    else:
+        assert False, "sequence feature alphabet != A,C,G,U(,a,c,g,u)"
+
+    # Read in sequences.
+    pos_seqs_dic = read_fasta_into_dic(pos_fa_in, all_uc=seqs_all_uc)
+    neg_seqs_dic = read_fasta_into_dic(neg_fa_in, all_uc=seqs_all_uc)
+    assert pos_seqs_dic, "no sequences read in from FASTA file \"%s\"" %(pos_fa_in)
+    assert neg_seqs_dic, "no sequences read in from FASTA file \"%s\"" %(neg_fa_in)
+
+    # Check for 4 (8) distinct nucleotides.
+    pos_cc_dic = gp2lib.seqs_dic_count_chars(pos_seqs_dic)
+    allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1}
+    c_nts = 4
+    if not seqs_all_uc:
+        allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1, 'a': 1, 'c': 1, 'g': 1, 'u': 1}
+        c_nts = 8
+    for nt in pos_cc_dic:
+        if nt not in allowed_nt_dic:
+            assert False, "positive sequences with invalid character \"%s\" encountered (allowed characters: ACGU(acgu)" %(nt)
+    assert len(pos_cc_dic) == c_nts, "# of distinct nucleotide characters in positive set != expected # (%i != %i)" %(len(pos_cc_dic), c_nts)
+    for nt in neg_cc_dic:
+        if nt not in allowed_nt_dic:
+            assert False, "negative sequences with invalid character \"%s\" encountered (allowed characters: ACGU(acgu)" %(nt)
+    assert len(neg_cc_dic) == c_nts, "# of distinct nucleotide characters in negative set != expected # (%i != %i)" %(len(neg_cc_dic), c_nts)
+
+    # Get con_ext info used to create dataset.
+    con_ext_str = "False"
+    gt_settings_file = args.in_folder + "/settings.graphprot2_gt.out"
+    assert os.path.exists(gt_settings_file), "graphprot2 gt settings file %s not found" %(gt_settings_file)
+    with open(gt_settings_file) as f:
+        for line in f:
+            cols = line.strip().split("\t")
+            if cols[0] == "con_ext":
+                if cols[1] != "False":
+                    con_ext_str = cols[1]
+    f.closed
+    if seqs_all_uc:
+        con_ext_str = "False"
+    # Add info to train settings file.
+    train_settings_file = args.out_folder + "/settings.graphprot2_train.out"
+    SETOUT = open(train_settings_file, "a")
+    SETOUT.write("con_ext\t%s\n" %(con_ext_str)
+    SETOUT.close()
 
     # Get uppercase (viewpoint) region start and ends for each sequence.
     pos_vp_dic = extract_uc_region_coords_from_fasta(pos_seqs_dic)
@@ -9043,6 +9107,8 @@ def load_geo_training_data(args,
         indiv_feat_dic["elem_p.str"] = 1
     if args.use_bps:
         indiv_feat_dic["bpp.str"] = 1
+    if args.use_context:
+        indiv_feat_dic["bpp.str"] = 1
 
     # Remove features from fid2type_dic.
     if indiv_feat_dic:
@@ -9072,17 +9138,6 @@ def load_geo_training_data(args,
     pos_bpp_dic = False
     neg_bpp_dic = False
 
-    # Try to get context extension used to create dataset.
-    con_ext = 100
-    gt_settings_file = args.in_folder + "/settings.graphprot2_gt.out"
-    if os.path.exists(gt_settings_file):
-        with open(gt_settings_file) as f:
-            for line in f:
-                cols = line.strip().split("\t")
-                if cols[0] == "plfold_l":
-                    con_ext = int(cols[1])
-        f.closed
-
     # Check and read in data.
     for fid, ftype in sorted(fid2type_dic.items()):
         if fid == "fa":
@@ -9092,10 +9147,8 @@ def load_geo_training_data(args,
             assert os.path.exists(neg_bpp_in), "--in folder does not contain %s"  %(neg_bpp_in)
             print("Read in base pair data ... ")
             pos_bpp_dic = read_bpp_into_dic(pos_bpp_in, pos_vp_dic,
-                                            con_ext=con_ext,
                                             bps_mode=args.bps_mode)
             neg_bpp_dic = read_bpp_into_dic(neg_bpp_in, neg_vp_dic,
-                                            con_ext=con_ext,
                                             bps_mode=args.bps_mode)
         if fid == "eia":
             feat_id = "eia"
@@ -9196,7 +9249,13 @@ def load_geo_training_data(args,
             cols = line.strip().split("\t")
             feat_id = cols[0]
             if feat_id in fid2type_dic:
-                FEATOUT.write("%s\n" %(row))
+                if feat_id == "fa":
+                    if seqs_all_uc:
+                        FEATOUT.write("fa\tC\tA,C,G,U\t-\n")
+                    else:
+                        FEATOUT.write("fa\tC\tA,C,G,U,a,c,g,u\t-\n")
+                else:
+                    FEATOUT.write("%s\n" %(row))
     f.closed
     FEATOUT.close()
 
@@ -9219,7 +9278,6 @@ def load_geo_training_data(args,
                                                                 tra_dic=pos_tra_dic,
                                                                 str_elem_p_dic=pos_str_elem_p_dic,
                                                                 bpp_dic=pos_bpp_dic,
-                                                                con_ext=con_ext,
                                                                 add_ids_out_file=pos_add_ids_out_file,
                                                                 add_seqs_out_file=pos_add_seqs_out_file,
                                                                 bps_mode=args.bps_mode,
@@ -9233,7 +9291,6 @@ def load_geo_training_data(args,
                                                                 tra_dic=neg_tra_dic,
                                                                 str_elem_p_dic=neg_str_elem_p_dic,
                                                                 bpp_dic=neg_bpp_dic,
-                                                                con_ext=con_ext,
                                                                 add_ids_out_file=neg_add_ids_out_file,
                                                                 add_seqs_out_file=neg_add_seqs_out_file,
                                                                 bps_mode=args.bps_mode,
@@ -9320,10 +9377,7 @@ def generate_geometric_data(seqs_dic, vp_dic,
                             tra_dic=False,
                             str_elem_p_dic=False,
                             bpp_dic=False,
-                            use_us_ds_labels=False,
                             plfold_bpp_cutoff=0.2,
-                            con_ext=100,
-                            all_nt_uc=False,
                             g_idx=False,
                             n_idx=False,
                             add_ids_out_file=False,
@@ -9331,6 +9385,11 @@ def generate_geometric_data(seqs_dic, vp_dic,
                             bps_mode=1):
     """
     Generate PyTorch Geometric graph format data.
+
+    seqs_dic:
+        Sequence ID -> sequence dictionary.
+    vp_dic:
+        Sequence ID -> [viewpont (uppercase) start, viewpoint end] dictionary.
 
     Return the following lists:
     all_nodes_labels       Nucleotide indices (dict_label_idx)
@@ -9346,25 +9405,15 @@ def generate_geometric_data(seqs_dic, vp_dic,
 
     # Checks.
     assert seqs_dic, "seqs_dic empty"
-    if all_nt_uc and use_us_ds_labels:
-        assert False, "use either all_nt_uc=True or use_us_ds_labels=True"
     # Nucleotide label to idx dictionary.
-    dict_label_idx = {'a': '1',
-                      'c': '2',
-                      'g': '3',
-                      'u': '4',
-                      'A': '5',
-                      'C': '6',
-                      'G': '7',
-                      'U': '8',
-                      'ua': '9',
-                      'uc': '10',
-                      'ug': '11',
-                      'uu': '12',
-                      'da': '13',
-                      'dc': '14',
-                      'dg': '15',
-                      'du': '16'}
+    dict_label_idx = {'A': '1',
+                      'C': '2',
+                      'G': '3',
+                      'U': '4',
+                      'a': '5',
+                      'c': '6',
+                      'g': '7',
+                      'u': '8'}
     # Init lists.
     all_nodes_labels = []
     all_graph_indicators = []
@@ -9385,22 +9434,11 @@ def generate_geometric_data(seqs_dic, vp_dic,
     for seq_id, seq in sorted(seqs_dic.items()):
         # Uppercase region (viewpoint) start + end + lengths.
         vp_s = vp_dic[seq_id][0] # 1-based.
-        vp_e = vp_dic[seq_id][1] # 1-based 2.
+        vp_e = vp_dic[seq_id][1] # 1-based.
         l_vp = vp_e - vp_s + 1
         l_seq = len(seq)
-        # Subsequence extraction start + end (1-based).
-        ex_s = vp_s
-        ex_e = vp_e
-        if bpp_dic:
-            ex_s = vp_s-con_ext
-            if ex_s < 1:
-                ex_s = 1
-            ex_e = vp_e+con_ext
-            if ex_e > l_seq:
-                ex_e = l_seq
-
         # Length of graph.
-        n_nodes = ex_e - ex_s + 1
+        n_nodes = l_seq
         # Add graph indicator labels (length of graph).
         all_graph_indicators.extend([g_idx+1]*n_nodes)
 
@@ -9424,32 +9462,11 @@ def generate_geometric_data(seqs_dic, vp_dic,
         g_i = 0
         seen_vp = False
         for i,c in enumerate(seq): # i from 0.. l-1
-            # Skip if outside region of interest.
-            if i < (ex_s-1) or i > (ex_e-1):
-                continue
             if seq_id in seqs_out_dic:
                 seqs_out_dic[seq_id] += c
             else:
                 seqs_out_dic[seq_id] = c
-            # Label upstream / downstream nucleotides differently.
-            if use_us_ds_labels:
-                lc = ["a", "c", "g", "u"]
-                uc = ["A", "C", "G", "U"]
-                new_c = c
-                if c in lc:
-                    if seen_vp:
-                        new_c = "d"+c
-                    else:
-                        new_c = "u"+c
-                else:
-                    seen_vp = True
-                all_nodes_labels.append(dict_label_idx[new_c])
-            elif all_nt_uc:
-                new_c=c.upper()
-                all_nodes_labels.append(dict_label_idx[new_c])
-            else:
-                # Add nucleotide node.
-                all_nodes_labels.append(dict_label_idx[c])
+            all_nodes_labels.append(dict_label_idx[c])
 
             # Make feature vector [0,1, ..] for each graph node.
             feat_vector = []
@@ -9486,13 +9503,13 @@ def generate_geometric_data(seqs_dic, vp_dic,
                 p1 = int(m.group(1))
                 p2 = int(m.group(2))
                 bpp_value = float(m.group(3))
-                g_p1 = p1 - ex_s # 0-based base pair p1.
-                g_p2 = p2 - ex_s # 0-based base pair p2.
+                g_p1 = p1 - 1 # 0-based base pair index.
+                g_p2 = p2 - 1 # 0-based base pair index.
                 # Filter.
                 if bpp_value < plfold_bpp_cutoff: continue
-                # Add edge if bpp value >= threshold.
+                # Add base pair depending on set mode.
                 if bps_mode == 1:
-                    if (p1 >= ex_s and p2 <= vp_e and p2 >= vp_s) or (p2 <= ex_e and p1 <= vp_e and p1 >= vp_s):
+                    if (p1 >= vp_s and p1 <= vp_e) or (p2 >= vp_s and p2 <= vp_e):
                         all_edges.append((g_p1+n_idx, g_p2+n_idx))
                         all_edges.append((g_p2+n_idx, g_p1+n_idx))
                 elif bps_mode == 2:
@@ -9501,6 +9518,7 @@ def generate_geometric_data(seqs_dic, vp_dic,
                         all_edges.append((g_p2+n_idx, g_p1+n_idx))
                 else:
                     assert False, "ERROR: invalid bps_mode given (valid values: 1,2)"
+
         n_idx += n_nodes
         # Append graph to list.
         g_idx += 1
@@ -9529,7 +9547,7 @@ def decompose_node_attr(x):
 
     """
     x = x.tolist()
-    dict_onehot_label = {'1000': 5, '0100': 6, '0010': 7, '0001': 8}
+    dict_onehot_label = {'1000': 1, '0100': 2, '0010': 3, '0001': 4}
     dict_onehot_nucleotide = {'1000': 'A', '0100': 'C', '0010': 'G', '0001': 'U'}
     dict_reg_exon_intron = {1: 'E', 0: 'I'}
     list_nucleotides = []
@@ -10593,7 +10611,7 @@ def process_custom_bp_file(bpp_file, bpp_out, seq_dic,
                     seq_id_max_dic[seq_id] = e
                 bpp_dic[seq_id].append([s, e, bpp])
     f.closed
-    assert bpp_diload_geo_training_datac, "no base pairs read in from --bp-in"
+    assert bpp_dic, "no base pairs read in from --bp-in"
     # Pairing rules.
     bp_nts_dic = {
         "A" : ["U"],

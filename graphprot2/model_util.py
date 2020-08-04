@@ -359,6 +359,7 @@ def get_window_scores(list_w_sizes,
                       list_node_attr=None,
                       list_node_labels=None,
                       use_node_attr=False,
+                      lc_context=False,
                       model=None,
                       device=None,
                       batch_size=None,
@@ -428,6 +429,27 @@ def get_window_scores(list_w_sizes,
             n_idx += sl_len
     assert list_graph_indicators, "list_graph_indicators empty"
 
+    # Add dummy graph that contains all nucleotides.
+    g_idx += 1
+    if lc_context:
+        list_graph_indicators.extend([g_idx]*8)
+        list_all_node_labels.extend([1,2,3,4,5,6,7,8])
+        if use_node_attr:
+            list_all_node_attributes.extend([list_node_attr[0]]*8)
+        for n_idx_temp in range(8):
+            if n_idx_temp != 7:
+                list_all_edges.append((n_idx_temp + n_idx, n_idx_temp + 1 + n_idx))
+                list_all_edges.append((n_idx_temp + 1 + n_idx, n_idx_temp + n_idx))
+    else:
+        list_graph_indicators.extend([g_idx]*4)
+        list_all_node_labels.extend([1,2,3,4])
+        if use_node_attr:
+            list_all_node_attributes.extend([list_node_attr[0]]*4)
+        for n_idx_temp in range(4):
+            if n_idx_temp != 3:
+                list_all_edges.append((n_idx_temp + n_idx, n_idx_temp + 1 + n_idx))
+                list_all_edges.append((n_idx_temp + 1 + n_idx, n_idx_temp + n_idx))
+
     f = open(raw_folder + "/" + save_dataset_name + "_graph_indicator.txt", 'w')
     f.writelines([str(e) + "\n" for e in list_graph_indicators])
     f.close()
@@ -452,6 +474,8 @@ def get_window_scores(list_w_sizes,
     scores = get_scores(loader, device, model,
                         min_max_norm=True)
     assert scores, "scores list empty"
+    # Remove dummy prediction.
+    scores = scores[:-1]
     assert g_len*c_w_sizes == len(scores), "length scores != length of list of node labels"
     all_scores = [scores[i:i + g_len] for i in range(0, len(scores), g_len)]
     scores_mean = list(np.mean(all_scores, axis=0))
