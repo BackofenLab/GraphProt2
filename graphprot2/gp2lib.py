@@ -4666,6 +4666,81 @@ def get_uc_lc_sequence_segment(seq, cp,
 
 ################################################################################
 
+def get_uc_lc_list_segment(seq, cp,
+                           vp_ext=20,
+                           uc2lc_label_dic=False,
+                           con_ext=0):
+    """
+    Given a list (seq), a center position inside the list, a viewpoint
+    extension value, and a context extension value: get the lowercase-
+    uppercase-lowercase sequence segment.
+
+    cp:
+    1-based list position that marks the center of the segment.
+
+    >>> seq = [1,2,3,4,1,2,3,4]
+    >>> cp = 4
+    >>> vp_ext = 1
+    >>> con_ext = 2
+    >>> get_uc_lc_list_segment(seq, cp, vp_ext=vp_ext, con_ext=con_ext)
+    [5, 6, 3, 4, 1, 6, 7]
+    >>> cp = 1
+    >>> vp_ext = 2
+    >>> con_ext = 2
+    >>> get_uc_lc_list_segment(seq, cp, vp_ext=vp_ext, con_ext=con_ext)
+    [1, 2, 3, 8, 5]
+    >>> cp = 1
+    >>> vp_ext = 0
+    >>> con_ext = 0
+    >>> get_uc_lc_list_segment(seq, cp, vp_ext=vp_ext, con_ext=con_ext)
+    [1]
+
+    """
+    # Checks.
+    assert seq, "given seq empty"
+    lseq = len(seq)
+    assert cp <= lseq, "given cp > lseq"
+    assert cp > 0, "given cp < 1"
+
+    if not uc2lc_label_dic:
+        uc2lc_label_dic = {1 : 5,
+                           2 : 6,
+                           3 : 7,
+                           4 : 8}
+
+    # Upstream extensions.
+    usucs = cp - vp_ext - 1
+    usuce = cp - 1
+    uslcs = cp - vp_ext - con_ext - 1
+    uslce = usucs
+    # Downstream extensions.
+    dsucs = cp
+    dsuce = cp + vp_ext
+    dslcs = dsuce
+    dslce = cp + vp_ext + con_ext
+
+    # Extract segments.
+    usucseg = seq[usucs:usuce]
+    uslcseg = seq[uslcs:uslce]
+    dsucseg = seq[dsucs:dsuce]
+    dslcseg = seq[dslcs:dslce]
+    cpseg = seq[cp-1:cp]
+
+    # Change context labels to lowercase labels.
+    for i,l in enumerate(uslcseg):
+        new_l = uc2lc_label_dic[l]
+        uslcseg[i] = new_l
+    for i,l in enumerate(dslcseg):
+        new_l = uc2lc_label_dic[l]
+        dslcseg[i] = new_l
+
+    # Give it to me.
+    final_seg = uslcseg + usucseg + cpseg + dsucseg + dslcseg
+    return final_seg
+
+
+################################################################################
+
 def gtf_extract_most_prominent_transcripts(in_gtf, out_file,
                                            strict=False,
                                            min_len=False,
@@ -9068,7 +9143,7 @@ def load_geo_training_data(args,
     # Add info to train settings file.
     train_settings_file = args.out_folder + "/settings.graphprot2_train.out"
     SETOUT = open(train_settings_file, "a")
-    SETOUT.write("con_ext\t%s\n" %(con_ext_str)
+    SETOUT.write("con_ext\t%s\n" %(con_ext_str))
     SETOUT.close()
 
     # Get uppercase (viewpoint) region start and ends for each sequence.
@@ -10376,10 +10451,14 @@ def make_feature_attribution_plot(seq, profile_scores, plot_out_file,
     i = 0
     add_importance_scores_plot(is_df, fig, gs, i,
                                y_label_size=5.5)
-
     if seq_label_plot:
         i += 1
-        color_dict = {'A' : '#616161', 'C': '#7f7f7f',  'G': '#a0a0a0',  'U': '#d2d2d2'}
+        if seq_alphabet == ["A","C","G","U"]:
+            color_dict = {'A' : '#616161', 'C': '#7f7f7f',  'G': '#a0a0a0',  'U': '#d2d2d2'}
+        elif seq_alphabet == ["A","C","G","U","a","c","g","u"]:
+            color_dict = {'A' : '#616161', 'C': '#7f7f7f',  'G': '#a0a0a0',  'U': '#d2d2d2', 'a' : '#616161', 'c': '#7f7f7f',  'g': '#a0a0a0',  'u': '#d2d2d2'}
+        else:
+            assert False, "invalid seq_alphabet given"
         add_label_plot(sl_df, fig, gs, i, color_dict, y_label="sequence",
                        y_label_size=4)
     if exon_intron_labels:
@@ -10547,7 +10626,12 @@ def make_motif_plot(motif_seqs_ll, motif_out_file,
     # Plot subplots.
     i = 0
     # Sequence motif.
-    color_dict = {'A' : '#616161', 'C': '#7f7f7f',  'G': '#a0a0a0',  'U': '#d2d2d2'}
+    if seq_alphabet == ["A","C","G","U"]:
+        color_dict = {'A' : '#616161', 'C': '#7f7f7f',  'G': '#a0a0a0',  'U': '#d2d2d2'}
+    elif seq_alphabet == ["A","C","G","U","a","c","g","u"]:
+        color_dict = {'A' : '#616161', 'C': '#7f7f7f',  'G': '#a0a0a0',  'U': '#d2d2d2', 'a' : '#616161', 'c': '#7f7f7f',  'g': '#a0a0a0',  'u': '#d2d2d2'}
+    else:
+        assert False, "invalid seq_alphabet given"
     add_motif_label_plot(seq_df, fig, gs, i, color_dict=False, y_label="sequence")
     # Exon intron motif.
     if motif_eia_ll:

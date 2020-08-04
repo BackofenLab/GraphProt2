@@ -359,6 +359,7 @@ def get_window_scores(list_w_sizes,
                       list_node_attr=None,
                       list_node_labels=None,
                       use_node_attr=False,
+                      con_ext=False,
                       lc_context=False,
                       model=None,
                       device=None,
@@ -397,6 +398,12 @@ def get_window_scores(list_w_sizes,
     g_len = len(list_node_labels)
     c_w_sizes = len(list_w_sizes)
 
+    # Set a maximum lowercase context extension for window prediction.
+    lc_ext = con_ext
+    if con_ext:
+        if con_ext > 50:
+            lc_ext = 50
+
     for w_size in list_w_sizes:
         # Extension left / right.
         extlr = int(w_size/2)
@@ -404,14 +411,28 @@ def get_window_scores(list_w_sizes,
         for i in range(g_len):
             reg_s = i - extlr
             reg_e = i + extlr + 1
+            # If lowercase context extension specified.
+            if con_ext:
+                reg_s = reg_s - con_ext
+                reg_e = reg_e + con_ext
             if reg_e > g_len:
                 reg_e = g_len
             if reg_s < 0:
                 reg_s = 0
-            sl_node_labels = list_node_labels[reg_s:reg_e]
+
+            if con_ext:
+                center_pos = i + 1
+                sl_node_labels = get_uc_lc_list_segment(list_node_labels,
+                                                        center_pos,
+                                                        vp_ext=extlr,
+                                                        con_ext=lc_ext)
+            else:
+                sl_node_labels = list_node_labels[reg_s:reg_e]
+            # Sublist of node attributes.
             sl_node_attr = []
             if use_node_attr:
                 sl_node_attr = list_node_attr[reg_s:reg_e]
+                assert len(sl_node_attr) == len(sl_node_labels), "sl_node_attr length != sl_node_labels length (%i != %i)" %(len(sl_node_attr), len(sl_node_labels))
             g_idx += 1
             sl_len = len(sl_node_labels)
             # Graph indicators.
@@ -480,6 +501,84 @@ def get_window_scores(list_w_sizes,
     all_scores = [scores[i:i + g_len] for i in range(0, len(scores), g_len)]
     scores_mean = list(np.mean(all_scores, axis=0))
     return scores_mean
+
+
+################################################################################
+
+def get_uc_lc_list_segment(seq, cp,
+                           vp_ext=20,
+                           uc2lc_label_dic=False,
+                           con_ext=0):
+    """
+    Given a list (seq), a center position inside the list, a viewpoint
+    extension value, and a context extension value: get the lowercase-
+    uppercase-lowercase sequence segment.
+
+    cp:
+        1-based list position that marks the center of the segment.
+    uc2lc_label_dic:
+        Uppercase to lowercase labels mapping dictionary.
+
+    >>> seq = [1,2,3,4,1,2,3,4]
+    >>> cp = 4
+    >>> vp_ext = 1
+    >>> con_ext = 2
+    >>> get_uc_lc_list_segment(seq, cp, vp_ext=vp_ext, con_ext=con_ext)
+    [5, 6, 3, 4, 1, 6, 7]
+    >>> cp = 1
+    >>> vp_ext = 2
+    >>> con_ext = 2
+    >>> get_uc_lc_list_segment(seq, cp, vp_ext=vp_ext, con_ext=con_ext)
+    [1, 2, 3, 8, 5]
+    >>> cp = 1
+    >>> vp_ext = 0
+    >>> con_ext = 0
+    >>> get_uc_lc_list_segment(seq, cp, vp_ext=vp_ext, con_ext=con_ext)
+    [1]
+
+    """
+    # Checks.
+    assert seq, "given seq empty"
+    assert cp, "invalid cp given"
+    lseq = len(seq)
+    assert cp <= lseq, "given cp > lseq"
+    assert cp > 0, "given cp < 1"
+
+    if not uc2lc_label_dic:
+        uc2lc_label_dic = {1 : 5,
+                           2 : 6,
+                           3 : 7,
+                           4 : 8}
+
+    # Upstream extensions.
+    usucs = cp - vp_ext - 1
+    usuce = cp - 1
+    uslcs = cp - vp_ext - con_ext - 1
+    uslce = usucs
+    # Downstream extensions.
+    dsucs = cp
+    dsuce = cp + vp_ext
+    dslcs = dsuce
+    dslce = cp + vp_ext + con_ext
+
+    # Extract segments.
+    usucseg = seq[usucs:usuce]
+    uslcseg = seq[uslcs:uslce]
+    dsucseg = seq[dsucs:dsuce]
+    dslcseg = seq[dslcs:dslce]
+    cpseg = seq[cp-1:cp]
+
+    # Change context labels to lowercase labels.
+    for i,l in enumerate(uslcseg):
+        new_l = uc2lc_label_dic[l]
+        uslcseg[i] = new_l
+    for i,l in enumerate(dslcseg):
+        new_l = uc2lc_label_dic[l]
+        dslcseg[i] = new_l
+
+    # Give it to me.
+    final_seg = uslcseg + usucseg + cpseg + dsucseg + dslcseg
+    return final_seg
 
 
 ################################################################################

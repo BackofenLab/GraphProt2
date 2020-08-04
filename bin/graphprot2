@@ -1116,7 +1116,6 @@ def main_eval(args):
     assert pos_graphs, "no positive sites (graph label == 1) in dataset"
     print("# positive sites:      %i" %(len(pos_graphs)))
 
-
     # Data loader object.
     pos_set = MyDataset(pos_graphs)
     batch_size = 1
@@ -1298,8 +1297,9 @@ def main_eval(args):
                                           use_node_attr=use_node_attr,
                                           model=model,
                                           device=device,
-                                          batch_size=batch_size,
                                           lc_context=con_ext,
+                                          con_ext=False,
+                                          batch_size=batch_size,
                                           geometric_folder=out_folder)
 
         profile_scores_ll.append(profile_scores)
@@ -1333,6 +1333,11 @@ def main_eval(args):
     win_info_str = ""
     for win_size in args.list_win_sizes:
         win_info_str += "w%i" %(win_size)
+
+    # Sequence alphabet.
+    seq_alphabet = ["A","C","G","U"]
+    if con_ext:
+        seq_alphabet = ["A","C","G","U","a","c","g","u"]
 
     # Sort graphs by score to evaluate top sites.
     rank_scores_out = args.out_folder + "/rank_score_sites.out"
@@ -1375,7 +1380,7 @@ def main_eval(args):
             plot_out_file = profile_plots_folder + "/" + plot_file_name
 
             gp2lib.make_feature_attribution_plot(seq, profile_scores, plot_out_file,
-                                          seq_alphabet=["A","C","G","U"],
+                                          seq_alphabet=seq_alphabet,
                                           seq_label_plot=False,
                                           exon_intron_labels=exon_intron_labels,
                                           phastcons_scores=phastcons_scores,
@@ -1498,7 +1503,7 @@ def main_eval(args):
                                    motif_eia_ll=motif_eia_ll,
                                    motif_pc_ll=motif_pc_ll,
                                    motif_pp_ll=motif_pp_ll,
-                                   seq_alphabet=['A', 'C', 'G', 'U'],
+                                   seq_alphabet=seq_alphabet,
                                    eia_alphabet=eia_alphabet)
 
             motif_file_info_dic[motif_out_file] = 1
@@ -1517,14 +1522,6 @@ def main_eval(args):
 def main_predict(args):
     """
     Predict binding sites (whole site or binding profiles).
-
-
-    graphprot2 predict
-    Let it guess whether whole site or profile prediction (sequences > 500 print WARNING at least)
-
-
-    1) create pyg dataset from prediction folder, like in model training
-    2) Then like in eval, predict on this set, either whole sites, or profiles.
 
     """
 
@@ -1558,6 +1555,25 @@ def main_predict(args):
     if not os.path.exists(out_folder):
         os.makedirs(out_folder)
     model_folder = args.model_in_folder
+
+    # Get graphprot2 train parameters.
+    gp2_train_param_file = model_folder + "/settings.graphprot2_train.out"
+    assert os.path.isfile(gp2_train_param_file), "missing graphprot2 train parameter file %s" %(gp2_train_param_file)
+    gp2_train_param_dic = {}
+    with open(gp2_train_param_file) as f:
+        for line in f:
+            row = line.strip()
+            cols = line.strip().split("\t")
+            gp2_train_param_dic[cols[0]] = cols[1]
+    f.closed
+    #if "use_bps" in gp2_train_param_dic:
+    #    assert gp2_train_param_dic["use_bps"] == "False", "graphprot2 eval currently does not support --use-bps in grahprot2 train"
+    assert "con_ext" in gp2_train_param_dic, "con_ext info tag missing in %s" %(gp2_train_param_file)
+    # Get nucleotide alphabet + con_ext info.
+    con_ext = False
+    con_ext_str = gp2_train_param_dic["con_ext"]
+    if con_ext_str != "False": # if not False, must be INT.
+        con_ext = int(con_ext_str)
 
     # Output files.
     ws_scores_out = out_folder + "/" + "whole_site_scores.out"
@@ -1728,34 +1744,45 @@ select best overlapping site (or two lists, one without best selection, one with
         print("CALEB: I have something for you ... ")
 
         # 1-hot string to nucleotide label.
-        hot2l_dic = {'1000': 5,
-                     '0100': 6,
-                     '0010': 7,
-                     '0001': 8}
+        hot2l_dic = {'1000': 1,
+                     '0100': 2,
+                     '0010': 3,
+                     '0001': 4}
         hot2nt_dic = {'1000': "A",
                       '0100': "C",
                       '0010': "G",
                       '0001': "U"}
+        # If lowercase context model.
+        if con_ext:
+            hot2l_dic = {'10000000': 1,
+                         '01000000': 2,
+                         '00100000': 3,
+                         '00010000': 4,
+                         '00001000': 5,
+                         '00000100': 6,
+                         '00000010': 7,
+                         '00000001': 8}
+            hot2nt_dic = {'10000000': "A",
+                          '01000000': "C",
+                          '00100000': "G",
+                          '00010000': "U",
+                          '00001000': "a",
+                          '00000100': "c",
+                          '00000010': "g",
+                          '00000001': "u"}
 
         # Get character counts for sequences.
         cc_dic = gp2lib.seqs_dic_count_chars(test_seqs_dic)
-        # Currently only allow A,C,G,U for profile predictions.
+        # Check for invalid nucleotides characters.
         allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1}
-        for nt in allowed_nt_dic:
-            if nt not in cc_dic:
-                assert False, "graphprot2 predict profiles currently only works with uppercase (ACGU) sequences"
-        c_dist_nts = len(cc_dic)
-        assert c_dist_nts == 4, "graphprot2 predict profiles currently only works with uppercase (ACGU) sequences"
-
-        profile_scores_ll = []
-
-        # Max win size.
-        max_w_size = 3
-        for w_size in args.list_win_sizes:
-            if w_size > max_w_size:
-                max_w_size = w_size
-        # For removing len(max_w_extlr) start and end positions of profiles.
-        max_w_extlr = int(max_w_size/2)
+        c_nts = 4
+        if con_ext:
+            allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1, 'a': 1, 'c': 1, 'g': 1, 'u': 1}
+            c_nts = 8
+        for nt in cc_dic:
+            if nt not in allowed_nt_dic:
+                assert False, "test sequences with invalid character \"%s\" encountered (allowed characters: ACGU(acgu)" %(nt)
+        assert len(cc_dic) == c_nts, "# of nucleotide characters in test set != expected # (%i != %i)" %(len(cc_dic), c_nts)
 
         PROFOUT = open(score_profiles_out, "w")
         PEAKOUT = open(peak_regions_bed, "w")
@@ -1764,6 +1791,8 @@ select best overlapping site (or two lists, one without best selection, one with
         TOPROUT = open(top_prof_sites_ref_bed, "w")
         # Peak count.
         peak_i = 0
+        # List of lists with profile scores.
+        profile_scores_ll = []
 
         print("Compute profile scores and top sites ... ")
 
@@ -1782,10 +1811,10 @@ select best overlapping site (or two lists, one without best selection, one with
 
             for v in x:
                 if use_node_attr:
-                    nav = [str(e) for e in v[:-4]]
+                    nav = [str(e) for e in v[:-c_nts]]
                     list_node_attr.append(",".join(nav))
                 # Nucleotides.
-                seq_1h = [int(e) for e in v[-4:]]
+                seq_1h = [int(e) for e in v[-c_nts:]]
                 seq_1h_s = [str(e) for e in seq_1h]
                 seq_1h_s = "".join(seq_1h_s)
                 assert seq_1h_s in hot2l_dic, "seq_1h_s %s not in hot2l_dic" %(seq_1h_s)
@@ -1800,9 +1829,9 @@ select best overlapping site (or two lists, one without best selection, one with
             len_nodes = len(list_node_labels)
 
             # Skip sequences containing < 4 different nucleotides.
-            if len(set(list_node_labels)) != 4:
-                print("Sequence %s contains < 4 individual nucleotides. Skip this sequence ... " %(seq_id))
-                continue
+            #if len(set(list_node_labels)) != 4:
+            #    print("Sequence %s contains < 4 individual nucleotides. Skip this sequence ... " %(seq_id))
+            #    continue
 
             # Predict sliding window profiles.
             window_scores = model_util.get_window_scores(args.list_win_sizes,
@@ -1811,6 +1840,8 @@ select best overlapping site (or two lists, one without best selection, one with
                                               list_node_labels=list_node_labels,
                                               use_node_attr=use_node_attr,
                                               model=model,
+                                              con_ext=False,
+                                              lc_context=con_ext,
                                               device=device,
                                               batch_size=batch_size,
                                               geometric_folder=out_folder)
@@ -1860,6 +1891,8 @@ select best overlapping site (or two lists, one without best selection, one with
                                               list_node_labels=list_node_labels,
                                               use_node_attr=use_node_attr,
                                               model=model,
+                                              lc_context=con_ext,
+                                              con_ext=con_ext,
                                               device=device,
                                               batch_size=batch_size,
                                               geometric_folder=out_folder)
