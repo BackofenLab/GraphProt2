@@ -8710,14 +8710,70 @@ def load_ws_predict_data(args,
         assert fid in fid2row_dic, "graphprot2 gp feature ID %s not found in %s" %(fid, feat_file)
         assert gp_fid2row_dic[fid] == fid2row_dic[fid], "feature infos for feature ID %s differ between gp + train feature files" %(fid)
 
+    # Get sequence context extension set in gp.
+    con_ext = False
+    gp_settings_file = args.in_folder + "/settings.graphprot2_gp.out"
+    if os.path.exists(gp_settings_file):
+        with open(gp_settings_file) as f:
+            for line in f:
+                cols = line.strip().split("\t")
+                if cols[0] == "con_ext":
+                    if cols[1] == "False":
+                        con_ext = False
+                    else:
+                        con_ext = int(cols[1])
+        f.closed
+    # Get base pair + con_ext settings from train.
+    bps_mode = 1
+    bps_cutoff = 0.5
+    con_ext_train = False
+    train_settings_file = args.model_in_folder + "/settings.graphprot2_train.out"
+    if os.path.exists(train_settings_file):
+        with open(train_settings_file) as f:
+            for line in f:
+                cols = line.strip().split("\t")
+                if cols[0] == "bps_mode":
+                    bps_mode = int(cols[1])
+                if cols[0] == "bps_cutoff":
+                    bps_cutoff = float(cols[1])
+                if cols[0] == "con_ext":
+                    if cols[1] == "False":
+                        con_ext_train = False
+                    else:
+                        con_ext_train = int(cols[1])
+        f.closed
+    # Compare gp + train context settings.
+    seqs_all_uc = False
+    if con_ext:
+        if not con_ext_train:
+            print("WARNING: --con-ext prediction data incompatible with trained model")
+            print("           Changing lowercase context regions to uppercase to")
+            print("            restore compatibility with trained model. To use")
+            print("             lowercase context regions in predictions train")
+            print("              a compatible model (graphprot2 gt --con-ext")
+            print("              and graphprot2 train --uc-context disabled)")
+            seqs_all_uc = True
+    if con_ext_train and not con_ext:
+        assert False, "Provided model (--model-in) was trained on upper- and lowercase context, but --in dataset does not contain lowercase context. Please provide a compatible model+dataset combination."
+    if con_ext_train and con_ext:
+        if con_ext_train != con_ext:
+            print("WARNING: set --con-ext differs between trained model and --in dataset (%i != %i)" %(con_ext_train, con_ext))
+
+    # Check sequence feature.
+    assert "fa" in fid2type_dic, "feature ID \"fa\" not in feature file"
+
+    if con_ext_train:
+        assert fid2cat_dic["fa"] == ["A", "C", "G", "U", "a", "c", "g", "u"], "sequence feature alphabet != A,C,G,U,a,c,g,u"
+
+    else:
+        assert fid2cat_dic["fa"] == ["A", "C", "G", "U"], "sequence feature alphabet != A,C,G,U"
+
+
     # Read in FASTA sequences.
     test_fa_in = args.in_folder + "/" + "test.fa"
     assert os.path.exists(test_fa_in), "--in folder does not contain %s"  %(test_fa_in)
-    test_seqs_dic = read_fasta_into_dic(test_fa_in)
+    test_seqs_dic = read_fasta_into_dic(test_fa_in, all_uc=seqs_all_uc)
     assert test_seqs_dic, "no sequences read in from FASTA file \"%s\"" %(test_fa_in)
-    # Check sequence feature.
-    assert "fa" in fid2type_dic, "feature ID \"fa\" not in feature file"
-    assert fid2cat_dic["fa"] == ["A", "C", "G", "U"], "sequence feature alphabet != A,C,G,U"
 
     # Get uppercase (viewpoint) region start and ends for each sequence.
     test_vp_dic = extract_uc_region_coords_from_fasta(test_seqs_dic)
@@ -8739,30 +8795,6 @@ def load_ws_predict_data(args,
     test_eia_dic = False
     test_str_elem_p_dic = False
     test_bpp_dic = False
-
-    # Try to get context extension used to create dataset.
-    con_ext = 100
-    gp_settings_file = args.in_folder + "/settings.graphprot2_gp.out"
-    if os.path.exists(gp_settings_file):
-        with open(gp_settings_file) as f:
-            for line in f:
-                cols = line.strip().split("\t")
-                if cols[0] == "plfold_l":
-                    con_ext = int(cols[1])
-        f.closed
-    # Get base pair settings.
-    bps_mode = 1
-    bps_cutoff = 0.5
-    train_settings_file = args.model_in_folder + "/settings.graphprot2_train.out"
-    if os.path.exists(train_settings_file):
-        with open(train_settings_file) as f:
-            for line in f:
-                cols = line.strip().split("\t")
-                if cols[0] == "bps_mode":
-                    bps_mode = int(cols[1])
-                if cols[0] == "bps_cutoff":
-                    bps_cutoff = float(cols[1])
-        f.closed
 
     # Check and read in data.
     for fid, ftype in sorted(fid2type_dic.items()):
@@ -9037,7 +9069,8 @@ def load_geo_training_data(args,
     assert neg_seqs_dic, "no sequences read in from FASTA file \"%s\"" %(neg_fa_in)
 
     # Check for 4 (8) distinct nucleotides.
-    pos_cc_dic = gp2lib.seqs_dic_count_chars(pos_seqs_dic)
+    pos_cc_dic = seqs_dic_count_chars(pos_seqs_dic)
+    neg_cc_dic = seqs_dic_count_chars(neg_seqs_dic)
     allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1}
     c_nts = 4
     if not seqs_all_uc:
@@ -9106,8 +9139,6 @@ def load_geo_training_data(args,
     if args.use_str_elem_p:
         indiv_feat_dic["elem_p.str"] = 1
     if args.use_bps:
-        indiv_feat_dic["bpp.str"] = 1
-    if args.use_context:
         indiv_feat_dic["bpp.str"] = 1
 
     # Remove features from fid2type_dic.
@@ -12112,6 +12143,41 @@ def polish_fasta_seqs(in_fa, len_dic,
                 assert vp_seq1 == vp_seq2, "vp_seq1 != vp_seq2 for ID %s (\"%s\" != \"%s\")" %(seq_id, vp_seq1, vp_seq2)
         FAOUT.write(">%s\n%s\n" %(seq_id,new_seq))
     FAOUT.close()
+
+
+################################################################################
+
+def get_major_lc_len_from_seqs_dic(seqs_dic):
+    """
+    Go through sequences dictionary (sequence iD -> sequence) and extract
+    longest lowercase part for each sequence. Count how many times each
+    length appears and return most frequent length.
+
+    >>> seqs_dic = {'id1': 'acgACGUac', 'id2': 'ACGU', 'id3': 'GUacguaa', 'id4': 'cguACGU'}
+    >>> get_major_lc_len_from_seqs_dic(seqs_dic)
+    3
+    >>> seqs_dic = {'id1': 'CCAA', 'id2': 'ACGU'}
+    >>> get_major_lc_len_from_seqs_dic(seqs_dic)
+    False
+
+    """
+    assert seqs_dic, "given seqs_dic empty"
+    # Lowercase part length counts dictionary.
+    lcl_dic = {}
+    for seq_id in seqs_dic:
+        m = re.search("([acgtun]+)", seqs_dic[seq_id])
+        if m:
+            lc_len = len(m.group(1))
+            if lc_len not in lcl_dic:
+                lcl_dic[lc_len] = 1
+            else:
+                lcl_dic[lc_len] += 1
+    major_len = False
+    if lcl_dic:
+        for lcl, lcc in sorted(lcl_dic.items(), key=lambda item: item[1], reverse=True):
+            major_len = lcl
+            break
+    return major_len
 
 
 ################################################################################

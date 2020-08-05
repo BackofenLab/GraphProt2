@@ -10,6 +10,12 @@ import sys
 import os
 
 
+"""
+
+python3 -m doctest model_util.py
+
+"""
+
 ################################################################################
 
 def train(epoch, device, model, optimizer, train_loader):
@@ -530,6 +536,16 @@ def get_uc_lc_list_segment(seq, cp,
     >>> con_ext = 2
     >>> get_uc_lc_list_segment(seq, cp, vp_ext=vp_ext, con_ext=con_ext)
     [1, 2, 3, 8, 5]
+    >>> cp = 8
+    >>> vp_ext = 0
+    >>> con_ext = 2
+    >>> get_uc_lc_list_segment(seq, cp, vp_ext=vp_ext, con_ext=con_ext)
+    [6, 7, 4]
+    >>> cp = 4
+    >>> vp_ext = 1
+    >>> con_ext = 4
+    >>> get_uc_lc_list_segment(seq, cp, vp_ext=vp_ext, con_ext=con_ext)
+    [5, 6, 3, 4, 1, 6, 7, 8]
     >>> cp = 1
     >>> vp_ext = 0
     >>> con_ext = 0
@@ -555,18 +571,39 @@ def get_uc_lc_list_segment(seq, cp,
     usuce = cp - 1
     uslcs = cp - vp_ext - con_ext - 1
     uslce = usucs
+    if usucs < 0:
+        usucs = 0
+    if usuce < 1:
+        usuce = 0
+    if uslcs < 0:
+        uslcs = 0
+    if uslce < 1:
+        uslce = 0
+
     # Downstream extensions.
     dsucs = cp
     dsuce = cp + vp_ext
     dslcs = dsuce
     dslce = cp + vp_ext + con_ext
+    if dsucs >= lseq:
+        dsucs = lseq
+    if dsuce > lseq:
+        dsuce = lseq
+    if dslcs >= lseq:
+        dslcs = lseq
+    if dslce > lseq:
+        dslce = lseq
+
+    # Center position.
+    cps = cp-1
+    cpe = cp
 
     # Extract segments.
     usucseg = seq[usucs:usuce]
     uslcseg = seq[uslcs:uslce]
     dsucseg = seq[dsucs:dsuce]
     dslcseg = seq[dslcs:dslce]
-    cpseg = seq[cp-1:cp]
+    cpseg = seq[cps:cpe]
 
     # Change context labels to lowercase labels.
     for i,l in enumerate(uslcseg):
@@ -578,6 +615,17 @@ def get_uc_lc_list_segment(seq, cp,
 
     # Give it to me.
     final_seg = uslcseg + usucseg + cpseg + dsucseg + dslcseg
+
+    #print("USLC: %i %i" %(uslcs,uslce))
+    #print("uslcseg:", uslcseg)
+    #print("USUC: %i %i" %(usucs,usuce))
+    #print("usucseg:", usucseg)
+    #print("CP:   %i %i" %(cps, cpe))
+    #print("cpseg:", cpseg)
+    #print("DSUC: %i %i" %(dsucs,dsuce))
+    #print("dsucseg:", dsucseg)
+    #print("DSLC: %i %i" %(dslcs,dslce))
+    #print("dslcseg:", dslcseg)
     return final_seg
 
 

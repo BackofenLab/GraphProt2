@@ -585,7 +585,7 @@ def setup_argument_parser():
                    type = int,
                    metavar='int',
                    default = False,
-                   help = "Up- and downstream context sequence extension of --in sites with lowercase characters for whole site prediction (graphprot predict --mode 2). Best use same --con-ext values in gp+gt+train modes. Note that statistics (--report) are produced only for uppercase sequence parts (default: False)")
+                   help = "Up- and downstream context sequence extension of --in sites with lowercase characters for whole site prediction (graphprot predict --mode 1). Best use same --con-ext values in gp+gt+train modes. Note that statistics (--report) are produced only for uppercase sequence parts (default: False)")
     p_gp.add_argument("--report",
                    dest="report",
                    default = False,
@@ -2053,12 +2053,6 @@ def main_gt(args):
     pos_transcript_to_genome_bed = args.out_folder + "/" + "positives.transcript_to_genome.bed"
     neg_transcript_to_genome_bed = args.out_folder + "/" + "negatives.transcript_to_genome.bed"
 
-    # Mode settings output file.
-    SETOUT = open(settings_file, "w")
-    for arg in vars(args):
-        SETOUT.write("%s\t%s\n" %(arg, str(getattr(args, arg))))
-    SETOUT.close()
-
     # Custom base pairs check.
     if args.bp_in:
         assert args.add_str, "--bp-in requires --str to be set for structure calculation"
@@ -2095,13 +2089,21 @@ def main_gt(args):
                 lc_context = True
                 break
         # Sequence character counts.
-        seq_cc_dic = seqs_dic_count_chars(pos_seqs_dic)
+        seq_cc_dic = gp2lib.seqs_dic_count_chars(pos_seqs_dic)
         if lc_context:
+            print("Lowercase context regions found inside --in sequences ... ")
             allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1, 'a': 1, 'c': 1, 'g': 1, 'u': 1}
             for nt in seq_cc_dic:
                 if nt not in allowed_nt_dic:
                     assert False, "--in sequences contain \"%s\" character (allowed characters: A C G U a c g u)" %(nt)
             FEATOUT.write("fa\tC\tA,C,G,U,a,c,g,u\t-\n")
+            # Get most frequenet lowercase extension.
+            major_lcl = gp2lib.get_major_lc_len_from_seqs_dic(pos_seqs_dic)
+            assert major_lcl, "no lowercase regions extracted (major_lcl evaluated to False)"
+            print("Most frequent lowercase region length found:  %i" %(major_lcl))
+            print("Set --con-ext to this length ... ")
+            # Use major_lcl as con_ext.
+            args.con_ext = major_lcl
         else:
             allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1}
             for nt in seq_cc_dic:
@@ -2183,6 +2185,12 @@ def main_gt(args):
                                                kmer_top=10,
                                                rna=True,
                                                uc_entropy=True)
+
+        # Mode settings output file.
+        SETOUT = open(settings_file, "w")
+        for arg in vars(args):
+            SETOUT.write("%s\t%s\n" %(arg, str(getattr(args, arg))))
+        SETOUT.close()
 
         print("# positive sequences output: %i" %(c_pos_out))
         print("# negative sequences output: %i" %(c_neg_out))
@@ -2328,6 +2336,12 @@ def main_gt(args):
         assert os.path.exists(args.in_neg_sites), "--neg-in file \"%s\" not found" %(args.in_neg_sites)
         assert not gp2lib.fasta_check_fasta_file(args.in_neg_sites), "--neg-in seems to be in FASTA format, but BED format expected"
         assert gp2lib.bed_check_six_col_format(args.in_neg_sites), "--neg-in BED file appears to be not in 6-column BED format"
+
+    # Mode settings output file.
+    SETOUT = open(settings_file, "w")
+    for arg in vars(args):
+        SETOUT.write("%s\t%s\n" %(arg, str(getattr(args, arg))))
+    SETOUT.close()
 
     # Get chromsome lengths from --gen.
     print("Get chromosome lengths from --gen ... ")
@@ -3519,12 +3533,6 @@ def main_gp(args):
     # Extracted site sequences (twoBitToFa output).
     tmp_fasta = args.out_folder + "/" + "test.tmp.fa"
 
-    # Mode settings output file.
-    SETOUT = open(settings_file, "w")
-    for arg in vars(args):
-        SETOUT.write("%s\t%s\n" %(arg, str(getattr(args, arg))))
-    SETOUT.close()
-
     # Write generated feature infos to table.
     FEATOUT = open(feat_table_out, "w")
 
@@ -3556,14 +3564,23 @@ def main_gp(args):
             if id2vpse_dic[seq_id][1] != seq_l or id2vpse_dic[seq_id][0] != 1:
                 lc_context = True
                 break
+
         # Sequence character counts.
-        seq_cc_dic = seqs_dic_count_chars(test_seqs_dic)
+        seq_cc_dic = gp2lib.seqs_dic_count_chars(test_seqs_dic)
         if lc_context:
+            print("Lowercase context regions found inside --in sequences ... ")
             allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1, 'a': 1, 'c': 1, 'g': 1, 'u': 1}
             for nt in seq_cc_dic:
                 if nt not in allowed_nt_dic:
                     assert False, "--in sequences contain \"%s\" character (allowed characters: A C G U a c g u)" %(nt)
             FEATOUT.write("fa\tC\tA,C,G,U,a,c,g,u\t-\n")
+            # Get most frequenet lowercase extension.
+            major_lcl = gp2lib.get_major_lc_len_from_seqs_dic(test_seqs_dic)
+            assert major_lcl, "no lowercase regions extracted (major_lcl evaluated to False)"
+            print("Most frequent lowercase region length found:  %i" %(major_lcl))
+            print("Set --con-ext to this length ... ")
+            # Use major_lcl as con_ext.
+            args.con_ext = major_lcl
         else:
             allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1}
             for nt in seq_cc_dic:
@@ -3614,6 +3631,12 @@ def main_gp(args):
                                                theme=args.theme,
                                                kmer_top=10,
                                                rna=True)
+
+        # Mode settings output file.
+        SETOUT = open(settings_file, "w")
+        for arg in vars(args):
+            SETOUT.write("%s\t%s\n" %(arg, str(getattr(args, arg))))
+        SETOUT.close()
 
         print("# prediction set sequences output: %i" %(c_test_out))
         print("")
@@ -3688,6 +3711,12 @@ def main_gp(args):
     # If --in column 4 IDs should be kept, check their uniqueness.
     if args.keep_ids:
         assert gp2lib.bed_check_unique_ids(args.in_sites), "--in BED file \"%s\" column 4 IDs not unique. Disable --keep-ids or provide unique IDs" %(args.in_sites)
+
+    # Mode settings output file.
+    SETOUT = open(settings_file, "w")
+    for arg in vars(args):
+        SETOUT.write("%s\t%s\n" %(arg, str(getattr(args, arg))))
+    SETOUT.close()
 
     # Get chromsome lengths from --gen.
     print("Get chromosome lengths from --gen ... ")
