@@ -7779,7 +7779,7 @@ and negative set.
             mdtext += 'title="phyloP scores distribution" width="400" />' + "\n"
             mdtext += """
 
-**Figure:** Mean phyloP conservation score and standard deviation for the positive and negative dataset.
+**Figure:** Mean phyloP conservation score and standard deviation (before -1 .. 1 normalization) for the positive and negative dataset.
 
 &nbsp;
 
@@ -7788,7 +7788,8 @@ and negative set.
         mdtext += """
 ## Conservation scores statistics ### {#con-stats}
 
-**Table:** Conservation scores statistics.
+**Table:** Conservation scores statistics. Note that phyloP statistics are
+calculated before normalization (normalizing values to -1 .. 1).
 
 """
         mdtext += "| &nbsp; &nbsp; Attribute &nbsp; &nbsp; | &nbsp; &nbsp; &nbsp; Positives &nbsp; &nbsp; &nbsp; | &nbsp; &nbsp; &nbsp; Negatives &nbsp; &nbsp; &nbsp; | \n"
@@ -11624,7 +11625,8 @@ I: internal loop, M: multi-loop, S: paired.
         mdtext += """
 ## Conservation scores statistics ### {#con-stats}
 
-**Table:** Conservation scores statistics.
+**Table:** Conservation scores statistics. Note that phyloP statistics are
+calculated before normalization (normalizing values to -1 .. 1).
 
 """
         mdtext += "| &nbsp; &nbsp; Attribute &nbsp; &nbsp; | &nbsp; &nbsp; &nbsp; Prediction set &nbsp; &nbsp; &nbsp; | \n"
@@ -11930,37 +11932,47 @@ def calc_ext_str_features(id2bedrow_dic, chr_len_dic,
         vp_len = vp_e - vp_s + 1
         us_len = vp_s - 1
         ds_len = site_len - vp_e
+        # US DS extension lengths.
         us_site_ext = args.plfold_w
         ds_site_ext = args.plfold_w
+        # In case of lowercase context, substract to update US DS lengths.
         if args.con_ext:
             us_site_ext = args.plfold_w - us_len
             ds_site_ext = args.plfold_w - ds_len
+        assert us_site_ext > 0, "us_site_ext <= 0 (%i) for site ID %s" %(us_site_ext, site_id)
+        assert ds_site_ext > 0, "ds_site_ext <= 0 (%i) for site ID %s" %(ds_site_ext, site_id)
+        # Reference start + end to extract.
         ext_site_s = site_s - us_site_ext
         ext_site_e = site_e + ds_site_ext
+        # Minus strand, US ext becomes DS extension and vice versa.
         if site_pol == "-":
             ext_site_s = site_s - ds_site_ext
             ext_site_e = site_e + us_site_ext
         seq_len = chr_len_dic[seq_id]
-        if ext_site_s < 0:
-            us_site_ext = us_site_ext + ext_site_s
-            if site_pol == "-":
+        # Check extension lengths at reference starts.
+        if ext_site_s < 0: # region start < reference start.
+            if site_pol == "+": # Plus strand.
+                us_site_ext = us_site_ext + ext_site_s
+            else: # Minus strand.
                 ds_site_ext = ds_site_ext + ext_site_s
-                if ds_site_ext < 0:
-                    ds_site_ext == 0
-                if us_site_ext < 0:
-                    us_site_ext == 0
+            if ds_site_ext < 0:
+                ds_site_ext == 0
+            if us_site_ext < 0:
+                us_site_ext == 0
             ext_site_s = 0
-        if ext_site_e > seq_len:
+        if ext_site_e > seq_len: # region end > reference end.
             diff = ext_site_e - seq_len
-            ds_site_ext = ds_site_ext - diff
-            if site_pol == "-":
+            if site_pol == "+": # Plus strand.
+                ds_site_ext = ds_site_ext - diff
+            else:
                 us_site_ext = us_site_ext - diff
             if ds_site_ext < 0:
                 ds_site_ext == 0
             if us_site_ext < 0:
                 us_site_ext == 0
             ext_site_e = seq_len
-        id2newlen_dic[site_id] = ext_site_e - ext_site_s
+        ext_site_len = ext_site_e - ext_site_s
+        id2newlen_dic[site_id] = ext_site_len
         id2extrow_dic[site_id] = "%s\t%i\t%i\t%s\t0\t%s" %(seq_id, ext_site_s, ext_site_e, site_id, site_pol)
         # Plus strand.
         new_vp_s = vp_s + us_site_ext
@@ -11971,6 +11983,9 @@ def calc_ext_str_features(id2bedrow_dic, chr_len_dic,
             new_vp_s = vp_s + ds_site_ext
             new_vp_e = vp_e + ds_site_ext
             id2extlen_dic[site_id] = [ds_site_ext, us_site_ext]
+        # Checks.
+        total_ext = us_site_ext + ds_site_ext
+        assert ext_site_len > total_ext, "ext_site_len <= total_ext (%i <= %i)" %(ext_site_len, total_ext)
         refid_dic[seq_id] = 1
         id2newvp_dic[site_id] = [new_vp_s, new_vp_e]
 
@@ -12029,6 +12044,7 @@ def calc_ext_str_features(id2bedrow_dic, chr_len_dic,
         total_ext = us_ext + ds_ext
         assert len_ll > total_ext, "len_ll <= total_ext for site ID %s" %(site_id)
         new_ll = str_elem_p_dic[site_id][us_ext:-ds_ext]
+        assert new_ll, "new_ll empty for site ID %s (us_ext = %i, ds_ext = %i, len_ll = %i)" %(site_id, us_ext, ds_ext, len_ll)
         SEPOUT.write(">%s\n" %(site_id))
         for l in new_ll:
             s = "\t".join(l)
