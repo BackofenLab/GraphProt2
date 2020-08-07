@@ -11875,6 +11875,136 @@ overlapping with the region.
 
 ################################################################################
 
+def get_ext_site_parts(id2bedrow_dic, chr_len_dic,
+                       str_ext=150,
+                       id2ucr_dic=False,
+                       refid_dic=None,
+                       extlen_dic=None,
+                       id2extrow_dic=None,
+                       id2newvp_dic=None):
+    """
+    Get extended site part lengths:
+    [upstream structure calculation extension,
+    upstream context extension,
+    center region,
+    downstream context extension,
+    downstream structure calculation extension]
+
+    id2bedrow_dic:
+        Site ID to site BED row (region on reference), e.g.
+        'sid1': 'id1\t950\t990\tsid1\t0\t+'
+    chr_len_dic:
+        reference (chromosome) ID -> reference length dic
+        To check and prune extended sites at borders.
+    str_ext:
+        Amount of structure extension added on both sides,
+        should be set to plfold_w.
+    id2ucr_dic:
+        viewpoint (uppercase) center region start and end
+        coordinates for each site.
+        Site ID -> [site_vp_start, site_vp_end]
+    refid_dic:
+        Store reference IDs from id2bedrow_dic.
+    extlen_dic:
+        Extended site lengths dic.
+    id2extrow_dic:
+        Extended reference BED row dictionary.
+    id2newvp_dic:
+        Stores new site viewpoint coordinates.
+        Site ID -> [new_vp_start, new_vp_end]
+
+    >>> id2bedrow_dic = {'sid1': 'id1\t950\t990\tsid1\t0\t+', 'sid2': 'id1\t500\t540\tsid2\t0\t+', 'sid3': 'id1\t0\t40\tsid4\t0\t+', 'sid4': 'id1\t10\t50\tsid5\t0\t-'}
+    >>> id2ucr_dic = {'sid1': [11,30], 'sid2': [11,30], 'sid3': [11,30], 'sid4': [6,30]}
+    >>> chr_len_dic = {'id1' : 1000}
+    >>> get_ext_site_parts(id2bedrow_dic, chr_len_dic, str_ext=100, id2ucr_dic=id2ucr_dic)
+    {'sid1': [100, 10, 20, 10, 10], 'sid2': [100, 10, 20, 10, 100], 'sid3': [0, 10, 20, 10, 100], 'sid4': [100, 5, 25, 10, 10]}
+
+    """
+    # Checks.
+    assert id2bedrow_dic, "given id2bedrow_dic empty"
+    assert str_ext > 0 and str_ext <= 500, "provide reasonable str_ext"
+    # Part lengths dictionary.
+    site2newl_dic = {}
+
+    # Get new part lengths for each site.
+    for site_id in id2bedrow_dic:
+        cols = id2bedrow_dic[site_id].split("\t")
+        seq_id = cols[0]
+        assert seq_id in chr_len_dic, "sequence ID %s not in chr_len_dic" %(seq_id)
+
+        ref_s = int(cols[1])
+        ref_e = int(cols[2])
+        site_id = cols[3]
+        site_sc = cols[4]
+        ref_pol = cols[5]
+        site_len = ref_e - ref_s
+
+        site_vp_s = 1
+        site_vp_e = site_len
+        if id2ucr_dic:
+            assert site_id in id2ucr_dic, "site ID %s not in id2ucr_dic" %(site_id)
+            site_vp_s = id2ucr_dic[site_id][0]
+            site_vp_e = id2ucr_dic[site_id][1]
+        site_vp_len = site_vp_e - site_vp_s + 1
+
+        us_con_ext = site_vp_s - 1
+        ds_con_ext = site_len - site_vp_e
+
+        us_site_ext = str_ext
+        ds_site_ext = str_ext
+
+        ref_ext_s = ref_s - us_site_ext
+        ref_ext_e = ref_e + ds_site_ext
+
+        # Check for ends.
+        ref_len = chr_len_dic[seq_id]
+
+        if ref_ext_s < 0:
+            us_site_ext += ref_ext_s
+            ref_ext_s = 0
+        if ref_ext_e > ref_len:
+            diff = ref_ext_e - ref_len
+            ds_site_ext = ds_site_ext - diff
+            ref_ext_e = ref_len
+
+        # Minus case, flip lengths.
+        if ref_pol == "-":
+            us_ext = ds_site_ext
+            ds_ext = us_site_ext
+            us_site_ext = us_ext
+            ds_site_ext = ds_ext
+
+        # Checks.
+        ref_ext_l = ref_ext_e - ref_ext_s
+        new_site_l = us_site_ext + us_con_ext + site_vp_len + ds_con_ext + ds_site_ext
+        assert ref_ext_l == new_site_l, "ref_ext_l != new_site_l (%i != %i) for site ID %s" %(ref_ext_l, new_site_l, site_id)
+
+        # Store extended BED rows.
+        if id2extrow_dic is not None:
+            id2extrow_dic[site_id] = "%s\t%i\t%i\t%s\t0\t%s" %(seq_id, ref_ext_s, ref_ext_e, site_id, ref_pol)
+
+        # Store new site viewpoint start+end.
+        if id2newvp_dic is not None:
+            new_vp_s = site_vp_s + us_site_ext
+            new_vp_e = site_vp_e + us_site_ext
+            id2newvp_dic[site_id] = [new_vp_s, new_vp_e]
+
+        # Store reference IDs.
+        if refid_dic is not None:
+            refid_dic[seq_id] = 1
+
+        if extlen_dic is not None:
+            extlen_dic[site_id] = ref_ext_l
+
+        # Store new part lengths.
+        site2newl_dic[site_id] = [us_site_ext, us_con_ext, site_vp_len, ds_con_ext, ds_site_ext]
+
+    assert site2newl_dic, "nothing stored inside site2newl_dic"
+    return site2newl_dic
+
+
+################################################################################
+
 def calc_ext_str_features(id2bedrow_dic, chr_len_dic,
                           out_bpp, out_str, args,
                           id2ucr_dic=False,
@@ -11891,7 +12021,7 @@ def calc_ext_str_features(id2bedrow_dic, chr_len_dic,
         Site ID to BED region (tab separated)
     id2ucr_dic:
         Site ID -> [viewpoint_start, viewpoint_end]
-        1-based coords.
+        with 1-based coords.
     chr_len_dic:
         Reference sequence lengths dictionary.
     out_bpp:
@@ -11907,87 +12037,18 @@ def calc_ext_str_features(id2bedrow_dic, chr_len_dic,
 
     print("Extend sequences by --plfold-w for structure calculations ... ")
 
-    # Store added part lengths on both sides (us, ds).
-    id2extlen_dic = {}
+    # Get extended parts and infos.
     id2newvp_dic = {}
     id2extrow_dic = {}
+    extlen_dic = {}
     refid_dic = {}
-    id2newlen_dic = {} # new extended site lengths.
-    for site_id in id2bedrow_dic:
-        cols = id2bedrow_dic[site_id].split("\t")
-        seq_id = cols[0]
-        assert seq_id in chr_len_dic, "sequence ID %s not in chr_len_dic" %(seq_id)
-        site_s = int(cols[1])
-        site_e = int(cols[2])
-        site_id = cols[3]
-        site_sc = cols[4]
-        site_pol = cols[5]
-        site_len = site_e - site_s
-        vp_s = 1
-        vp_e = site_len
-        if id2ucr_dic:
-            assert site_id in id2ucr_dic, "site ID %s not in id2ucr_dic" %(site_id)
-            vp_s = id2ucr_dic[site_id][0]
-            vp_e = id2ucr_dic[site_id][1]
-        vp_len = vp_e - vp_s + 1
-        us_len = vp_s - 1
-        ds_len = site_len - vp_e
-        # US DS extension lengths.
-        us_site_ext = args.plfold_w
-        ds_site_ext = args.plfold_w
-        # In case of lowercase context, substract to update US DS lengths.
-        if args.con_ext:
-            us_site_ext = args.plfold_w - us_len
-            ds_site_ext = args.plfold_w - ds_len
-        assert us_site_ext > 0, "us_site_ext <= 0 (%i) for site ID %s" %(us_site_ext, site_id)
-        assert ds_site_ext > 0, "ds_site_ext <= 0 (%i) for site ID %s" %(ds_site_ext, site_id)
-        # Reference start + end to extract.
-        ext_site_s = site_s - us_site_ext
-        ext_site_e = site_e + ds_site_ext
-        # Minus strand, US ext becomes DS extension and vice versa.
-        if site_pol == "-":
-            ext_site_s = site_s - ds_site_ext
-            ext_site_e = site_e + us_site_ext
-        seq_len = chr_len_dic[seq_id]
-        # Check extension lengths at reference starts.
-        if ext_site_s < 0: # region start < reference start.
-            if site_pol == "+": # Plus strand.
-                us_site_ext = us_site_ext + ext_site_s
-            else: # Minus strand.
-                ds_site_ext = ds_site_ext + ext_site_s
-            if ds_site_ext < 0:
-                ds_site_ext == 0
-            if us_site_ext < 0:
-                us_site_ext == 0
-            ext_site_s = 0
-        if ext_site_e > seq_len: # region end > reference end.
-            diff = ext_site_e - seq_len
-            if site_pol == "+": # Plus strand.
-                ds_site_ext = ds_site_ext - diff
-            else:
-                us_site_ext = us_site_ext - diff
-            if ds_site_ext < 0:
-                ds_site_ext == 0
-            if us_site_ext < 0:
-                us_site_ext == 0
-            ext_site_e = seq_len
-        ext_site_len = ext_site_e - ext_site_s
-        id2newlen_dic[site_id] = ext_site_len
-        id2extrow_dic[site_id] = "%s\t%i\t%i\t%s\t0\t%s" %(seq_id, ext_site_s, ext_site_e, site_id, site_pol)
-        # Plus strand.
-        new_vp_s = vp_s + us_site_ext
-        new_vp_e = vp_e + us_site_ext
-        id2extlen_dic[site_id] = [us_site_ext, ds_site_ext]
-        if site_pol == "-":
-            # Minus strand.
-            new_vp_s = vp_s + ds_site_ext
-            new_vp_e = vp_e + ds_site_ext
-            id2extlen_dic[site_id] = [ds_site_ext, us_site_ext]
-        # Checks.
-        total_ext = us_site_ext + ds_site_ext
-        assert ext_site_len > total_ext, "ext_site_len <= total_ext (%i <= %i)" %(ext_site_len, total_ext)
-        refid_dic[seq_id] = 1
-        id2newvp_dic[site_id] = [new_vp_s, new_vp_e]
+    id2newl_dic = get_ext_site_parts(id2bedrow_dic, chr_len_dic,
+                                     str_ext=args.plfold_w,
+                                     id2ucr_dic=id2ucr_dic,
+                                     refid_dic=refid_dic,
+                                     extlen_dic=extlen_dic,
+                                     id2extrow_dic=id2extrow_dic,
+                                     id2newvp_dic=id2newvp_dic)
 
     # Checks.
     assert id2extrow_dic, "id2extrow_dic empty"
@@ -12019,7 +12080,7 @@ def calc_ext_str_features(id2bedrow_dic, chr_len_dic,
         bed_extract_sequences_from_2bit(tmp_bed, tmp_fa, args.in_2bit)
 
     # Check extracted sequences, replace N's with random nucleotides.
-    polish_fasta_seqs(tmp_fa, id2newlen_dic,
+    polish_fasta_seqs(tmp_fa, extlen_dic,
                       vp_check_seqs_dic=bp_check_seqs_dic,
                       vp_dic=id2newvp_dic)
     calc_str_elem_up_bpp(tmp_fa, tmp_bpp_out, tmp_elem_p_out,
@@ -12035,15 +12096,20 @@ def calc_ext_str_features(id2bedrow_dic, chr_len_dic,
     str_elem_p_dic = read_str_elem_p_into_dic(tmp_elem_p_out,
                                               p_to_str=True)
     assert str_elem_p_dic, "str_elem_p_dic empty"
+
     SEPOUT = open(out_str,"w")
     for site_id in str_elem_p_dic:
-        us_ext = id2extlen_dic[site_id][0]
-        ds_ext = id2extlen_dic[site_id][1]
+        us_ext = id2newl_dic[site_id][0]
+        ds_ext = id2newl_dic[site_id][4]
         # Checks.
         len_ll = len(str_elem_p_dic[site_id])
         total_ext = us_ext + ds_ext
         assert len_ll > total_ext, "len_ll <= total_ext for site ID %s" %(site_id)
-        new_ll = str_elem_p_dic[site_id][us_ext:-ds_ext]
+        if ds_ext:
+            new_ll = str_elem_p_dic[site_id][us_ext:-ds_ext]
+        else:
+            # If ds_ext == 0.
+            new_ll = str_elem_p_dic[site_id][us_ext:]
         assert new_ll, "new_ll empty for site ID %s (us_ext = %i, ds_ext = %i, len_ll = %i)" %(site_id, us_ext, ds_ext, len_ll)
         SEPOUT.write(">%s\n" %(site_id))
         for l in new_ll:
@@ -12071,10 +12137,10 @@ def calc_ext_str_features(id2bedrow_dic, chr_len_dic,
             if re.search(">.+", line):
                 m = re.search(">(.+)", line)
                 seq_id = m.group(1)
-                us_ext = id2extlen_dic[seq_id][0]
-                ds_ext = id2extlen_dic[seq_id][1]
+                us_ext = id2newl_dic[seq_id][0]
+                ds_ext = id2newl_dic[seq_id][4]
                 # Original length.
-                max_len = id2newlen_dic[seq_id] - us_ext - ds_ext
+                max_len = extlen_dic[seq_id] - us_ext - ds_ext
                 BPPOUT.write(">%s\n" %(seq_id))
             else:
                 m = re.search("(\d+)\t(\d+)\t(.+)", line)
