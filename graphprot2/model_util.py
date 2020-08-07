@@ -299,7 +299,74 @@ def train_final_model(args, dataset, train_loader, test_loader,
 
 ################################################################################
 
-def select_model(args, dataset, train_loader, val_loader, models_folder, device):
+def select_model(args, n_features, train_dataset, val_dataset, model_folder, device):
+    """
+    Select best hyperparameter combination for given train_dataset and val_dataset.
+    Return optimal hyperparameters. Use this function for cross validation to
+    estimate generalization performance.
+
+    """
+    opt_batch_size = args.list_batch_size[0]
+    opt_node_hidden_dim = args.list_node_hidden_dim[0]
+    opt_weight_decay = args.list_weight_decay[0]
+    opt_lr = args.list_lr[0]
+    opt_val_loss = 1000000000.0
+    opt_acc = 0
+    opt_epochs = 0
+
+    for batch_size in args.list_batch_size:
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
+        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
+        for node_hidden_dim in args.list_node_hidden_dim:
+            for weight_decay in args.list_weight_decay:
+                for lr in args.list_lr:
+                    model_path = model_folder + "/" + str(batch_size) + "_" + str(node_hidden_dim) + "_" + str(weight_decay) + "_" + str(lr)
+                    # print('Processing with ', model_name + "_" + str(batch_size) + "_" + str(node_hidden_dim) + "_" + str(weight_decay) + "_" + str(lr))
+                    model = FunnelGNN(input_dim=n_features, node_hidden_dim=node_hidden_dim,
+                                     fc_hidden_dim=args.fc_hidden_dim, out_dim=2).to(device)
+
+                    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+                    best_val_loss = 1000000000.0
+                    best_val_acc = 0
+                    elapsed_patience = 0
+                    c_epochs = 0
+                    for epoch in range(0, args.epochs):
+                        c_epochs += 1
+                        if elapsed_patience > args.patience:
+                            break
+                        train_loss = train(device, model, optimizer, train_loader)
+                        val_loss, val_acc = test(val_loader, device, model)
+
+                        if val_loss < best_val_loss:
+                            #print('save model...')
+                            elapsed_patience = 0
+                            best_val_loss = val_loss
+                            best_val_acc = val_acc
+                            torch.save(model.state_dict(), model_path)
+                        else:
+                            elapsed_patience += 1
+
+                    if best_val_loss < opt_val_loss:
+                        opt_val_loss = best_val_loss
+                        opt_node_hidden_dim = node_hidden_dim
+                        opt_weight_decay = weight_decay
+                        opt_lr = lr
+                        opt_acc = best_val_acc
+                        opt_epochs = c_epochs
+                        opt_batch_size = batch_size
+
+    opt_dic["opt_batch_size"] = opt_batch_size
+    opt_dic["opt_node_hidden_dim"] = opt_node_hidden_dim
+    opt_dic["opt_weight_decay"] = opt_weight_decay
+    opt_dic["opt_lr"] = opt_lr
+    opt_dic["opt_acc"] = opt_acc
+    opt_dic["opt_epochs"] = opt_epochs
+    return opt_dic
+
+
+################################################################################
+
+def select_model_old(args, dataset, train_loader, val_loader, models_folder, device):
     """
     Do the hyperparameter (HP) optimization (inner CV).
 

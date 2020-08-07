@@ -3,7 +3,7 @@
 from torch_geometric.datasets import TUDataset
 from torch_geometric.data import DataLoader
 from graphprot2.MyNets import FunnelGNN, MyDataset
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
 from graphprot2 import model_util
 from graphprot2 import gp2lib
 import numpy as np
@@ -146,23 +146,46 @@ def setup_argument_parser():
     # Add advanced model definition arguments group.
     p_tra = p_tr.add_argument_group("model definition arguments")
     # Optional arguments for train.
-    p_tra.add_argument("--k",
-                   dest="kfsplits",
+    p_tra.add_argument("--gen-cv",
+                   dest = "gen_cv",
+                   default = False,
+                   action = "store_true",
+                   help = "Run cross validation in combination with hyperparameter optimization to evaluate generalization performance (default: False)")
+    p_tra.add_argument("--gen-cv-k",
+                   dest="gen_cv_k",
                    type = int,
                    default = 10,
-                   choices = [3,4,5,6,7,8,9,10],
-                   help = "k for k-fold cross validation (default: 10)")
+                   choices = [5,10],
+                   help = "Cross validation k for evaluating generalization performance (default: 10)")
+    p_tra.add_argument("--train-cv",
+                   dest = "train_cv",
+                   default = False,
+                   action = "store_true",
+                   help = "Run cross validation to train final model, with hyperparameter optimization in each split and selection of best parameters based their on average performance on validation sets. By default final model training is done for one split only (validation set size controlled by --train-vs). Note that --train-cv with many hyperparameter combinations considerably increases run time (default: False)")
+    p_tra.add_argument("--train-cv-k",
+                   dest="train_cv_k",
+                   type = int,
+                   default = 5,
+                   choices = [5,10],
+                   help = "Final model cross validation k. Use in combination with --train-cv (default: 5)")
+    p_tra.add_argument("--train-vs",
+                   dest = "train_vs",
+                   type = float,
+                   metavar='float',
+                   default = 0.2,
+                   help = "Validation set size for training final model as percentage of all training sites. Only effective if --train-cv not set (with --train-cv validation set size controlled by --train-cv-k) (default: 0.2)")
     p_tra.add_argument("--gm-data",
                    dest = "gm_data",
                    default = False,
                    action = "store_true",
                    help = "Train generic model on provided dataset (special data format needed)")
     p_tra.add_argument("--batch-size",
-                   dest="batch_size",
+                   dest="list_batch_size",
                    type = int,
                    metavar='int',
-                   default = 50,
-                   help = "Gradient descent batch size (default: 50)")
+                   nargs='+',
+                   default=[50],
+                   help = "List of gradient descent batch sizes (default: 50)")
     p_tra.add_argument("--epochs",
                    dest="epochs",
                    type = int,
@@ -696,6 +719,7 @@ def main_train(args):
     indiv_feat_check = args.use_pc_con + args.use_pp_con + args.use_eia + args.use_tra + args.use_rra + args.use_str_elem_p + args.use_bps
     if indiv_feat_check and args.only_seq:
         assert False, "--only-seq useless in combination with individually selected features (--use-xxx)"
+    assert args.train_vs > 0.1 and args.train_vs <= 0.5, "Use reasonable values for --train-vs (> 0.1 and <= 0.5)"
 
     # Generate results output folder.
     out_folder = args.out_folder
@@ -780,26 +804,34 @@ def main_train(args):
     #args.list_weight_decay = [0.00001]
 
     # Selected hyperparameters.
-    sel_lr = args.list_lr[0]
-    sel_node_hidden_dim = args.list_node_hidden_dim[0]
-    sel_weight_decay = args.list_weight_decay[0]
+    #sel_lr = args.list_lr[0]
+    #sel_node_hidden_dim = args.list_node_hidden_dim[0]
+    #sel_weight_decay = args.list_weight_decay[0]
 
     # Get HPO combinations.
     c_lr = len(args.list_lr)
     c_nhd = len(args.list_node_hidden_dim)
     c_wd = len(args.list_weight_decay)
+    c_bs = len(args.list_batch_size)
 
     # Number of HP combinations.
-    nr_hp_comb = c_lr*c_nhd*c_wd
+    nr_hp_comb = c_lr*c_nhd*c_wd*c_bs
     run_hpo = True
     print("Number of hyperparameter (HP) combinations: %i" %(nr_hp_comb))
     if nr_hp_comb == 1:
         run_hpo = False
-        print("# HP combinations to test == 1. Disabling HP optimization ...")
+        print("# HP combinations to test == 1. No HP optimization needed ...")
 
-    if run_hpo:
 
-        print("Running CV with HP optimization ... ")
+    """
+    Run cross validation (--gen-cv, --gen-cv-k) to estimate generalization
+    performance.
+
+    """
+
+    if gen_cv:
+
+        print("Running CV to estimate generalization performance (--gen-cv) ... ")
 
         # Path to store CV models.
         model_folder = out_folder + "/cv_models/"
@@ -813,19 +845,19 @@ def main_train(args):
         # Chosen hyperparameters + CV results per fold output file.
         opt_cv_hps_file = out_folder + "/opt_hyperparam_cv.out"
         OPTHP = open(opt_cv_hps_file, "w")
-        OPTHP.write("fold\topt_node_hidden_dim\topt_weight_decay\topt_lr\tacc\n")
+        OPTHP.write("fold\topt_batch_size\topt_node_hidden_dim\topt_weight_decay\topt_lr\tacc\n")
 
         # Split datasets into folds.
-        skf = StratifiedKFold(n_splits=args.kfsplits, shuffle=False)
+        skf = StratifiedKFold(n_splits=args.gen_cv_k, shuffle=False)
         acc_list = []
 
         i_cv = 0
 
-        # Do kfsplits-fold cross validation with hyperparameter optimization.
+        # Run --gen-cv-k fold cross validation with hyperparameter optimization.
         for list_tr_idx, list_te_idx in skf.split(np.zeros(len(labels)), labels):
 
             i_cv += 1
-            print("Starting CV fold %i ... " %(i_cv))
+            print("Starting --gen-cv fold %i ... " %(i_cv))
 
             test_dataset = MyDataset([graphs[idx] for idx in list_te_idx])
             # Further split up train portion into train + validation.
@@ -842,21 +874,15 @@ def main_train(args):
             print("# validation instances:  %i" %(c_val))
             print("# test instances:        %i" %(c_test))
 
-            test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True)
-            train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-            val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=True)
-
-            # CV HP optimization inner loop.
-            opt_node_hidden_dim, opt_weight_decay, opt_lr = model_util.select_model(args, dataset, train_loader, val_loader, model_folder, device)
-
-            # Define optimized model.
-            model = FunnelGNN(input_dim=dataset.num_features, node_hidden_dim=opt_node_hidden_dim,
-                              fc_hidden_dim=args.fc_hidden_dim, out_dim=dataset.num_classes).to(device)
-
-            # Load optimized model parameters (load_state_dict) and hyperparameters (from file name).
-            model.load_state_dict(torch.load(model_folder + "/" + str(opt_node_hidden_dim) + "_" + str(opt_weight_decay) + "_" + str(opt_lr)))
+            # Get optimal parameters for this CV split.
+            opt_batch_size, opt_node_hidden_dim, opt_weight_decay, opt_lr, opt_acc = model_util.select_model(args, dataset.num_features, train_dataset,
+                                                                               val_dataset, model_folder, device)
+            model = FunnelGNN(input_dim=dataset.num_features, node_hidden_dim=opt_node_hidden_dim, fc_hidden_dim=args.fc_hidden_dim, out_dim=2).to(device)
+            model_path = model_folder + "/" + str(opt_batch_size) + "_" + str(opt_node_hidden_dim) + "_" + str(opt_weight_decay) + "_" + str(opt_lr)
+            model.load_state_dict(torch.load(model_path))
 
             # Get test error of optimized model.
+            test_loader = DataLoader(test_dataset, batch_size=opt_batch_size, shuffle=False)
             loss, acc = model_util.test(test_loader, device, model)
             # Store test accuracy.
             acc_list.append(acc)
@@ -865,66 +891,145 @@ def main_train(args):
             print("Selected model accuracy: %f" %(acc))
 
             # Output model state dictionary and optimized hyperparameters.
-            OPTHP.write("%i\t%s\t%s\t%s\t%s\n" %(i_cv, str(opt_node_hidden_dim), str(opt_weight_decay), str(opt_lr), str(acc) ))
-            sel_lr = opt_lr
-            sel_node_hidden_dim = opt_node_hidden_dim
-            sel_weight_decay = opt_weight_decay
+            OPTHP.write("%i\t%s\t%s\t%s\t%s\t%s\n" %(i_cv, str(opt_batch_size), str(opt_node_hidden_dim), str(opt_weight_decay), str(opt_lr), str(acc) ))
 
         OPTHP.close()
 
-        # Write average accuracy to file.
+        # Report average accuracy with stdev.
         avg_acc = statistics.mean(acc_list)
         stdev_acc = statistics.stdev(acc_list)
-        avg_acc_out_file = args.out_folder + "/avg_acc.out"
+        print("Average accuarcy + stdev (--gen-cv): %f (+- %f)" %(avg_acc, stdev_acc))
+        avg_acc_out_file = args.out_folder + "/avg_accuracy.gen_cv.out"
         #AAOUT = open(avg_acc_out_file, "a+")
         AAOUT = open(avg_acc_out_file, "w")
         AAOUT.write("%f\t%f\n" %(avg_acc, stdev_acc))
         AAOUT.close()
 
-    # Train final model.
-    final_k = 5
-    skf = StratifiedKFold(n_splits=final_k, shuffle=True)
-    out_model_file = "final.model"
-    out_model_params_file = "final.params"
 
-    if nr_hp_comb == 1:
-        print("Use default hyperparameters for training final model:")
-    else:
-        print("Selected hyperparameters for training final model:")
+    """
+    Train final model.
 
-    print("Learning rate (lr) = %s" %(str(sel_lr)))
-    print("Node feature dimension hidden layers (node_hidden_dim) = %s" %(sel_node_hidden_dim))
-    print("Weight decay (weight_decay) = %s" %(sel_weight_decay))
+    Do this by taking the whole training set, then split into train and
+    validation set (validation set size can be set by --train-vs).
+    Do hyperparameter optimization on the train set, and evaluate each
+    combination on the validation set. Select the best combination, and
+    output the respective model as final model.
+    ALTERNATIVELY, use --train-cv to split train set into --train-cv-k
+    folds, and do the described procedure --train-cv-k times. This yields
+    an average accuracy for each HP combination. Select the HP combination
+    with highest average accuracy. Train a final model with this combination,
+    using the whole training set, and # epochs from the highest accuracy
+    model using this HP combination.
 
-    print("Train final model ... ")
+    batch_size
+    kfsplits
+    New:
+    list_batch_size
+    gen_cv
+    gen_cv_k
+    train_cv
+    train_cv_k
+    train_vs
 
-    for list_tr_idx, list_te_idx in skf.split(np.zeros(len(labels)), labels):
-        train_dataset = MyDataset([graphs[idx] for idx in list_tr_idx])
-        test_dataset = MyDataset([graphs[idx] for idx in list_te_idx])
-        c_train = len(list_tr_idx)
-        c_test = len(list_te_idx)
-        print("# training instances:  %i" %(c_train))
-        print("# test instances:      %i" %(c_test))
-        train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-        test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True)
+    """
 
-        model_util.train_final_model(args, dataset, train_loader, test_loader,
-                                     out_folder, device,
-                                     data_id=data_id,
-                                     out_model_file=out_model_file,
-                                     out_model_params_file=out_model_params_file,
-                                     opt_lr=sel_lr,
-                                     opt_node_hidden_dim=sel_node_hidden_dim,
-                                     opt_weight_decay=sel_weight_decay)
-        # Break after first split.
-        break
+    # Path to store final models.
+    model_folder = out_folder + "/final_models/"
+    if not os.path.exists(model_folder):
+        os.makedirs(model_folder)
 
     final_model_path = out_folder + "/" + out_model_file
     final_params_path = out_folder + "/" + out_model_params_file
-    print("Final model:")
-    print(final_model_path)
-    print("Final model parameters file:")
-    print(final_params_path)
+
+    if train_cv:
+
+        if run_hpo:
+            print("Train final model (HPO enabled, %i splits!) ... " %(args.train_cv_k))
+        else:
+            print("Train final model (%i splits!)... " %(args.train_cv_k))
+
+        skf = StratifiedKFold(n_splits=args.train_cv_k, shuffle=True)
+
+        print("CALEB: I have something for you ... ")
+        # TU DES TU DES ...
+
+    else:
+
+        if run_hpo:
+            print("Train final model (HPO enabled, 1 split only) ... ")
+        else:
+            print("Train final model (1 split only)... ")
+
+        # Make one train-validation split.
+        sss = StratifiedShuffleSplit(n_splits=1, test_size=args.train_vs)
+
+        for list_tr_idx, list_val_idx in sss.split(np.zeros(len(labels)), labels):
+
+            train_dataset = MyDataset([graphs[idx] for idx in list_tr_idx])
+            val_dataset = MyDataset([graphs[idx] for idx in list_val_idx])
+
+            # Report set sizes.
+            c_train = len(list_tr_idx)
+            c_val = len(list_val_idx)
+            print("# training instances:    %i" %(c_train))
+            print("# validation instances:  %i" %(c_val))
+
+            # Get optimal HPs.
+            opt_dic = model_util.select_model(args, dataset.num_features, train_dataset,
+                                              val_dataset, model_folder, device)
+
+            opt_batch_size = opt_dic["opt_batch_size"]
+            opt_node_hidden_dim = opt_dic["opt_node_hidden_dim"]
+            opt_weight_decay = opt_dic["opt_weight_decay"]
+            opt_lr = opt_dic["opt_lr"]
+            opt_acc = opt_dic["opt_acc"]
+            opt_epochs = opt_dic["opt_epochs"]
+
+            #model = FunnelGNN(input_dim=dataset.num_features, node_hidden_dim=opt_node_hidden_dim, fc_hidden_dim=args.fc_hidden_dim, out_dim=2).to(device)
+
+            # Move final model file.
+            model_path = model_folder + "/" + str(opt_batch_size) + "_" + str(opt_node_hidden_dim) + "_" + str(opt_weight_decay) + "_" + str(opt_lr)
+            #model.load_state_dict(torch.load(model_path))
+            assert os.path.exists(model_path), "missing model file (path: %s)" %(model_path)
+            gp2lib.move_rename_file(model_path, final_model_path)
+
+            # Write model params file.
+            PAROUT = open(final_params_path, "w")
+            PAROUT.write("fc_hidden_dim\t%s\n" %(str(args.fc_hidden_dim)))
+            PAROUT.write("epochs\t%s\n" %(str(args.epochs)))
+            PAROUT.write("patience\t%s\n" %(str(args.patience)))
+            PAROUT.write("model_epochs\t%s\n" %(str(opt_epochs)))
+            PAROUT.write("val_acc\t%s\n" %(str(opt_acc)))
+            PAROUT.write("batch_size\t%s\n" %(str(opt_batch_size)))
+            PAROUT.write("lr\t%s\n" %(str(opt_lr)))
+            PAROUT.write("node_hidden_dim\t%s\n" %(str(opt_node_hidden_dim)))
+            PAROUT.write("weight_decay\t%s\n" %(str(opt_weight_decay)))
+            PAROUT.write("data_id\t%s" %(data_id))
+            PAROUT.close()
+
+            # Epochs and accuracy.
+            print("# epochs used to train model: ", opt_epochs)
+            print("Model validation accuracy:    ", opt_acc)
+
+            if run_hpo:
+                print("Optimized final model hyperparameters")
+                print("=====================================")
+                print("batch size:                    ", opt_batch_size)
+                print("Hidden layer node feature dim: ", opt_node_hidden_dim)
+                print("Weight decay:                  ", opt_weight_decay)
+                print("learning rate:                 ", opt_lr)
+            else:
+                print("Final model hyperparameters")
+                print("===========================")
+                print("batch size:                    ", opt_batch_size)
+                print("Hidden layer node feature dim: ", opt_node_hidden_dim)
+                print("Weight decay:                  ", opt_weight_decay)
+                print("learning rate:                 ", opt_lr)
+                print("")
+            print("Final model (hyper)parameters file:\n%s" %())
+            print(final_params_path)
+            print("Final model file:")
+            print(final_model_path)
 
 
 ################################################################################
