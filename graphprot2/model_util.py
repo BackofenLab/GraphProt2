@@ -18,7 +18,7 @@ python3 -m doctest model_util.py
 
 ################################################################################
 
-def train(epoch, device, model, optimizer, train_loader):
+def train(device, model, optimizer, train_loader):
     model.train()
 
     loss_all = 0
@@ -234,14 +234,14 @@ def min_max_normalize_probs(x, max_x, min_x,
 
 ################################################################################
 
-def train_final_model(args, dataset, train_loader, test_loader,
-                      out_folder, device,
-                      data_id="data_id",
-                      out_model_file = "final.model",
-                      out_model_params_file = "final.params",
-                      opt_lr=0.0001,
-                      opt_node_hidden_dim=128,
-                      opt_weight_decay=0.00001):
+def train_final_model_old(args, dataset, train_loader, test_loader,
+                          out_folder, device,
+                          data_id="data_id",
+                          out_model_file = "final.model",
+                          out_model_params_file = "final.params",
+                          opt_lr=0.0001,
+                          opt_node_hidden_dim=128,
+                          opt_weight_decay=0.00001):
     """
     Train final model.
 
@@ -267,7 +267,7 @@ def train_final_model(args, dataset, train_loader, test_loader,
             break
         c_epochs += 1
         # Train network, going over whole dataset.
-        train_loss = train(epoch, device, model, optimizer, train_loader)
+        train_loss = train(device, model, optimizer, train_loader)
         # Get loss on test set.
         test_loss, test_acc = test(test_loader, device, model)
 
@@ -299,7 +299,43 @@ def train_final_model(args, dataset, train_loader, test_loader,
 
 ################################################################################
 
-def select_model(args, n_features, train_dataset, val_dataset, model_folder, device):
+def train_final_model(args, n_features, train_dataset, train_epochs, device,
+                      final_model_path = "final.model",
+                      batch_size=50,
+                      lr=0.0001,
+                      node_hidden_dim=128,
+                      weight_decay=0.00001):
+    """
+    Train final model.
+
+    Just train for given number of epochs, no patience or loss calculation.
+
+    """
+    # Output files.
+    model_file = final_model_path
+
+    # Train loader.
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+
+    # Define network.
+    model = FunnelGNN(input_dim=n_features, node_hidden_dim=node_hidden_dim,
+                      fc_hidden_dim=args.fc_hidden_dim, out_dim=2).to(device)
+    # Define optimizer.
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+    for epoch in range(0, train_epochs):
+        # Train network, going over whole dataset.
+        train_loss = train(device, model, optimizer, train_loader)
+
+    torch.save(model.state_dict(), model_file)
+
+
+################################################################################
+
+def select_model(args, n_features, train_dataset, val_dataset,
+                 model_folder, device,
+                 hps2acc_dic=None,
+                 hps2epo_dic=None):
     """
     Select best hyperparameter combination for given train_dataset and val_dataset.
     Return optimal hyperparameters. Use this function for cross validation to
@@ -313,6 +349,7 @@ def select_model(args, n_features, train_dataset, val_dataset, model_folder, dev
     opt_val_loss = 1000000000.0
     opt_acc = 0
     opt_epochs = 0
+    opt_dic = {}
 
     for batch_size in args.list_batch_size:
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
@@ -320,7 +357,9 @@ def select_model(args, n_features, train_dataset, val_dataset, model_folder, dev
         for node_hidden_dim in args.list_node_hidden_dim:
             for weight_decay in args.list_weight_decay:
                 for lr in args.list_lr:
-                    model_path = model_folder + "/" + str(batch_size) + "_" + str(node_hidden_dim) + "_" + str(weight_decay) + "_" + str(lr)
+                    # Hyperparameter string.
+                    hp_str = str(batch_size) + "_" + str(node_hidden_dim) + "_" + str(weight_decay) + "_" + str(lr)
+                    model_path = model_folder + "/" + hp_str
                     # print('Processing with ', model_name + "_" + str(batch_size) + "_" + str(node_hidden_dim) + "_" + str(weight_decay) + "_" + str(lr))
                     model = FunnelGNN(input_dim=n_features, node_hidden_dim=node_hidden_dim,
                                      fc_hidden_dim=args.fc_hidden_dim, out_dim=2).to(device)
@@ -345,6 +384,20 @@ def select_model(args, n_features, train_dataset, val_dataset, model_folder, dev
                             torch.save(model.state_dict(), model_path)
                         else:
                             elapsed_patience += 1
+
+                    # Store used epochs and best accuarcy for this HP combination.
+                    if hps2acc_dic is not None:
+                        if hp_str not in hps2acc_dic:
+                            hps2acc_dic[hp_str] = []
+                            hps2acc_dic[hp_str].append(best_val_acc)
+                        else:
+                            hps2acc_dic[hp_str].append(best_val_acc)
+                    if hps2epo_dic is not None:
+                        if hp_str not in hps2epo_dic:
+                            hps2epo_dic[hp_str] = []
+                            hps2epo_dic[hp_str].append(c_epochs)
+                        else:
+                            hps2epo_dic[hp_str].append(c_epochs)
 
                     if best_val_loss < opt_val_loss:
                         opt_val_loss = best_val_loss
@@ -404,7 +457,7 @@ def select_model_old(args, dataset, train_loader, val_loader, models_folder, dev
                     if elapsed_patience > args.patience:
                         break
                     # Train network, going over whole dataset.
-                    train_loss = train(epoch, device, model, optimizer, train_loader)
+                    train_loss = train(device, model, optimizer, train_loader)
                     # Get loss on validation set.
                     val_loss, val_acc = test(val_loader, device, model)
 
