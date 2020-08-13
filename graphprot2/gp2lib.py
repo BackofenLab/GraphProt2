@@ -5849,6 +5849,7 @@ def bed_get_transcript_annotations_from_gtf(tr_ids_dic, in_bed, in_gtf, out_tra,
     three_prime_utr
     start_codon (optionally)
     stop_codon (optionally)
+    Non of these (default if no overlap)
 
     tr_ids_dic:
         Transcript IDs dictionary, defines from which transcripts to use
@@ -5881,7 +5882,7 @@ def bed_get_transcript_annotations_from_gtf(tr_ids_dic, in_bed, in_gtf, out_tra,
     are transcript IDs.
 
     Use following labels:
-    five_prime_utr -> F, CDS -> C, three_prime_utr -> T
+    five_prime_utr -> F, CDS -> C, three_prime_utr -> T, none -> N
     start_codon -> S, stop_codon -> E
 
     Output .tra file with format:
@@ -8614,6 +8615,7 @@ def phylop_norm_train_scores(pos_pp_con_out, neg_pp_con_out,
 
 def load_ws_predict_data(args,
                          data_id="data",
+                         predict_con_ext=False,
                          add_info_out=True):
 
     """
@@ -8695,7 +8697,10 @@ def load_ws_predict_data(args,
     f.closed
     assert fid2type_dic, "no feature infos read in from graphprot2 train feature file %s" %(feat_file)
 
-    # Read in features.out from graphprot2 gp, and check.
+    if args.mode == 2:
+        assert "bpp.str" not in fid2type_dic, "--model-in model was trained with base pair information, but profile prediction mode (--mode 2) so far does not support base pair information. Use --mode 1 or train models without base pair information"
+
+    # Read in features.out from graphprot2 gp and check.
     gp_feat_file = args.in_folder + "/" + "features.out"
     assert os.path.exists(gp_feat_file), "%s features file expected but not does not exist" %(gp_feat_file)
     gp_fid2row_dic = {}
@@ -8708,10 +8713,12 @@ def load_ws_predict_data(args,
             gp_fid2row_dic[feat_id] = row
     f.closed
     assert gp_fid2row_dic, "no feature infos found in graphprot2 gp feature file %s" %(gp_feat_file)
-    assert len(fid2row_dic) == len(gp_fid2row_dic), "# features in gp + train feature files differ"
-    for fid in gp_fid2row_dic:
-        assert fid in fid2row_dic, "graphprot2 gp feature ID %s not found in %s" %(fid, feat_file)
-        assert gp_fid2row_dic[fid] == fid2row_dic[fid], "feature infos for feature ID %s differ between gp + train feature files" %(fid)
+    #assert len(fid2row_dic) == len(gp_fid2row_dic), "# features in gp + train feature files differ"
+    for fid in fid2row_dic:
+        assert fid in gp_fid2row_dic, "graphprot2 train feature ID \"%s\" not found in %s" %(fid, gp_feat_file)
+        # If predict_profiles, "fa" feature between gp + train can differ.
+        if not (args.mode == 2 and fid == "fa"):
+            assert gp_fid2row_dic[fid] == fid2row_dic[fid], "feature infos for feature ID \"%s\" differ between gp + train feature files (train: \"%s\", gp: \"%s\")" %(fid, gp_fid2row_dic[fid], fid2row_dic[fid])
 
     # Get sequence context extension set in gp.
     con_ext = False
@@ -8756,11 +8763,30 @@ def load_ws_predict_data(args,
             print("              a compatible model (graphprot2 gt --con-ext")
             print("              and graphprot2 train --uc-context disabled)")
             seqs_all_uc = True
-    if con_ext_train and not con_ext:
-        assert False, "Provided model (--model-in) was trained on upper- and lowercase context, but --in dataset does not contain lowercase context. Please provide a compatible model+dataset combination."
-    if con_ext_train and con_ext:
-        if con_ext_train != con_ext:
-            print("WARNING: set --con-ext differs between trained model and --in dataset (%i != %i)" %(con_ext_train, con_ext))
+
+    # Double talking jive fake graph switches.
+    add_fake_g=False
+    fake_g_lcuc=False
+    # If we have a lowercase uppercase model.
+    if con_ext_train:
+        if con_ext:
+            if predict_con_ext:
+                if con_ext_train != predict_con_ext:
+                    print("WARNING: set context extension differs between trained model and --con-ext (%i != %i)" %(con_ext_train, predict_con_ext))
+            else:
+                if con_ext_train != con_ext:
+                    print("WARNING: --con-ext differs between trained model and --in dataset (%i != %i)" %(con_ext_train, con_ext))
+        else:
+            # Only a problem for --mode 1 whole site prediction.
+            if args.mode == 1:
+                assert False, "Provided model (--model-in) was trained on upper- and lowercase context, but --in dataset does not contain lowercase context. Please provide a compatible model+dataset combination for whole site prediction (--mode 1)."
+
+        if args.mode == 2:
+            # Convert profile prediction sequences to uppercase.
+            seqs_all_uc = True
+            # For profile prediction, we need to add a UC LC fake graph here.
+            add_fake_g = True
+            fake_g_lcuc = True
 
     # Check sequence feature.
     assert "fa" in fid2type_dic, "feature ID \"fa\" not in feature file"
@@ -8770,7 +8796,6 @@ def load_ws_predict_data(args,
 
     else:
         assert fid2cat_dic["fa"] == ["A", "C", "G", "U"], "sequence feature alphabet != A,C,G,U"
-
 
     # Read in FASTA sequences.
     test_fa_in = args.in_folder + "/" + "test.fa"
@@ -8905,6 +8930,8 @@ def load_ws_predict_data(args,
                                                         add_ids_out_file=test_add_ids_out_file,
                                                         add_seqs_out_file=test_add_seqs_out_file,
                                                         bps_mode=bps_mode,
+                                                        add_fake_g=add_fake_g,
+                                                        fake_g_lcuc=fake_g_lcuc,
                                                         plfold_bpp_cutoff=bps_cutoff)
 
     print("Store PyG data on HD ... ")
@@ -9144,10 +9171,13 @@ def load_geo_training_data(args,
     if args.use_bps:
         indiv_feat_dic["bpp.str"] = 1
 
+
     # Remove features from fid2type_dic.
     if indiv_feat_dic:
         del_feat_list = []
         for fid in fid2type_dic:
+            if fid == "fa":
+                continue
             if fid not in indiv_feat_dic:
                 del_feat_list.append(fid)
         for fid in del_feat_list:
@@ -9155,6 +9185,7 @@ def load_geo_training_data(args,
 
     if args.only_seq:
         fid2type_dic = {}
+        fid2type_dic["fa"] = "C"
 
     # Dictionaries.
     pos_pc_con_dic = False
@@ -9413,6 +9444,8 @@ def generate_geometric_data(seqs_dic, vp_dic,
                             plfold_bpp_cutoff=0.2,
                             g_idx=False,
                             n_idx=False,
+                            add_fake_g=False,
+                            fake_g_lcuc=False,
                             add_ids_out_file=False,
                             add_seqs_out_file=False,
                             bps_mode=1):
@@ -9493,7 +9526,6 @@ def generate_geometric_data(seqs_dic, vp_dic,
 
         # Add feature values per position.
         g_i = 0
-        seen_vp = False
         for i,c in enumerate(seq): # i from 0.. l-1
             if seq_id in seqs_out_dic:
                 seqs_out_dic[seq_id] += c
@@ -9552,11 +9584,13 @@ def generate_geometric_data(seqs_dic, vp_dic,
                 else:
                     assert False, "ERROR: invalid bps_mode given (valid values: 1,2)"
 
+        # Update node and graph indices.
         n_idx += n_nodes
-        # Append graph to list.
         g_idx += 1
         # Store sequence ID -> graph index.
         id2gidx_dic[seq_id] = g_idx
+
+    assert g_idx, "no graphs added (g_idx == 0)"
 
     # Output additional infos.
     if add_ids_out_file:
@@ -9568,6 +9602,34 @@ def generate_geometric_data(seqs_dic, vp_dic,
         fasta_output_dic(seqs_out_dic, add_seqs_out_file,
                          split=True,
                          split_size=60)
+
+    # If double taking jive fake graph should be added.
+    if add_fake_g:
+        # Fake sequence.
+        fake_seq = "ACGU"
+        if fake_g_lcuc:
+            fake_seq = "ACGUacgu"
+        # Node indicators.
+        n_nodes = len(fake_seq)
+        all_graph_indicators.extend([g_idx+1]*n_nodes)
+        # Node labels and edges.
+        g_i = 0
+        for i,c in enumerate(fake_seq):
+            all_nodes_labels.append(dict_label_idx[c])
+            # Add backbone edges.
+            if g_i > 0:
+                all_edges.append((g_i-1+n_idx, g_i+n_idx))
+                all_edges.append((g_i+n_idx, g_i-1+n_idx))
+            # Increment graph node index.
+            g_i += 1
+        # Node attributes.
+        if all_nodes_attributes:
+            # Add first element n_nodes times.
+            for i in range(n_nodes):
+                all_nodes_attributes.append(all_nodes_attributes[0])
+        # Update node and graph indices.
+        n_idx += n_nodes
+        g_idx += 1
 
     return all_nodes_labels, all_graph_indicators, all_edges, all_nodes_attributes, g_idx, n_idx
 
@@ -10152,6 +10214,7 @@ def seq_to_plot_df(seq, alphabet,
 ################################################################################
 
 def add_importance_scores_plot(df, fig, gs, i,
+                               color_dict=False,
                                y_label_size=9):
     """
     Make nucleotide importance scores plot.
@@ -10159,7 +10222,10 @@ def add_importance_scores_plot(df, fig, gs, i,
 
     """
     ax = fig.add_subplot(gs[i, :])
-    logo = logomaker.Logo(df, ax=ax)
+    if color_dict:
+        logo = logomaker.Logo(df, ax=ax, color_scheme=color_dict)
+    else:
+        logo = logomaker.Logo(df, ax=ax)
     logo.style_spines(visible=False)
     logo.style_spines(spines=['left'], visible=True, bounds=[-1, 1])
     logo.style_spines(spines=['bottom'], visible=False)
@@ -10330,8 +10396,13 @@ def add_phylop_scores_plot(df, fig, gs, i,
 
 def make_feature_attribution_plot(seq, profile_scores, plot_out_file,
                                   seq_alphabet=["A","C","G","U"],
+                                  eia_alphabet=["E", "I"],
+                                  rra_alphabet=["N", "R"],
+                                  tra_alphabet=["C", "F", "T"],
                                   seq_label_plot=False,
                                   exon_intron_labels=False,
+                                  repeat_region_labels=False,
+                                  transcript_region_labels=False,
                                   phastcons_scores=False,
                                   phylop_scores=False):
     """
@@ -10354,15 +10425,32 @@ def make_feature_attribution_plot(seq, profile_scores, plot_out_file,
     plot_out_file:
         Plot output file. E.g. "results_out/site1_plot.png"
     seq_alphabet:
-        Sequence alphabet, by default == RNA alphabet.
+        Sequence alphabet, by default == RNA alphabet (ACGU).
+    eia_alphabet:
+        Exon-intron labels alphabet.
+    rra_alphabet:
+        Repeat region labels alphabet.
+    tra_alphabet:
+        Transcript region labels alphabet.
     seq_label_plot:
         Make RNA sequence label plot.
     exon_intron_labels:
-        List of exon (E) intron (I) labels for the binding site.
+        List of exon-intron labels for the binding site.
+    repeat_region_labels:
+        List of repeat region labels for the binding site.
+    transcript_region_labels:
+        List of transcript region labels for the binding site.
     phastcons_scores:
         List of phastCons scores for the binding site.
     phylop_scores:
         List of phyloP scores for the binding site.
+
+    Original colors:
+    'A' : '#008000', 'C': '#0000ff',  'G': '#ffa600',  'U': '#ff0000',
+
+    Different greys:
+    'A' : '#616161', 'C': '#7f7f7f',  'G': '#a0a0a0',  'U': '#d2d2d2'
+    'a' : '#616161', 'c': '#7f7f7f',  'g': '#a0a0a0',  'u': '#d2d2d2'
 
     """
 
@@ -10384,8 +10472,19 @@ def make_feature_attribution_plot(seq, profile_scores, plot_out_file,
     if exon_intron_labels:
         assert len(exon_intron_labels) == len(seq), "length exon_intron_labels list != length seq"
         ei_seq = "".join(exon_intron_labels)
-        ei_alphabet = ["E", "I"]
-        ei_df = seq_to_plot_df(ei_seq, ei_alphabet)
+        ei_df = seq_to_plot_df(ei_seq, eia_alphabet)
+        n_subplots += 1
+        height_ratios.append(1)
+    if repeat_region_labels:
+        assert len(repeat_region_labels) == len(seq), "length repeat_region_labels list != length seq"
+        rra_seq = "".join(repeat_region_labels)
+        rra_df = seq_to_plot_df(rra_seq, rra_alphabet)
+        n_subplots += 1
+        height_ratios.append(1)
+    if transcript_region_labels:
+        assert len(transcript_region_labels) == len(seq), "length transcript_region_labels list != length seq"
+        tra_seq = "".join(transcript_region_labels)
+        tra_df = seq_to_plot_df(tra_seq, tra_alphabet)
         n_subplots += 1
         height_ratios.append(1)
     if phastcons_scores:
@@ -10407,22 +10506,47 @@ def make_feature_attribution_plot(seq, profile_scores, plot_out_file,
 
     # Plot subplots.
     i = 0
+    color_dict = False
+    if seq_alphabet == ["A","C","G","U"]:
+        color_dict = {'A' : '#008000', 'C': '#0000ff',  'G': '#ffa600',  'U': '#ff0000'}
+    elif seq_alphabet == ["A","C","G","U","a","c","g","u"]:
+        color_dict = {'A' : '#008000', 'C': '#0000ff',  'G': '#ffa600',  'U': '#ff0000', 'a' : '#008000', 'c': '#0000ff',  'g': '#ffa600',  'u': '#ff0000'}
+    else:
+        assert False, "invalid seq_alphabet given"
     add_importance_scores_plot(is_df, fig, gs, i,
+                               color_dict=color_dict,
                                y_label_size=5.5)
     if seq_label_plot:
         i += 1
+        color_dict = False
         if seq_alphabet == ["A","C","G","U"]:
-            color_dict = {'A' : '#616161', 'C': '#7f7f7f',  'G': '#a0a0a0',  'U': '#d2d2d2'}
+            color_dict = {'A' : '#008000', 'C': '#0000ff',  'G': '#ffa600',  'U': '#ff0000'}
         elif seq_alphabet == ["A","C","G","U","a","c","g","u"]:
-            color_dict = {'A' : '#616161', 'C': '#7f7f7f',  'G': '#a0a0a0',  'U': '#d2d2d2', 'a' : '#616161', 'c': '#7f7f7f',  'g': '#a0a0a0',  'u': '#d2d2d2'}
+            color_dict = {'A' : '#008000', 'C': '#0000ff',  'G': '#ffa600',  'U': '#ff0000', 'a' : '#008000', 'c': '#0000ff',  'g': '#ffa600',  'u': '#ff0000'}
         else:
             assert False, "invalid seq_alphabet given"
-        add_label_plot(sl_df, fig, gs, i, color_dict, y_label="sequence",
+        add_label_plot(sl_df, fig, gs, i, color_dict=color_dict, y_label="sequence",
                        y_label_size=4)
     if exon_intron_labels:
         i += 1
-        color_dict = {'E' : 'grey', 'I': 'lightgrey'}
-        add_label_plot(ei_df, fig, gs, i, color_dict,
+        color_dict = False
+        if eia_alphabet == ["E", "I"]:
+            color_dict = {'E' : 'grey', 'I': 'lightgrey'}
+        add_label_plot(ei_df, fig, gs, i, color_dict=color_dict,
+                       y_label_size=4)
+    if repeat_region_labels:
+        i += 1
+        color_dict = False
+        if rra_alphabet == ["N", "R"]:
+            color_dict = {'N' : 'grey', 'R': 'lightgrey'}
+        add_label_plot(rra_df, fig, gs, i, color_dict=color_dict,
+                       y_label_size=4)
+    if transcript_region_labels:
+        i += 1
+        color_dict = False
+        if tra_alphabet == ["C", "F", "T"]:
+            color_dict = {'C' : '#616161', 'F': '#7f7f7f',  'T': '#a0a0a0'}
+        add_label_plot(tra_df, fig, gs, i, color_dict=color_dict,
                        y_label_size=4)
     if phastcons_scores:
         i += 1
@@ -10528,10 +10652,14 @@ def motif_scores_to_plot_df(motif_sc_ll):
 
 def make_motif_plot(motif_seqs_ll, motif_out_file,
                     motif_eia_ll=False,
+                    motif_rra_ll=False,
+                    motif_tra_ll=False,
                     motif_pc_ll=False,
                     motif_pp_ll=False,
                     seq_alphabet=['A', 'C', 'G', 'U'],
-                    eia_alphabet=['E', 'I']):
+                    eia_alphabet=['E', 'I'],
+                    rra_alphabet=['N', 'R'],
+                    tra_alphabet=['C', 'F', 'T']):
     """
     Plot motifs.
     Apart from sequence motif (motif_seqs_ll), optionally create motif for
@@ -10543,10 +10671,22 @@ def make_motif_plot(motif_seqs_ll, motif_out_file,
         List of sequence character lists (same lengths)
     motif_eia_ll:
         List of exon intron character lists (same lengths)
+    motif_rra_ll:
+        List of repeat region character lists (same lengths)
+    motif_tra_ll:
+        List of transcript region character lists (same lengths)
     motif_pc_ll:
         List of phastCons score lists (same lengths)
     motif_pp_ll:
         List of phyloP score lists (same lengths)
+    seq_alphabet:
+        Sequence alphabet, by default == RNA alphabet (ACGU).
+    eia_alphabet:
+        Exon-intron labels alphabet.
+    rra_alphabet:
+        Repeat region labels alphabet.
+    tra_alphabet:
+        Transcript region labels alphabet.
 
     """
     # Get motif size from data.
@@ -10560,6 +10700,16 @@ def make_motif_plot(motif_seqs_ll, motif_out_file,
     # Exon intron motif dataframe.
     if motif_eia_ll:
         eia_df = motif_seqs_to_plot_df(motif_eia_ll, alphabet=eia_alphabet)
+        n_subplots += 1
+        height_ratios.append(1)
+    # Repeat region motif dataframe.
+    if motif_rra_ll:
+        rra_df = motif_seqs_to_plot_df(motif_rra_ll, alphabet=rra_alphabet)
+        n_subplots += 1
+        height_ratios.append(1)
+    # Transcript region motif dataframe.
+    if motif_tra_ll:
+        tra_df = motif_seqs_to_plot_df(motif_tra_ll, alphabet=tra_alphabet)
         n_subplots += 1
         height_ratios.append(1)
     # phastCons scores dataframe.
@@ -10584,19 +10734,42 @@ def make_motif_plot(motif_seqs_ll, motif_out_file,
     # Plot subplots.
     i = 0
     # Sequence motif.
+    color_dict = False
     if seq_alphabet == ["A","C","G","U"]:
-        color_dict = {'A' : '#616161', 'C': '#7f7f7f',  'G': '#a0a0a0',  'U': '#d2d2d2'}
+        color_dict = {'A' : '#008000', 'C': '#0000ff',  'G': '#ffa600',  'U': '#ff0000'}
     elif seq_alphabet == ["A","C","G","U","a","c","g","u"]:
-        color_dict = {'A' : '#616161', 'C': '#7f7f7f',  'G': '#a0a0a0',  'U': '#d2d2d2', 'a' : '#616161', 'c': '#7f7f7f',  'g': '#a0a0a0',  'u': '#d2d2d2'}
+        color_dict = {'A' : '#008000', 'C': '#0000ff',  'G': '#ffa600',  'U': '#ff0000', 'a' : '#008000', 'c': '#0000ff',  'g': '#ffa600',  'u': '#ff0000'}
     else:
         assert False, "invalid seq_alphabet given"
-    add_motif_label_plot(seq_df, fig, gs, i, color_dict=False, y_label="sequence")
+    add_motif_label_plot(seq_df, fig, gs, i, color_dict=color_dict, y_label="sequence")
     # Exon intron motif.
     if motif_eia_ll:
         i += 1
-        color_dict = {'E' : 'grey', 'I': 'lightgrey'}
+        color_dict = False
+        if eia_alphabet == ['E', 'I']:
+            color_dict = {'E' : 'grey', 'I': 'lightgrey'}
         add_motif_label_plot(eia_df, fig, gs, i,
                              y_label="exon-intron",
+                             y_label_size=7,
+                             color_dict=color_dict)
+    # Repeat region motif.
+    if motif_rra_ll:
+        i += 1
+        color_dict = False
+        if rra_alphabet == ['N', 'R']:
+            color_dict = {'N' : 'grey', 'R': 'lightgrey'}
+        add_motif_label_plot(rra_df, fig, gs, i,
+                             y_label="repeat region",
+                             y_label_size=7,
+                             color_dict=color_dict)
+    # Transcript region motif.
+    if motif_tra_ll:
+        i += 1
+        color_dict = False
+        if tra_alphabet == ["C", "F", "T"]:
+            color_dict = {'C' : '#616161', 'F': '#7f7f7f',  'T': '#a0a0a0'}
+        add_motif_label_plot(tra_df, fig, gs, i,
+                             y_label="transcript region",
                              y_label_size=7,
                              color_dict=color_dict)
     # phastCons motif.
@@ -11713,7 +11886,7 @@ Distribution of transcript regions for the prediction set.
                                           perc=True, theme=theme)
         tra_plot_path = plots_folder + "/" + tra_plot
         mdtext += '<img src="' + tra_plot_path + '" alt="Transcript region distribution"' + "\n"
-        mdtext += 'title="Transcript region distribution" width="550" />' + "\n"
+        mdtext += 'title="Transcript region distribution" width="400" />' + "\n"
         mdtext += """
 **Figure:** Percentages of 5'UTR (F), CDS (C), and 3'UTR (T) positions as well as
 positions not covered by these transcript regions (N) for the prediction set.
@@ -11777,7 +11950,7 @@ Finder (with period of 12 or less).
                                           perc=True, theme=theme)
         rra_plot_path = plots_folder + "/" + rra_plot
         mdtext += '<img src="' + rra_plot_path + '" alt="Repeat region distribution"' + "\n"
-        mdtext += 'title="Repeat region distribution" width="550" />' + "\n"
+        mdtext += 'title="Repeat region distribution" width="400" />' + "\n"
         mdtext += """
 **Figure:** Percentages of repeat (R) and no-repeat (N) regions for the
 prediction set.

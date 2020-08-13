@@ -318,7 +318,7 @@ optional arguments:
   --thr float           Minimum site score (--in BED column 5) for filtering
                         (assuming higher score == better site) (default: None)
   --rev-filter          Reverse --thr filtering (i.e. the lower the better,
-                        e.g. for p-values) (default: false)
+                        e.g. for p-values) (default: False)
   --max-len int         Maximum length of --in sites (default: 300)
   --min-len int         Minimum length of --in sites (only effective for
                         --mode 2). If length < --min-len, take center and
@@ -368,7 +368,7 @@ additional annotation arguments:
   --eia                 Add exon-intron annotations to genomic regions
                         (default: False)
   --eia-ib              Add intron border annotations to genomic regions (in
-                        combination with --exon-intron) (GPdefault: False)
+                        combination with --exon-intron) (default: False)
   --eia-n               Label regions not covered by intron or exon regions as
                         N instead of labelling them as introns (I) (in
                         combination with --exon-intron) (default: False)
@@ -412,11 +412,12 @@ The following command line arguments are available in `graphprot2 gp` mode:
 ```
 graphprot2 gp -h
 usage: graphprot2 gp [-h] --in str --out str [--gtf str] [--gen str]
-                     [--keep-ids] [--gene-filter] [--report] [--theme {1,2}]
-                     [--eia] [--eia-ib] [--eia-n] [--tr-list str]
-                     [--phastcons str] [--phylop str] [--tra] [--tra-codons]
-                     [--tra-borders] [--rra] [--str] [--bp-in str]
-                     [--plfold-u int] [--plfold-l int] [--plfold-w int]
+                     [--keep-ids] [--gene-filter] [--con-ext int] [--report]
+                     [--theme {1,2}] [--eia] [--eia-ib] [--eia-n]
+                     [--tr-list str] [--phastcons str] [--phylop str] [--tra]
+                     [--tra-codons] [--tra-borders] [--rra] [--str]
+                     [--bp-in str] [--plfold-u int] [--plfold-l int]
+                     [--plfold-w int]
 
 optional arguments:
   -h, --help       show this help message and exit
@@ -426,6 +427,12 @@ optional arguments:
                    be unique (default: False)
   --gene-filter    Filter --in sites based on gene coverage (gene annotations
                    from --gtf) (default: False)
+  --con-ext int    Up- and downstream context sequence extension of --in sites
+                   with lowercase characters for whole site prediction
+                   (graphprot predict --mode 1). Best use same --con-ext
+                   values in gp+gt+train modes. Note that statistics
+                   (--report) are produced only for uppercase sequence parts
+                   (default: False)
   --report         Output an .html report providing various training set
                    statistics and plots (default: False)
   --theme {1,2}    Set theme for .html report (1: default, 2: midnight blue)
@@ -486,10 +493,12 @@ graphprot2 train -h
 usage: graphprot2 train [-h] --in IN_FOLDER --out OUT_FOLDER [--only-seq]
                         [--use-phastcons] [--use-phylop] [--use-eia]
                         [--use-tra] [--use-rra] [--use-str-elem-p] [--use-bps]
-                        [--bps-mode {1,2,3}] [--bps-prob-cutoff float]
-                        [--k {3,4,5,6,7,8,9,10}] [--gm-data]
-                        [--batch-size int] [--epochs int] [--patience int]
-                        [--fc-hidden-dim int] [--list-lr float [float ...]]
+                        [--bps-mode {1,2}] [--bps-prob-cutoff float]
+                        [--uc-context] [--gen-cv] [--gen-cv-k {5,10}]
+                        [--gm-cv] [--train-cv] [--train-cv-k {5,10}]
+                        [--train-vs float] [--batch-size int [int ...]]
+                        [--epochs int] [--patience int] [--fc-hidden-dim int]
+                        [--list-lr float [float ...]]
                         [--list-hidden-dim int [int ...]]
                         [--list-weight-decay float [float ...]]
 
@@ -503,7 +512,7 @@ required arguments:
 feature definition arguments:
   --only-seq            Use only sequence feature. By default all features
                         present in --in are used as node attributes (default:
-                        false)
+                        False)
   --use-phastcons       Add phastCons conservation scores. Set --use-x to
                         define which features to add on top of sequence
                         feature (by default all --in features are used)
@@ -525,21 +534,43 @@ feature definition arguments:
   --use-bps             Add base pairs to graph. Set --use-x to define which
                         features to add on top of sequence feature (by default
                         all --in features are used)
-  --bps-mode {1,2,3}    Defines which base pairs are added to the graphs.
-                        --bpp-mode 1 : all base pairs in viewpoint+context.
-                        --bpp-mode 2 : base pairs with start or end in
-                        viewpoint region. --bpp-mode 3 : only base pairs with
-                        start+end in viewpoint (default: 2)
+  --bps-mode {1,2}      Defines which base pairs are added to the graphs.
+                        --bpp-mode 1 : base pairs with start or end in
+                        viewpoint region. --bpp-mode 2 : only base pairs with
+                        start+end in viewpoint (default: 1)
   --bps-prob-cutoff float
                         Base pair probability cutoff for filtering base pairs
                         added to the graph (default: 0.5)
+  --uc-context          Convert lowercase context (if present, added by
+                        graphprot2 gt --con-ext) to uppercase (default: False)
 
 model definition arguments:
-  --k {3,4,5,6,7,8,9,10}
-                        k for k-fold cross validation (default: 10)
-  --gm-data             Train generic model on provided dataset (special data
-                        format needed)
-  --batch-size int      Gradient descent batch size (default: 50)
+  --gen-cv              Run cross validation in combination with
+                        hyperparameter optimization to evaluate generalization
+                        performance (default: False)
+  --gen-cv-k {5,10}     Cross validation k for evaluating generalization
+                        performance (default: 10)
+  --gm-cv               Treat data as generic model data (positive IDs with
+                        specific format required). This turns on generic model
+                        data cross validation, with every fold leaving one RBP
+                        set out for testing (ignoring --gen-cv and --gen-cv-k)
+                        (default: False)
+  --train-cv            Run cross validation to train final model, with
+                        hyperparameter optimization in each split and
+                        selection of best parameters based their on average
+                        performance on validation sets. By default final model
+                        training is done for one split only (validation set
+                        size controlled by --train-vs). Note that --train-cv
+                        with many hyperparameter combinations considerably
+                        increases run time (default: False)
+  --train-cv-k {5,10}   Final model cross validation k. Use in combination
+                        with --train-cv (default: 5)
+  --train-vs float      Validation set size for training final model as
+                        percentage of all training sites. Only effective if
+                        --train-cv not set (with --train-cv validation set
+                        size controlled by --train-cv-k) (default: 0.2)
+  --batch-size int [int ...]
+                        List of gradient descent batch sizes (default: 50)
   --epochs int          Number of training epochs (default: 200)
   --patience int        Number of epochs to wait for further improvement on
                         validation set before stopping (default: 30)
@@ -577,10 +608,10 @@ optional arguments:
                         Specify number(s) of top predicted sites used for
                         motif extraction. Provide multiple numbers (e.g. --nr-
                         top-sites 100 500 1000) to extract one motif plot from
-                        each site set (default: 1000)
+                        each site set (default: 500)
   --nr-top-profiles int
                         Specify number of top predicted sites to plot profiles
-                        for (default: 50)
+                        for (default: 25)
   --motif-size LIST_MOTIF_SIZES [LIST_MOTIF_SIZES ...]
                         Motif size(s) (widths) for extracting and plotting
                         motifs. Provide multiple sizes (e.g. --motif-size 5 7
@@ -610,8 +641,8 @@ usage: graphprot2 predict [-h] --in IN_FOLDER --model-in MODEL_IN_FOLDER --out
                           str [--mode {1,2}]
                           [--win-size LIST_WIN_SIZES [LIST_WIN_SIZES ...]]
                           [--peak-ext int] [--con-ext int] [--thr float]
+                          [--max-merge-dist int]
 
-<<<<<<< HEAD
 optional arguments:
   -h, --help            show this help message and exit
   --mode {1,2}          Define prediction mode. (1) predict whole sites, (2)
@@ -620,15 +651,21 @@ optional arguments:
   --win-size LIST_WIN_SIZES [LIST_WIN_SIZES ...]
                         Windows size(s) for calculating position-wise scoring
                         profiles. Provide multiple sizes (e.g. --win-size 5 7
-                        9) to compute average profiles (default: 7)
-  --peak-ext int        Up- and downstream peak position extension (uppercase
-                        characters) for peak scoring and extraction from
+                        9) to compute average profiles (default: 11)
+  --peak-ext int        Up- and downstream peak position extension for
+                        extracting top-scoring sites from fixed-window
                         profiles (default: 30)
-  --con-ext int         Up- and downstream peak region extension (lowercase
-                        characters) for peak scoring and extraction from
-                        profiles (default: false)
-  --thr float           Minimum profile position score for extracting top-
-                        scoring sites (default: 0.5)
+  --con-ext int         Up- and downstream context extension for extracting
+                        top-scoring sites from fixed-window profiles. By
+                        default uses --con-ext info from --model-in (if set in
+                        graphprot2 train), but restricts it to a maximum of 50
+                        (default: False)
+  --thr float           Minimum profile position score for extracting peak
+                        regions and top-scoring sites. Further increase e.g.
+                        in case of too many or too broad peaks (default: 0.5)
+  --max-merge-dist int  Maximum distance between two peaks for merging. Two
+                        peakse get merged to one if they are <= --max-merge-
+                        dist away from each other (default: 0)
 
 required arguments:
   --in IN_FOLDER        Input prediction data folder (output of graphprot2 gp)

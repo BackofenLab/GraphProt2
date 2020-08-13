@@ -490,6 +490,8 @@ def get_window_scores(list_w_sizes,
                       model=None,
                       device=None,
                       batch_size=None,
+                      seq_id="seq_id",
+                      win_sc_out_file=False,
                       geometric_folder=None):
     """
     Predict whole site scores in a sliding window fashion, starting from
@@ -525,10 +527,19 @@ def get_window_scores(list_w_sizes,
     c_w_sizes = len(list_w_sizes)
 
     # Set a maximum lowercase context extension for window prediction.
-    lc_ext = con_ext
+    lc_ext = 0
     if con_ext:
+        lc_ext = con_ext
         if con_ext > 50:
+            print("Set --con-ext > 50 (%i). Restrict --con-ext to 50 ... " %(con_ext))
             lc_ext = 50
+
+    # Window scores output file.
+    if win_sc_out_file:
+        sub_seqs_list = []
+        reg_se_list = []
+
+    max_w_size = max(list_w_sizes)
 
     for w_size in list_w_sizes:
         # Extension left / right.
@@ -539,8 +550,8 @@ def get_window_scores(list_w_sizes,
             reg_e = i + extlr + 1
             # If lowercase context extension specified.
             if con_ext:
-                reg_s = reg_s - con_ext
-                reg_e = reg_e + con_ext
+                reg_s = reg_s - lc_ext
+                reg_e = reg_e + lc_ext
             if reg_e > g_len:
                 reg_e = g_len
             if reg_s < 0:
@@ -554,6 +565,7 @@ def get_window_scores(list_w_sizes,
                                                         con_ext=lc_ext)
             else:
                 sl_node_labels = list_node_labels[reg_s:reg_e]
+
             # Sublist of node attributes.
             sl_node_attr = []
             if use_node_attr:
@@ -561,6 +573,11 @@ def get_window_scores(list_w_sizes,
                 assert len(sl_node_attr) == len(sl_node_labels), "sl_node_attr length != sl_node_labels length (%i != %i)" %(len(sl_node_attr), len(sl_node_labels))
             g_idx += 1
             sl_len = len(sl_node_labels)
+            if win_sc_out_file and w_size == max_w_size:
+                # Get sequence.
+                sub_seq = node_label_list_to_seq(sl_node_labels)
+                sub_seqs_list.append(sub_seq)
+                reg_se_list.append([reg_s,reg_e])
             # Graph indicators.
             list_graph_indicators.extend([g_idx]*sl_len)
             # Nodel labels.
@@ -626,7 +643,47 @@ def get_window_scores(list_w_sizes,
     assert g_len*c_w_sizes == len(scores), "length scores != length of list of node labels"
     all_scores = [scores[i:i + g_len] for i in range(0, len(scores), g_len)]
     scores_mean = list(np.mean(all_scores, axis=0))
+    # Window scores output file.
+    if win_sc_out_file:
+        assert len(scores_mean) == len(sub_seqs_list), "length scores_mean != length sub_seqs_list (%i != %i)" %(len(scores_mean), len(sub_seqs_list))
+        WINSCOUT = open(win_sc_out_file, "a")
+        for i, seq in enumerate(sub_seqs_list):
+            reg_se = reg_se_list[i]
+            reg_sc = scores_mean[i]
+            WINSCOUT.write("%s\t%i\t%i\t%f\t%s\n" %(seq_id, reg_se[0], reg_se[1], reg_sc, seq))
+        WINSCOUT.close()
     return scores_mean
+
+
+################################################################################
+
+def node_label_list_to_seq(nll, custom_map_dic=False):
+    """
+    Convert node label list to sequence, given a dictionary with
+    node label -> sequence character mapping.
+
+    nll:
+        node label list
+    custom_map_dic:
+        custom mapping dictionary. By default use 12345678 -> ACGUacgu
+        dictionary.
+
+    >>> nll = [1,2,3,4,5,6,7,8]
+    >>> node_label_list_to_seq(nll)
+    'ACGUacgu'
+
+    """
+    assert nll, "given node label list nll empty"
+    mapping_dic = {1:'A', 2:'C', 3:'G', 4:'U', 5:'a', 6:'c', 7:'g', 8:'u'}
+    if custom_map_dic:
+        mapping_dic = custom_map_dic
+    seq = ""
+    for nl in nll:
+        assert nl in mapping_dic, "node label \"%s\" not found in set mapping_dic" %(nl)
+        nt = mapping_dic[nl]
+        seq += nt
+    assert seq, "no sequence constructed (seq empty)"
+    return seq
 
 
 ################################################################################
@@ -671,6 +728,11 @@ def get_uc_lc_list_segment(seq, cp,
     >>> con_ext = 0
     >>> get_uc_lc_list_segment(seq, cp, vp_ext=vp_ext, con_ext=con_ext)
     [1]
+    >>> cp = 1
+    >>> vp_ext = 2
+    >>> con_ext = 2
+    >>> get_uc_lc_list_segment(seq, cp, vp_ext=vp_ext, con_ext=con_ext)
+    [1,2,3,8,5]
 
     """
     # Checks.
