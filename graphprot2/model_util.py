@@ -732,7 +732,7 @@ def get_uc_lc_list_segment(seq, cp,
     >>> vp_ext = 2
     >>> con_ext = 2
     >>> get_uc_lc_list_segment(seq, cp, vp_ext=vp_ext, con_ext=con_ext)
-    [1,2,3,8,5]
+    [1, 2, 3, 8, 5]
 
     """
     # Checks.
