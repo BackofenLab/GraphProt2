@@ -2197,16 +2197,17 @@ def main_predict(args):
     """
     CASE 2: profile + peak predictions.
 
-    - predict batch_sizeposition-wise scoring profiles using one ore more
+    - Predict position-wise scoring profiles using one ore more
       windows (args.win_size)
-    - Extract peaks from profiles, predict on peaks extended by peak_ext
-      and con_ext, and report best peaks (choose best scoring in case of
-      overlapping peaks)
-
-Profile predictions done already, use code from eval
-Then extract from scoring lists peak regions (above thr).
-Extend them again, make subgraphs, predict scores for these,
-select best overlapping site (or two lists, one without best selection, one with)
+    - Extract peak regions from profiles (regions above args.sc_thr)
+    - Predict wide profiles using --peak-ext (and optionally --con-ext)
+    - Extract peak regions from wide profiles and store top scoring positions
+      extended by --peak-ext (and optionally --con-ext) as top-scoring
+      sites
+    - Merge overlapping peak regions and top-scoring sites (controlled by
+      --max-merge-dist).
+    - If genomic or transcript regions given as input, map peak regions
+      and top-scoring sites to reference (update coordinates).
 
     """
     peaks_found = False
@@ -3480,8 +3481,8 @@ def main_gt(args):
     3) transcript region annotation (--tra, --tra-codons, --tra-borders)
     Add transcript region label annotations from --gtf to genomic or
     transcript sites.
-    --tra: add 5'UTR (F), CDS (C), and 3'UTR (T) annotation to transcript
-    or genomic sites.
+    --tra: add 5'UTR (F), CDS (C), None (N), and 3'UTR (T) annotation
+    to transcript or genomic sites.
     --tra-codons: add start (S) and stop (E) codon annotation to transcript
     or genomic sites.
     --tra-borders: add transcript start (A), transcript end (Z) nt, and
@@ -3492,7 +3493,7 @@ def main_gt(args):
     Position-wise exon + intron annotation, for each genomic site position
     .eia : stores E or I labels for each site position
     If --eia-n, additional N label for regions not overlapping with
-    transcripts.
+    transcripts (by default these are labelled as I)
     If --eia-ib, intron border labels (F: 5' intron start, T: 3' intron end)
 
     5) repeat region annotation (--rra)
@@ -3501,6 +3502,7 @@ def main_gt(args):
     Repeat region information is stored in --gen .2bit, with lower-case
     nucleotides belonging to repeat regions annotated by RepeatMasker and
     Tandem Repeats Finder (with period of 12 or less).
+
     """
 
     # Additional feature stats dictionaries.
@@ -4503,8 +4505,8 @@ def main_gp(args):
     3) transcript region annotation (--tra, --tra-codons, --tra-borders)
     Add transcript region label annotations from --gtf to genomic or
     transcript sites.
-    --tra: add 5'UTR (F), CDS (C), and 3'UTR (T) annotation to transcript
-    or genomic sites.
+    --tra: add 5'UTR (F), CDS (C), None (N), and 3'UTR (T) annotation
+    to transcript or genomic sites.
     --tra-codons: add start (S) and stop (E) codon annotation to transcript
     or genomic sites.
     --tra-borders: add transcript start (A), transcript end (Z) nt, and
@@ -4515,7 +4517,7 @@ def main_gp(args):
     Position-wise exon + intron annotation, for each genomic site position
     .eia : stores E or I labels for each site position
     If --eia-n, additional N label for regions not overlapping with
-    transcripts.
+    transcripts (by default these are labelled as I).
     If --eia-ib, intron border labels (F: 5' intron start, T: 3' intron end)
 
     5) repeat region annotation (--rra)
@@ -4524,6 +4526,7 @@ def main_gp(args):
     Repeat region information is stored in --gen .2bit, with lower-case
     nucleotides belonging to repeat regions annotated by RepeatMasker and
     Tandem Repeats Finder (with period of 12 or less).
+
     """
 
     # Additional feature stats dictionaries.
