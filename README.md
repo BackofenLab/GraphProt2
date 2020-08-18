@@ -173,6 +173,7 @@ In addition to the Python libaries, we also need some command line tools to be a
 - [bedtools](https://github.com/arq5x/bedtools2/releases)  (tested with version 2.29.0)
 - [twoBitToFa](http://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/twoBitToFa)
 - [twoBitInfo](http://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/twoBitInfo)
+- [bigWigAverageOverBed](http://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/bigWigAverageOverBed) (to extract conservation scores)
 
 
 However, installation inside the environment is also possible:
@@ -182,6 +183,7 @@ However, installation inside the environment is also possible:
 conda install -c bioconda bedtools
 conda install -c bioconda ucsc-twobitinfo
 conda install -c bioconda ucsc-twobittofa
+conda install -c bioconda ucsc-bigwigaverageoverbed
 ```
 
 
