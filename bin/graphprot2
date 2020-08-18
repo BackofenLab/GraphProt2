@@ -501,12 +501,12 @@ def setup_argument_parser():
                    dest="intron_border_annot",
                    default = False,
                    action = "store_true",
-                   help = "Add intron border annotations to genomic regions (in combination with --exon-intron) (default: False)")
+                   help = "Add intron border annotations to genomic regions (in combination with --eia) (default: False)")
     p_gta.add_argument("--eia-n",
                    dest="exon_intron_n",
                    default = False,
                    action = "store_true",
-                   help = "Label regions not covered by intron or exon regions as N instead of labelling them as introns (I) (in combination with --exon-intron) (default: False)")
+                   help = "Label regions not covered by intron or exon regions as N instead of labelling them as introns (I) (in combination with --eia) (default: False)")
     p_gta.add_argument("--tr-list",
                    dest="tr_list",
                    type=str,
