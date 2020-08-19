@@ -2978,21 +2978,23 @@ def main_gt(args):
         assert ns_count_dic['c_out'], "no negative sites remaining after filtering and extension ... "
         print("# negative sites read in (post-filtering):  %i" %(ns_count_dic['c_out']))
 
-    # If overlaps between sites allowed (should work with transcript + genomic sites).
-    if args.allow_overlaps:
-        gp2lib.make_file_copy(tmp1_bed, tmp2_bed)
-    else:
+
+    # Check whether scores work for best overlap sites selection.
+    if not args.allow_overlaps:
         print("Select highest-scoring sites in case of overlaps ... ")
         # Check if scores are there.
         sc2c_dic = gp2lib.bed_get_score_to_count_dic(tmp1_bed)
-        # Throw this error in case no col5 scores are present (e.g. each row with score 0).
+        # Warning in case no col5 scores are present (e.g. each row with score 0).
         if len(sc2c_dic) == 1:
             print("WARNING: --in BED regions all contain the same column 5 score!")
             print("         To select best sites in case of overlaps, please add")
             print("            distinct BED column 5 scores to --in BED file.")
             print("                    Enabling --allow-overlaps ... ")
             args.allow_overlaps = True
-        #assert len(sc2c_dic) != 1, "removing overlaps by selecting entries with best BED column 5 scores useless since --in BED file contains only one distinct column 5 score. Set --allow-overlaps to skip removal of overlaps or assign column 5 scores to --in BED regions"
+    # If overlaps between sites allowed (should work with transcript + genomic sites).
+    if args.allow_overlaps:
+        gp2lib.make_file_copy(tmp1_bed, tmp2_bed)
+    else:
         # Merge overlapping sites, selecting best scoring site for each overlap group.
         gp2lib.bed_sort_merge_output_top_entries(tmp1_bed, tmp2_bed,
                                                  rev_filter=args.rev_filter)
@@ -3157,7 +3159,7 @@ def main_gt(args):
                                                     report=False)
             if warning:
                 print("WARNING: bedtools shuffle output contains such regions. Removing ...")
-                assert trouble_ids_dic, "no IDs in trouble_ids_dic to remove negative regions"
+                assert trouble_ids_dic, "no IDs in trouble_ids_dic (i.e. negative regions) to remove"
                 c_del = 0
                 for neg_id in trouble_ids_dic:
                     del id2row_neg_dic[neg_id]
@@ -3355,7 +3357,7 @@ def main_gt(args):
 
     """
 
-    # Dictionaries for storing original lowercase+uppercase information (if --rep-reg).
+    # Dictionaries for storing original lowercase+uppercase information (if --rra).
     pos_context_seqs_rep_lc_dic = {}
     neg_context_seqs_rep_lc_dic = {}
     # Store uppercase start and ends for sequence IDs.
@@ -4436,7 +4438,7 @@ def main_gp(args):
 
     """
 
-    # Dictionaries for storing original lowercase+uppercase information (if --rep-reg).
+    # Dictionaries for storing original lowercase+uppercase information (if --rra).
     test_seqs_rep_lc_dic = {}
     if args.rep_reg_annot:
         # Store lowercase info in dics, then make sequences uppercase again.
