@@ -1903,13 +1903,13 @@ def bed_get_exon_intron_annotations_from_gtf(tr_ids_dic, in_bed,
     eia_out:
         Output file with labels.
     stats_dic:
-        If not None, extract exon intron annotation statistics and store
+        If not None, extract exon-intron annotation statistics and store
         in stats_dic.
     id2ucr_dic:
         Sequence ID to uppercase sequence start + end, with format:
         sequence_id -> "uppercase_start-uppercase_end"
         where both positions are 1-based.
-        Set to define regions for which to extract exon intron annotation
+        Set to define regions for which to extract exon-intron annotation
         stats, stored in stats_dic.
     n_labels:
         If True, label all positions not covered by intron or exon regions
@@ -2761,7 +2761,8 @@ def exon_intron_labels_read_in_ids(in_file):
 
 ################################################################################
 
-def get_chromosome_lengths_from_2bit(in_2bit, out_lengths):
+def get_chromosome_lengths_from_2bit(in_2bit, out_lengths,
+                                     std_chr_filter=False):
     """
     Get chromosome lengths from in_2bit .2bit file. Write lengths
     to out_lengths, with format:
@@ -2770,6 +2771,11 @@ def get_chromosome_lengths_from_2bit(in_2bit, out_lengths):
     chr11	135086622
     ...
     Also return a dictionary with key=chr_id and value=chr_length.
+
+    std_chr_filter:
+        Filter / convert chromosome IDs with function check_convert_chr_id(),
+        removing non-standard chromosomes, and convert IDs like 1,2,X,MT ..
+        to chr1, chr2, chrX, chrM.
 
     """
 
@@ -2792,10 +2798,18 @@ def get_chromosome_lengths_from_2bit(in_2bit, out_lengths):
             cols = line.strip().split("\t")
             chr_id = cols[0]
             chr_l = int(cols[1])
+            # Check ID.
+            if std_chr_filter:
+                new_chr_id = check_convert_chr_id(chr_id)
+                # If not standard chromosome ID or conversion failed, skip.
+                if not new_chr_id:
+                    continue
+                else:
+                    chr_id = new_chr_id
             assert chr_id not in chr_len_dic, "non-unique chromosome ID \"%s\" encountered in \"%s\"" %(chr_id, out_lengths)
             chr_len_dic[chr_id] = chr_l
     f.closed
-    assert chr_len_dic, "chr_len_dic empty (\"%s\" empty?)" %(out_lengths)
+    assert chr_len_dic, "chr_len_dic empty (\"%s\" empty? Chromosome IDs filter activated?)" %(out_lengths)
 
     return chr_len_dic
 
@@ -3547,16 +3561,11 @@ def gtf_extract_exon_bed(in_gtf, out_bed,
             continue
 
         # Restrict to standard chromosomes.
-        if re.search("^chr", chr_id):
-            if not re.search("^chr[\dMXY]", chr_id):
-                continue
+        new_chr_id = check_convert_chr_id(chr_id)
+        if not new_chr_id:
+            continue
         else:
-            # Convert to "chr" IDs.
-            if not re.search("^[\dMXY]", chr_id):
-                continue
-            if chr_id == "MT":
-                chr_id = "M"
-            chr_id = "chr" + chr_id
+            chr_id = new_chr_id
 
         # Make start coordinate 0-base (BED standard).
         feat_s = feat_s - 1
@@ -3698,16 +3707,11 @@ def gtf_extract_gene_bed(in_gtf, out_bed,
             continue
 
         # Restrict to standard chromosomes.
-        if re.search("^chr", chr_id):
-            if not re.search("^chr[\dMXY]", chr_id):
-                continue
+        new_chr_id = check_convert_chr_id(chr_id)
+        if not new_chr_id:
+            continue
         else:
-            # Convert to "chr" IDs.
-            if not re.search("^[\dMXY]", chr_id):
-                continue
-            if chr_id == "MT":
-                chr_id = "M"
-            chr_id = "chr" + chr_id
+            chr_id = new_chr_id
 
         # Make start coordinate 0-base (BED standard).
         feat_s = feat_s - 1
@@ -3784,16 +3788,11 @@ def gtf_extract_tsl_gene_bed(in_gtf, out_bed,
         feat_s = feat_s - 1
 
         # Restrict to standard chromosomes.
-        if re.search("^chr", chr_id):
-            if not re.search("^chr[\dMXY]", chr_id):
-                continue
+        new_chr_id = check_convert_chr_id(chr_id)
+        if not new_chr_id:
+            continue
         else:
-            # Convert to "chr" IDs.
-            if not re.search("^[\dMXY]", chr_id):
-                continue
-            if chr_id == "MT":
-                chr_id = "M"
-            chr_id = "chr" + chr_id
+            chr_id = new_chr_id
 
         # Extract gene ID and from infos.
         m = re.search('gene_id "(.+?)"', infos)
@@ -3904,16 +3903,11 @@ def gtf_extract_transcript_bed(in_gtf, out_bed,
             continue
 
         # Restrict to standard chromosomes.
-        if re.search("^chr", chr_id):
-            if not re.search("^chr[\dMXY]", chr_id):
-                continue
+        new_chr_id = check_convert_chr_id(chr_id)
+        if not new_chr_id:
+            continue
         else:
-            # Convert to "chr" IDs.
-            if not re.search("^[\dMXY]", chr_id):
-                continue
-            if chr_id == "MT":
-                chr_id = "M"
-            chr_id = "chr" + chr_id
+            chr_id = new_chr_id
 
         # Make start coordinate 0-base (BED standard).
         feat_s = feat_s - 1
@@ -4306,15 +4300,65 @@ def bed_convert_transcript_to_genomic_sites(in_bed, in_gtf, out_bed,
 
 ################################################################################
 
+def check_convert_chr_id(chr_id):
+    """
+    Check and convert chromosome IDs to format:
+    chr1, chr2, chrX, ...
+    If chromosome IDs like 1,2,X, .. given, convert to chr1, chr2, chrX ..
+    Return False if given chr_id not standard and not convertable.
+
+    Filter out scaffold IDs like:
+    GL000009.2, KI270442.1, chr14_GL000009v2_random
+    chrUn_KI270442v1 ...
+
+    >>> chr_id = "chrX"
+    >>> check_convert_chr_id(chr_id)
+    'chrX'
+    >>> chr_id = "4"
+    >>> check_convert_chr_id(chr_id)
+    'chr4'
+    >>> chr_id = "MT"
+    >>> check_convert_chr_id(chr_id)
+    'chrM'
+    >>> chr_id = "GL000009.2"
+    >>> check_convert_chr_id(chr_id)
+    False
+    >>> chr_id = "chrUn_KI270442v1"
+    >>> check_convert_chr_id(chr_id)
+    False
+
+    """
+    assert chr_id, "given chr_id empty"
+
+    if re.search("^chr", chr_id):
+        if not re.search("^chr[\dMXY]+$", chr_id):
+            chr_id = False
+    else:
+        # Convert to "chr" IDs.
+        if chr_id == "MT":
+            chr_id = "M"
+        if not re.search("^[\dMXY]+$", chr_id):
+            chr_id = False
+        chr_id = "chr" + chr_id
+    return chr_id
+
+
+################################################################################
+
 def bed_get_chromosome_ids(bed_file,
+                           std_chr_filter=False,
                            ids_dic=False):
     """
     Read in .bed file, return chromosome IDs (column 1 IDs).
     Return dic with chromosome ID -> count mapping.
 
     ids_dic:
-    A non-empty ids_dic can be supplied, resulting in chromosome IDs
-    to be added to the existing ids_dic dictionary.
+        A non-empty ids_dic can be supplied, resulting in chromosome IDs
+        to be added to the existing ids_dic dictionary.
+    std_chr_filter:
+        Filter / convert chromosome IDs with function check_convert_chr_id(),
+        removing non-standard chromosomes, and convert IDs like 1,2,X,MT ..
+        to chr1, chr2, chrX, chrM.
 
     >>> test_file = "test_data/test6.bed"
     >>> bed_get_chromosome_ids(test_file)
@@ -4328,12 +4372,20 @@ def bed_get_chromosome_ids(bed_file,
             row = line.strip()
             cols = line.strip().split("\t")
             chr_id = cols[0]
+            # Check ID.
+            if std_chr_filter:
+                new_chr_id = check_convert_chr_id(chr_id)
+                # If not standard chromosome ID or conversion failed, skip entry.
+                if not new_chr_id:
+                    continue
+                else:
+                    chr_id = new_chr_id
             if chr_id in ids_dic:
                 ids_dic[chr_id] += 1
             else:
                 ids_dic[chr_id] = 1
     f.closed
-    assert ids_dic, "No chromosome IDs read into dictionary (input file \"%s\" empty or malformatted?)" % (bed_file)
+    assert ids_dic, "No chromosome IDs read into dictionary (input file \"%s\" empty or malformatted? Chromosome IDs filter activated?)" % (bed_file)
     return ids_dic
 
 
@@ -4416,16 +4468,11 @@ def gtf_extract_exon_numbers(in_gtf,
             continue
 
         # Restrict to standard chromosomes.
-        if re.search("^chr", chr_id):
-            if not re.search("^chr[\dMXY]", chr_id):
-                continue
+        new_chr_id = check_convert_chr_id(chr_id)
+        if not new_chr_id:
+            continue
         else:
-            # Convert to "chr" IDs.
-            if not re.search("^[\dMXY]", chr_id):
-                continue
-            if chr_id == "MT":
-                chr_id = "M"
-            chr_id = "chr" + chr_id
+            chr_id = new_chr_id
 
         # Extract transcript ID.
         m = re.search('transcript_id "(.+?)"', infos)
@@ -4763,13 +4810,11 @@ def gtf_extract_most_prominent_transcripts(in_gtf, out_file,
             continue
 
         # Restrict to standard chromosomes.
-        if re.search("^chr", chr_id):
-            if not re.search("^chr[\dMXY]", chr_id):
-                continue
+        new_chr_id = check_convert_chr_id(chr_id)
+        if not new_chr_id:
+            continue
         else:
-            # Convert to "chr" IDs.
-            if not re.search("^[\dMXY]", chr_id):
-                continue
+            chr_id = new_chr_id
 
         # Extract gene ID.
         m = re.search('gene_id "(.+?)"', infos)
@@ -6175,16 +6220,11 @@ def get_transcript_border_annotations(tr_ids_dic, in_gtf, out_bed,
         exc = tr_exc_dic[tr_id]
 
         # Restrict to standard chromosomes.
-        if re.search("^chr", chr_id):
-            if not re.search("^chr[\dMXY]", chr_id):
-                continue
+        new_chr_id = check_convert_chr_id(chr_id)
+        if not new_chr_id:
+            continue
         else:
-            # Convert to "chr" IDs.
-            if not re.search("^[\dMXY]", chr_id):
-                continue
-            if chr_id == "MT":
-                chr_id = "M"
-            chr_id = "chr" + chr_id
+            chr_id = new_chr_id
 
         # Make start coordinate 0-base (BED standard).
         feat_s = feat_s - 1
@@ -6369,16 +6409,11 @@ def gtf_write_transcript_annotations_to_bed(tr_ids_dic, in_gtf, out_bed,
             continue
 
         # Restrict to standard chromosomes.
-        if re.search("^chr", chr_id):
-            if not re.search("^chr[\dMXY]", chr_id):
-                continue
+        new_chr_id = check_convert_chr_id(chr_id)
+        if not new_chr_id:
+            continue
         else:
-            # Convert to "chr" IDs.
-            if not re.search("^[\dMXY]", chr_id):
-                continue
-            if chr_id == "MT":
-                chr_id = "M"
-            chr_id = "chr" + chr_id
+            chr_id = new_chr_id
 
         # Make start coordinate 0-base (BED standard).
         feat_s = feat_s - 1
@@ -7515,12 +7550,10 @@ by GraphProt2 (graphprot2 gt):
         mdtext += "- [Conservation scores distribution](#con-plot)\n"
         mdtext += "- [Conservation scores statistics](#con-stats)"
     if pos_eia_stats_dic and neg_eia_stats_dic:
-        occ_labels = ["F", "T"]
         mdtext += "\n"
-        mdtext += "- [Exon intron region distribution](#eia-plot)\n"
-        mdtext += "- [Exon intron region statistics](#eia-stats)"
+        mdtext += "- [Exon-intron region distribution](#eia-plot)\n"
+        mdtext += "- [Exon-intron region statistics](#eia-stats)"
     if pos_tra_stats_dic and neg_tra_stats_dic:
-        occ_labels = ["S", "E", "A", "Z", "B"]
         mdtext += "\n"
         mdtext += "- [Transcript region distribution](#tra-plot)\n"
         mdtext += "- [Transcript region statistics](#tra-stats)"
@@ -7817,10 +7850,10 @@ calculated before normalization (normalizing values to -1 .. 1).
             mdtext += "| mean score | %.3f (+-%.3f) | %.3f (+-%.3f) |\n" %(pos_phylop_stats_dic['mean'], pos_phylop_stats_dic['stdev'], neg_phylop_stats_dic['mean'], neg_phylop_stats_dic['stdev'])
         mdtext += "\n&nbsp;\n&nbsp;\n"
 
-    # Exon intron region plots and stats.
+    # Exon-intron region plots and stats.
     if pos_eia_stats_dic and neg_eia_stats_dic:
         mdtext += """
-## Exon intron region distribution ### {#eia-plot}
+## Exon-intron region distribution ### {#eia-plot}
 
 Distribution of exon and intron regions for the positive and negative set.
 
@@ -7830,17 +7863,17 @@ Distribution of exon and intron regions for the positive and negative set.
                                           ["E", "I", "N"],
                                           perc=True, theme=theme)
         eia_plot_path = plots_folder + "/" + eia_plot
-        mdtext += '<img src="' + eia_plot_path + '" alt="Exon intron region distribution"' + "\n"
-        mdtext += 'title="Exon intron region distribution" width="550" />' + "\n"
+        mdtext += '<img src="' + eia_plot_path + '" alt="Exon-intron region distribution"' + "\n"
+        mdtext += 'title="Exon-intron region distribution" width="550" />' + "\n"
         mdtext += """
 **Figure:** Percentages of exon (E) and intron (I) regions for the positive and negative set.
 If --eia-n is set, also include regions not covered by introns or exons (N).
 
 &nbsp;
 
-## Exon intron region statistics ### {#eia-stats}
+## Exon-intron region statistics ### {#eia-stats}
 
-**Table:** Exon intron region statistics for the positive and negative set.
+**Table:** Exon-intron region statistics for the positive and negative set.
 If --eia-ib is set, also include statistics for sites containing intron
 5' (F) and intron 3' (T) ends.
 
@@ -8837,7 +8870,7 @@ def load_ws_predict_data(args,
             feat_id = "eia"
             eia_alphabet = fid2cat_dic[feat_id]
             assert os.path.exists(test_eia_in), "--in folder does not contain %s"  %(test_eia_in)
-            print("Read in exon intron annotations ... ")
+            print("Read in exon-intron annotations ... ")
             test_eia_dic = read_feat_into_dic(test_eia_in, "C",
                                              label_list=eia_alphabet)
             for c in fid2cat_dic[feat_id]:
@@ -9220,7 +9253,7 @@ def load_geo_training_data(args,
             eia_alphabet = fid2cat_dic[feat_id]
             assert os.path.exists(pos_eia_in), "--in folder does not contain %s"  %(pos_eia_in)
             assert os.path.exists(neg_eia_in), "--in folder does not contain %s"  %(neg_eia_in)
-            print("Read in exon intron annotations ... ")
+            print("Read in exon-intron annotations ... ")
             pos_eia_dic = read_feat_into_dic(pos_eia_in, "C",
                                              label_list=eia_alphabet)
             neg_eia_dic = read_feat_into_dic(neg_eia_in, "C",
@@ -9900,18 +9933,12 @@ def process_test_sites(in_bed, out_bed, chr_len_dic,
             c_in += 1
             # Restrict to standard chromosomes.
             if not transcript_regions:
-                if re.search("^chr", chr_id):
-                    if not re.search("^chr[\dMXY]", chr_id):
-                        c_filt_ref += 1
-                        continue
+                new_chr_id = check_convert_chr_id(chr_id)
+                if not new_chr_id:
+                    c_filt_ref += 1
+                    continue
                 else:
-                    # Convert to "chr" IDs.
-                    if not re.search("^[\dMXY]", chr_id):
-                        c_filt_ref += 1
-                        continue
-                    if chr_id == "MT":
-                        chr_id = "M"
-                    chr_id = "chr" + chr_id
+                    chr_id = new_chr_id
             # Make site polarities "+" for transcript sites.
             if transcript_regions:
                 site_pol = "+"
@@ -10038,18 +10065,12 @@ def process_in_sites(in_bed, out_bed, chr_len_dic, args,
                         continue
             # Restrict to standard chromosomes.
             if not transcript_regions:
-                if re.search("^chr", chr_id):
-                    if not re.search("^chr[\dMXY]", chr_id):
-                        c_filt_ref += 1
-                        continue
+                new_chr_id = check_convert_chr_id(chr_id)
+                if not new_chr_id:
+                    c_filt_ref += 1
+                    continue
                 else:
-                    # Convert to "chr" IDs.
-                    if not re.search("^[\dMXY]", chr_id):
-                        c_filt_ref += 1
-                        continue
-                    if chr_id == "MT":
-                        chr_id = "M"
-                    chr_id = "chr" + chr_id
+                    chr_id = new_chr_id
             # Make site polarities "+" for transcript sites.
             if transcript_regions:
                 site_pol = "+"
@@ -10670,7 +10691,7 @@ def make_motif_plot(motif_seqs_ll, motif_out_file,
     motif_seqs_ll:
         List of sequence character lists (same lengths)
     motif_eia_ll:
-        List of exon intron character lists (same lengths)
+        List of exon-intron character lists (same lengths)
     motif_rra_ll:
         List of repeat region character lists (same lengths)
     motif_tra_ll:
@@ -10697,7 +10718,7 @@ def make_motif_plot(motif_seqs_ll, motif_out_file,
     # Number of plots.
     n_subplots = 1
     height_ratios = [2.5]
-    # Exon intron motif dataframe.
+    # Exon-intron motif dataframe.
     if motif_eia_ll:
         eia_df = motif_seqs_to_plot_df(motif_eia_ll, alphabet=eia_alphabet)
         n_subplots += 1
@@ -10742,7 +10763,7 @@ def make_motif_plot(motif_seqs_ll, motif_out_file,
     else:
         assert False, "invalid seq_alphabet given"
     add_motif_label_plot(seq_df, fig, gs, i, color_dict=color_dict, y_label="sequence")
-    # Exon intron motif.
+    # Exon-intron motif.
     if motif_eia_ll:
         i += 1
         color_dict = False
@@ -11586,8 +11607,8 @@ by GraphProt2 (graphprot2 gp):
     if test_eia_stats_dic:
         occ_labels = ["F", "T"]
         mdtext += "\n"
-        mdtext += "- [Exon intron region distribution](#eia-plot)\n"
-        mdtext += "- [Exon intron region statistics](#eia-stats)"
+        mdtext += "- [Exon-intron region distribution](#eia-plot)\n"
+        mdtext += "- [Exon-intron region statistics](#eia-stats)"
     if test_tra_stats_dic:
         occ_labels = ["S", "E", "A", "Z", "B"]
         mdtext += "\n"
@@ -11824,10 +11845,10 @@ calculated before normalization (normalizing values to -1 .. 1).
             mdtext += "| mean score | %.3f (+-%.3f) |\n" %(test_phylop_stats_dic['mean'], test_phylop_stats_dic['stdev'])
         mdtext += "\n&nbsp;\n&nbsp;\n"
 
-    # Exon intron region plots and stats.
+    # Exon-intron region plots and stats.
     if test_eia_stats_dic:
         mdtext += """
-## Exon intron region distribution ### {#eia-plot}
+## Exon-intron region distribution ### {#eia-plot}
 
 Distribution of exon and intron regions for the prediction set.
 
@@ -11838,17 +11859,17 @@ Distribution of exon and intron regions for the prediction set.
                                           perc=True, theme=theme)
 
         eia_plot_path = plots_folder + "/" + eia_plot
-        mdtext += '<img src="' + eia_plot_path + '" alt="Exon intron region distribution"' + "\n"
-        mdtext += 'title="Exon intron region distribution" width="550" />' + "\n"
+        mdtext += '<img src="' + eia_plot_path + '" alt="Exon-intron region distribution"' + "\n"
+        mdtext += 'title="Exon-intron region distribution" width="550" />' + "\n"
         mdtext += """
 **Figure:** Percentages of exon (E) and intron (I) regions for the prediction set.
 If --eia-n is set, also include regions not covered by introns or exons (N).
 
 &nbsp;
 
-## Exon intron region statistics ### {#eia-stats}
+## Exon-intron region statistics ### {#eia-stats}
 
-**Table:** Exon intron region statistics for the prediction set.
+**Table:** Exon-intron region statistics for the prediction set.
 If --eia-ib is set, also include statistics for sites containing intron
 5' (F) and intron 3' (T) ends.
 

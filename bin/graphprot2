@@ -511,7 +511,7 @@ def setup_argument_parser():
                    dest="tr_list",
                    type=str,
                    metavar='str',
-                   help = "Supply file with transcript IDs (one ID per row) for exon intron labeling (using the corresponding exon regions from --gtf). By default, exon regions of the most prominent transcripts (automatically selected from --gtf) are used (default: False)")
+                   help = "Supply file with transcript IDs (one ID per row) for exon-intron labeling (using the corresponding exon regions from --gtf). By default, exon regions of the most prominent transcripts (automatically selected from --gtf) are used (default: False)")
     p_gta.add_argument("--phastcons",
                    dest="pc_bw",
                    type=str,
@@ -654,7 +654,7 @@ def setup_argument_parser():
                    dest="tr_list",
                    type=str,
                    metavar='str',
-                   help = "Supply file with transcript IDs (one ID per row) for exon intron labeling (using the corresponding exon regions from --gtf). By default, exon regions of the most prominent transcripts (automatically selected from --gtf) are used (default: False)")
+                   help = "Supply file with transcript IDs (one ID per row) for exon-intron labeling (using the corresponding exon regions from --gtf). By default, exon regions of the most prominent transcripts (automatically selected from --gtf) are used (default: False)")
     p_gpa.add_argument("--phastcons",
                    dest="pc_bw",
                    type=str,
@@ -1486,7 +1486,7 @@ def main_eval(args):
     if con_ext:
         seq_alphabet = ["A","C","G","U","a","c","g","u"]
     print("Sequence alphabet:          ", seq_alphabet)
-    # Exon intron annotation alphabet.
+    # Exon-intron annotation alphabet.
     eia_alphabet = ["E", "I"]
     if "eia" in feat_alphabet_dic:
         eia_alphabet = feat_alphabet_dic["eia"]
@@ -1633,7 +1633,7 @@ def main_eval(args):
         list_node_labels = []
         # More lists.
         seqs_list = [] # nucleotide labels.
-        eia_list = [] # exon intron labels.
+        eia_list = [] # exon-intron labels.
         rra_list = [] # repeat region labels.
         tra_list = [] # transcript region labels.
         pc_list = [] # phastCons scores.
@@ -1642,7 +1642,7 @@ def main_eval(args):
         for v in x:
             if use_node_attr:
                 nav = v[:-c_nts]
-                # Exon intron labels list.
+                # Exon-intron labels list.
                 if "eia" in featid2ch_dic:
                     for ch in featid2ch_dic["eia"]:
                         v_i = ch - 1
@@ -3751,7 +3751,7 @@ def main_gt(args):
     """
     if (args.exon_intron_annot or args.tr_reg_annot) and not transcript_regions:
         print("Get transcript annotations for genomic sites ... ")
-        # Get transcript IDs to use for exon-intron or region annotation.
+        # Get transcript IDs to use for exon-intron or transcript region annotation.
         tr_ids_dic = {}
         if args.tr_list:
             print("Using transcript list from --tr-list to define transcript regions ... ")
@@ -3760,9 +3760,14 @@ def main_gt(args):
             # Read in all transcript IDs in --gtf.
             all_tr_ids_dic = gp2lib.gtf_get_transcript_ids(args.in_gtf)
             # Check if given --tr list IDs are in --gtf.
+            del_tr_l = []
             for tr_id in tr_ids_dic:
                 if tr_id not in all_tr_ids_dic:
                     print("WARNING: transcript ID \"%s\" from --tr-list not found in --gtf. Ignoring transcript ... " %(tr_id))
+                    del_tr_l.append(tr_id)
+            for tr_id in del_tr_l:
+                del tr_ids_dic[tr_id]
+            assert tr_ids_dic, "no transcript IDs from --tr-list remain after removing IDs not found in --gtf"
         else:
             # Create exon BED file from most prominent transcripts.
             strict=False
@@ -3988,8 +3993,8 @@ def main_gt(args):
         print("Positives phyloP conservation scores .pp.con:\n%s" %(pos_pp_con_out))
         print("Negatives phyloP conservation scores .pp.con:\n%s" %(neg_pp_con_out))
     if args.exon_intron_annot:
-        print("Positives exon intron region annotations .eia:\n%s" %(pos_eia_out))
-        print("Negatives exon intron region annotations .eia:\n%s" %(neg_eia_out))
+        print("Positives exon-intron region annotations .eia:\n%s" %(pos_eia_out))
+        print("Negatives exon-intron region annotations .eia:\n%s" %(neg_eia_out))
     if args.tr_reg_annot:
         print("Positives transcript region annotations .tra:\n%s" %(pos_tra_out))
         print("Negatives transcript region annotations .tra:\n%s" %(neg_tra_out))
@@ -4072,6 +4077,7 @@ def main_gp(args):
     if gp2lib.fasta_check_fasta_file(args.in_sites):
         # Read in sequences (this also checks for unique headers + converts to RNA).
         print("Processing --in FASTA sequences ... ")
+        print("Read in --in FASTA sequences and convert to RNA ... ")
         test_seqs_dic = gp2lib.read_fasta_into_dic(args.in_sites)
         id2vpse_dic = gp2lib.extract_viewpoint_regions_from_fasta(test_seqs_dic,
                                                                   get_se_dic=True)
@@ -4605,7 +4611,7 @@ def main_gp(args):
         #                            plfold_u=args.plfold_u,
         #                            plfold_l=args.plfold_l,
         #                            plfold_w=args.plfold_w)
-        # Calculate structure features for positives.
+        # Calculate structure features for test set.
         print("Get secondary structure information ... ")
         gp2lib.calc_ext_str_features(id2row_dic, chr_len_dic,
                                      test_bpp_out, test_str_elem_p_out, args,
@@ -4701,7 +4707,7 @@ def main_gp(args):
     """
     if (args.exon_intron_annot or args.tr_reg_annot) and not transcript_regions:
         print("Get transcript annotations for genomic sites ... ")
-        # Get transcript IDs to use for exon-intron or region annotation.
+        # Get transcript IDs to use for exon-intron or transcript region annotation.
         tr_ids_dic = {}
         if args.tr_list:
             print("Using transcript list from --tr-list to define transcript regions ... ")
@@ -4873,7 +4879,7 @@ def main_gp(args):
     if args.pp_bw:
         print("phyloP conservation scores .pp.con:\n%s" %(test_pp_con_out))
     if args.exon_intron_annot:
-        print("Exon intron region annotations .eia:\n%s" %(test_eia_out))
+        print("Exon-intron region annotations .eia:\n%s" %(test_eia_out))
     if args.tr_reg_annot:
         print("Transcript region annotations .tra:\n%s" %(test_tra_out))
     if args.rep_reg_annot:
