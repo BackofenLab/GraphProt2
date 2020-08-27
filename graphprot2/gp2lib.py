@@ -4337,9 +4337,10 @@ def check_convert_chr_id(chr_id):
         # Convert to "chr" IDs.
         if chr_id == "MT":
             chr_id = "M"
-        if not re.search("^[\dMXY]+$", chr_id):
+        if re.search("^[\dMXY]+$", chr_id):
+            chr_id = "chr" + chr_id
+        else:
             chr_id = False
-        chr_id = "chr" + chr_id
     return chr_id
 
 
