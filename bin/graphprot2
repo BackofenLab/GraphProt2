@@ -3074,7 +3074,7 @@ def main_gt(args):
         mask_files_list.append(args.in_sites)
         mask_files_list.append(positives_with_context_bed)
         if args.mask_bed:
-            mask_files_list.append(mask_bed)
+            mask_files_list.append(args.mask_bed)
         gp2lib.merge_files(mask_files_list, mask_negatives_bed)
         # Generate shuffle file.
         shuffle_list = []
