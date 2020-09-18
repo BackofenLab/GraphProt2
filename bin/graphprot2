@@ -166,7 +166,7 @@ def setup_argument_parser():
                    dest = "train_cv",
                    default = False,
                    action = "store_true",
-                   help = "Run cross validation to train final model, with hyperparameter optimization in each split and selection of best parameters based their on average performance on validation sets. By default final model training is done for one split only (validation set size controlled by --train-vs). Note that --train-cv with many hyperparameter combinations considerably increases run time (default: False)")
+                   help = "Run cross validation to train final model, with hyperparameter optimization in each split and selection of best parameters based on their average performance on validation sets. By default final model training is done for one split only (validation set size controlled by --train-vs). Note that --train-cv with many hyperparameter combinations considerably increases run time (default: False)")
     p_tra.add_argument("--train-cv-k",
                    dest="train_cv_k",
                    type = int,
