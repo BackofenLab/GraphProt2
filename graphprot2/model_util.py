@@ -332,6 +332,60 @@ def train_final_model(args, n_features, train_dataset, train_epochs, device,
 
 ################################################################################
 
+def train_default_hp_model(args, n_features, train_dataset,
+                           model_folder, device):
+    """
+    Train a model with default hyperparameters.
+    Optimize for given number of epochs or until patience is exhausted
+    regarding no improvement on training set loss.
+
+    """
+    model_batch_size = args.list_batch_size[0]
+    model_node_hidden_dim = args.list_node_hidden_dim[0]
+    model_weight_decay = args.list_weight_decay[0]
+    model_lr = args.list_lr[0]
+
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
+
+    # Hyperparameter string.
+    hp_str = str(model_batch_size) + "_" + str(model_node_hidden_dim) + "_" + str(model_weight_decay) + "_" + str(model_lr)
+    model_path = model_folder + "/" + hp_str
+
+    model = FunnelGNN(input_dim=n_features, node_hidden_dim=model_node_hidden_dim,
+                     fc_hidden_dim=args.fc_hidden_dim, out_dim=2).to(device)
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=model_lr, weight_decay=model_weight_decay)
+    best_train_loss = 1000000000.0
+    best_train_acc = 0
+    elapsed_patience = 0
+    c_epochs = 0
+    for epoch in range(0, args.epochs):
+        c_epochs += 1
+        if elapsed_patience > args.patience:
+            break
+        train_loss = train(device, model, optimizer, train_loader)
+        train_loss, train_acc = test(train_loader, device, model)
+
+        if train_loss < best_train_loss:
+            elapsed_patience = 0
+            best_train_loss = train_loss
+            best_train_acc = train_acc
+            torch.save(model.state_dict(), model_path)
+        else:
+            elapsed_patience += 1
+
+    opt_dic = {}
+    opt_dic["opt_batch_size"] = model_batch_size
+    opt_dic["opt_node_hidden_dim"] = model_node_hidden_dim
+    opt_dic["opt_weight_decay"] = model_weight_decay
+    opt_dic["opt_lr"] = model_lr
+    opt_dic["opt_acc"] = best_train_acc
+    opt_dic["opt_epochs"] = c_epochs
+    return opt_dic
+
+
+################################################################################
+
 def select_model(args, n_features, train_dataset, val_dataset,
                  model_folder, device,
                  hps2acc_dic=None,

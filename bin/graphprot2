@@ -888,24 +888,49 @@ def main_train(args):
             print("# validation instances:  %i" %(c_val))
             print("# test instances:        %i" %(c_test))
 
-            # Get optimal parameters for this CV split.
-            opt_dic = model_util.select_model(args, dataset.num_features, train_dataset,
-                                              val_dataset, model_folder, device)
+            if run_hpo:
+                # Get optimal parameters for this CV split.
+                opt_dic = model_util.select_model(args, dataset.num_features, train_dataset,
+                                                  val_dataset, model_folder, device)
 
-            opt_batch_size = opt_dic["opt_batch_size"]
-            opt_node_hidden_dim = opt_dic["opt_node_hidden_dim"]
-            opt_weight_decay = opt_dic["opt_weight_decay"]
-            opt_lr = opt_dic["opt_lr"]
-            opt_acc = opt_dic["opt_acc"]
-            opt_epochs = opt_dic["opt_epochs"]
+                opt_batch_size = opt_dic["opt_batch_size"]
+                opt_node_hidden_dim = opt_dic["opt_node_hidden_dim"]
+                opt_weight_decay = opt_dic["opt_weight_decay"]
+                opt_lr = opt_dic["opt_lr"]
+                opt_acc = opt_dic["opt_acc"]
+                opt_epochs = opt_dic["opt_epochs"]
 
-            model = FunnelGNN(input_dim=dataset.num_features, node_hidden_dim=opt_node_hidden_dim, fc_hidden_dim=args.fc_hidden_dim, out_dim=2).to(device)
-            model_path = model_folder + "/" + str(opt_batch_size) + "_" + str(opt_node_hidden_dim) + "_" + str(opt_weight_decay) + "_" + str(opt_lr)
-            model.load_state_dict(torch.load(model_path))
+                model = FunnelGNN(input_dim=dataset.num_features, node_hidden_dim=opt_node_hidden_dim, fc_hidden_dim=args.fc_hidden_dim, out_dim=2).to(device)
+                model_path = model_folder + "/" + str(opt_batch_size) + "_" + str(opt_node_hidden_dim) + "_" + str(opt_weight_decay) + "_" + str(opt_lr)
+                model.load_state_dict(torch.load(model_path))
 
-            # Get test error of optimized model.
-            test_loader = DataLoader(test_dataset, batch_size=opt_batch_size, shuffle=False)
-            loss, acc = model_util.test(test_loader, device, model)
+                # Get test error of optimized model.
+                test_loader = DataLoader(test_dataset, batch_size=opt_batch_size, shuffle=False)
+                loss, acc = model_util.test(test_loader, device, model)
+
+            else:
+
+                # Train model using default parameters on training split.
+                opt_dic = model_util.train_default_hp_model(args, dataset.num_features,
+                                                            train_dataset, model_folder,
+                                                            device)
+
+                opt_batch_size = opt_dic["opt_batch_size"]
+                opt_node_hidden_dim = opt_dic["opt_node_hidden_dim"]
+                opt_weight_decay = opt_dic["opt_weight_decay"]
+                opt_lr = opt_dic["opt_lr"]
+                opt_acc = opt_dic["opt_acc"]
+                opt_epochs = opt_dic["opt_epochs"]
+
+                model = FunnelGNN(input_dim=dataset.num_features, node_hidden_dim=opt_node_hidden_dim, fc_hidden_dim=args.fc_hidden_dim, out_dim=2).to(device)
+                model_path = model_folder + "/" + str(opt_batch_size) + "_" + str(opt_node_hidden_dim) + "_" + str(opt_weight_decay) + "_" + str(opt_lr)
+                model.load_state_dict(torch.load(model_path))
+
+                # Get test error of default parameters model.
+                test_loader = DataLoader(test_dataset, batch_size=opt_batch_size, shuffle=False)
+                loss, acc = model_util.test(test_loader, device, model)
+
+
             # Store test accuracy.
             acc_list.append(acc)
             with open(cv_results_file, 'a+') as f:
