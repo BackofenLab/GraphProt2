@@ -920,7 +920,7 @@ def main_train(args):
         # Report average accuracy with stdev.
         avg_acc = statistics.mean(acc_list)
         stdev_acc = statistics.stdev(acc_list)
-        print("Average accuarcy + stdev (--gen-cv): %f (+- %f)" %(avg_acc, stdev_acc))
+        print("Average accuracy + stdev (--gen-cv): %f (+- %f)" %(avg_acc, stdev_acc))
         avg_acc_out_file = args.out_folder + "/avg_accuracy.gen_cv.out"
         #AAOUT = open(avg_acc_out_file, "a+")
         AAOUT = open(avg_acc_out_file, "w")
