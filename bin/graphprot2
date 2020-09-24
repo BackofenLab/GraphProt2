@@ -731,7 +731,7 @@ def main_train(args):
     indiv_feat_check = args.use_pc_con + args.use_pp_con + args.use_eia + args.use_tra + args.use_rra + args.use_str_elem_p + args.use_bps
     if indiv_feat_check and args.only_seq:
         assert False, "--only-seq useless in combination with individually selected features (--use-xxx)"
-    assert args.train_vs > 0.1 and args.train_vs <= 0.5, "Use reasonable values for --train-vs (> 0.1 and <= 0.5)"
+    assert args.train_vs >= 0.1 and args.train_vs <= 0.5, "Use reasonable values for --train-vs (>= 0.1 and <= 0.5)"
 
     if args.gm_cv and args.gen_cv:
         assert False, "use either --gen-cv to estimate single model generalization performance, or --gm-cv to estimate generic model generalization performance"
@@ -874,21 +874,25 @@ def main_train(args):
             print("Starting --gen-cv fold %i ... " %(i_cv))
 
             test_dataset = MyDataset([graphs[idx] for idx in list_te_idx])
-            # Further split up train portion into train + validation.
-            # Training set == all list entries except last length(test_set).
-            train_dataset = MyDataset([graphs[idx] for idx in list_tr_idx[:-len(list_te_idx)]])
-            # Validation set == last length(test_set) entries.
-            val_dataset = MyDataset([graphs[idx] for idx in list_tr_idx[-len(list_te_idx):]])
-
-            # Report set sizes.
-            c_train = len(list_tr_idx) - len(list_te_idx)
-            c_test = len(list_te_idx)
-            c_val = len(list_te_idx)
-            print("# training instances:    %i" %(c_train))
-            print("# validation instances:  %i" %(c_val))
-            print("# test instances:        %i" %(c_test))
+            if run_hpo:
+                # Further split up train portion into train + validation.
+                # Training set == all list entries except last length(test_set).
+                train_dataset = MyDataset([graphs[idx] for idx in list_tr_idx[:-len(list_te_idx)]])
+                # Validation set == last length(test_set) entries.
+                val_dataset = MyDataset([graphs[idx] for idx in list_tr_idx[-len(list_te_idx):]])
+            else:
+                train_dataset = MyDataset([graphs[idx] for idx in list_tr_idx])
 
             if run_hpo:
+
+                # Report set sizes.
+                c_train = len(list_tr_idx) - len(list_te_idx)
+                c_test = len(list_te_idx)
+                c_val = len(list_te_idx)
+                print("# training instances:    %i" %(c_train))
+                print("# validation instances:  %i" %(c_val))
+                print("# test instances:        %i" %(c_test))
+
                 # Get optimal parameters for this CV split.
                 opt_dic = model_util.select_model(args, dataset.num_features, train_dataset,
                                                   val_dataset, model_folder, device)
@@ -909,6 +913,12 @@ def main_train(args):
                 loss, acc = model_util.test(test_loader, device, model)
 
             else:
+
+                # Report set sizes.
+                c_train = len(list_tr_idx)
+                c_test = len(list_te_idx)
+                print("# training instances:    %i" %(c_train))
+                print("# test instances:        %i" %(c_test))
 
                 # Train model using default parameters on training split.
                 opt_dic = model_util.train_default_hp_model(args, dataset.num_features,

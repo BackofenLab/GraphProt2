@@ -345,7 +345,7 @@ def train_default_hp_model(args, n_features, train_dataset,
     model_weight_decay = args.list_weight_decay[0]
     model_lr = args.list_lr[0]
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=model_batch_size, shuffle=False)
 
     # Hyperparameter string.
     hp_str = str(model_batch_size) + "_" + str(model_node_hidden_dim) + "_" + str(model_weight_decay) + "_" + str(model_lr)
