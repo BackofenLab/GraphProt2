@@ -156,7 +156,7 @@ def setup_argument_parser():
                    type = int,
                    default = 10,
                    choices = [5,10],
-                   help = "Cross validation k for evaluating generalization performance (default: 10)")
+                   help = "Cross validation k for evaluating generalization performance (use together with --gen-cv) (default: 10)")
     p_tra.add_argument("--gm-cv",
                    dest = "gm_cv",
                    default = False,
@@ -184,8 +184,8 @@ def setup_argument_parser():
                    type = int,
                    metavar='int',
                    nargs='+',
-                   default=[50],
-                   help = "List of gradient descent batch sizes (default: 50)")
+                   default=[30, 50],
+                   help = "List of gradient descent batch sizes (default: 30 50)")
     p_tra.add_argument("--epochs",
                    dest="epochs",
                    type = int,
@@ -196,7 +196,7 @@ def setup_argument_parser():
                    dest="patience",
                    type = int,
                    metavar='int',
-                   default = 30,
+                   default = 50,
                    help = "Number of epochs to wait for further improvement on validation set before stopping (default: 30)")
     p_tra.add_argument("--fc-hidden-dim",
                    dest="fc_hidden_dim",
@@ -209,22 +209,22 @@ def setup_argument_parser():
                    type=float,
                    metavar='float',
                    nargs='+',
-                   default=[0.0001],
-                   help="List of learning rates for hyperparameter optimization (default: 0.0001)")
+                   default=[0.001, 0.0001],
+                   help="List of learning rates for hyperparameter optimization (default: 0.001 0.0001)")
     p_tra.add_argument("--list-hidden-dim",
                    dest="list_node_hidden_dim",
                    type=int,
                    metavar='int',
                    nargs='+',
-                   default=[128],
-                   help="List of node feature dimensions in hidden layers for hyperparameter optimization (default: 128)")
+                   default=[64, 128],
+                   help="List of node feature dimensions in hidden layers for hyperparameter optimization (default: 64 128)")
     p_tra.add_argument("--list-weight-decay",
                    dest="list_weight_decay",
                    type=float,
                    metavar='float',
                    nargs='+',
-                   default=[0.0001],
-                   help="List of weight decays for hyperparameter optimization (default: 0.0001)")
+                   default=[0.0, 0.0001, 0.0005],
+                   help="List of weight decays for hyperparameter optimization (default: 0.0 0.0001 0.0005)")
 
     """
     Model evaluation mode.
@@ -767,6 +767,21 @@ def main_train(args):
 
     # Class label to RBP label dictionary.
     li2label_dic = {}
+
+
+    """
+
+
+
+
+
+
+
+
+
+
+
+    """
 
     # Load data and store on disk in PyTorch geometric format.
     gp2lib.load_geo_training_data(args,
