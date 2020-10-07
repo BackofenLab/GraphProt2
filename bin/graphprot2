@@ -488,7 +488,7 @@ def setup_argument_parser():
                    type = int,
                    default = 1,
                    choices = [1,2],
-                   help = "Set theme for .html report (1: default, 2: midnight blue) (default: 1)")
+                   help = "Set theme for .html report (1: palm beach, 2: midnight sunset) (default: 1)")
 
     # Add additional feature arguments group.
     p_gta = p_gt.add_argument_group("additional annotation arguments")
@@ -631,7 +631,7 @@ def setup_argument_parser():
                    type = int,
                    default = 1,
                    choices = [1,2],
-                   help = "Set theme for .html report (1: default, 2: midnight blue) (default: 1)")
+                   help = "Set theme for .html report (1: palm beach, 2: midnight sunset) (default: 1)")
 
     # Add additional feature arguments group.
     p_gpa = p_gp.add_argument_group("additional annotation arguments")
