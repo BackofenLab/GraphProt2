@@ -9145,9 +9145,16 @@ def load_training_data(args,
 
     # Read in sequences.
     seqs_dic = read_fasta_into_dic(pos_fa_in, all_uc=seqs_all_uc)
+    pos_ids_dic = {}
+    for seq_id in seqs_dic:
+        pos_ids_dic[seq_id] = 1
     seqs_dic = read_fasta_into_dic(neg_fa_in, all_uc=seqs_all_uc,
                                    seqs_dic=seqs_dic)
     assert seqs_dic, "no sequences read from FASTA files"
+    neg_ids_dic = {}
+    for seq_id in seqs_dic:
+        if seq_id not in pos_ids_dic:
+            neg_ids_dic[seq_id] = 1
 
     # Check for 4 (8) distinct nucleotides.
     cc_dic = seqs_dic_count_chars(seqs_dic)
@@ -9220,7 +9227,7 @@ def load_training_data(args,
         indiv_feat_dic["bpp.str"] = 1
 
     # Looking for additional features.
-    std_feat_dic = {"pc.con" : 1,
+    std_fid_dic = {"pc.con" : 1,
                     "pp.con" : 1,
                     "eia" : 1,
                     "tra" : 1,
@@ -9228,12 +9235,12 @@ def load_training_data(args,
                     "fa" : 1,
                     "elem_p.str" : 1,
                     "bpp.str" : 1}
-    add_feat_dic = {}
+    add_fid_dic = {}
     for fid in fid2type_dic:
-        if fid not in std_feat_dic:
-            add_feat_dic[fid] = 1
+        if fid not in std_fid_dic:
+            add_fid_dic[fid] = 1
     if args.use_add_feat:
-        for fid in add_feat_dic:
+        for fid in add_fid_dic:
             indiv_feat_dic[fid] = 1
 
     # Remove features from fid2type_dic.
@@ -9251,12 +9258,31 @@ def load_training_data(args,
         fid2type_dic = {}
         fid2type_dic["fa"] = "C"
 
-    # Dictionaries.
+    # Check whether additional features are still present.
+    add_feat_present = False
+    all_add_fid_dic = {"eia" : 1,
+                       "tra" : 1,
+                       "rra" : 1}
+    for fid in add_fid_dic:
+        all_add_fid_dic[fid] = 1
+    for fid in all_add_fid_dic:
+        if fid in fid2type_dic:
+            add_feat_present = True
+
+    # Data dictionaries.
     pc_con_dic = {}
     pp_con_dic = {}
     str_elem_p_dic = {}
     bpp_dic = {}
     add_feat_dic = {}
+    # If additional features present + should be loaded, init add_feat_dic.
+    if add_feat_present:
+        for seq_id in seqs_dic:
+            seq = seqs_dic[seq_id]
+            l_seq = len(seq)
+            add_feat_dic[seq_id] = []
+            for i in range(l_seq):
+                add_feat_dic[seq_id].append([])
 
     # Check and read in data.
     for fid, ftype in sorted(fid2type_dic.items()): # fid e.g. fa, ftype: C,N.
@@ -9373,6 +9399,8 @@ def load_training_data(args,
         CIOUT.write("%s\n" %(ch_info))
     CIOUT.close()
 
+
+    # OBSOLETE.
     print("Convert data to PyG format ... ")
 
     # Convert data to PyTorch geometric format.
@@ -9415,28 +9443,39 @@ def load_training_data(args,
     seqs_dic, feature_list, label_list, id2idx_dic, bp_list
 
     """
-    seqs_dic = {}
-    all_graphs = []
-    label_list = []
-    id2idx_dic = {}
-    idx2id_dic = {}
-    i = 0
 
-    # Process positive sequences.
-    for seq_id, seq in sorted(pos_seqs_dic.items()):
+    # Sequence ID list + label list.
+    seq_ids_list = []
+    label_list = []
+    i = 0
+    for seq_id,c in sorted(pos_ids_dic.items()):
+        seq_ids_list.append(seq_id)
+        label_list.append(1)
         id2idx_dic[seq_id] = i
         idx2id_dic[i] = seq_id
-        seqs_dic[seq_id] = seq
-        seq_l = len(seq)
         i += 1
-        label_list.append(1)
-        # Init feature_list with sequence one-hot encodings.
+    for seq_id,c in sorted(neg_ids_dic.items()):
+        seq_ids_list.append(seq_id)
+        label_list.append(0)
+        id2idx_dic[seq_id] = i
+        idx2id_dic[i] = seq_id
+        i += 1
+
+    # Construct graphs list.
+    all_graphs = []
+
+    for seq_id, seq in sorted(seqs_dic.items()):
+        l_seq = len(seq)
+        i += 1
+        # Init feature_list for this instance with sequence one-hot encodings.
         feature_list = []
         feature_list.append(string_vectorizer(seq, custom_alphabet=fid2cat_dic["fa"]))
         assert len(feature_list) == l_seq, "len(feature_list) != l_seq for sequence ID %s" %(seq_id)
+
         # Make edge indices for backbone.
         edge_index_1 = []
         edge_index_2 = []
+        # Edge indices 0-based!
         for n_idx in range(l_seq - 1):
             edge_index_1.append(n_idx)
             edge_index_2.append(n_idx+1)
@@ -9444,7 +9483,70 @@ def load_training_data(args,
             if args.undirected:
                 edge_index_1.append(n_idx+1)
                 edge_index_2.append(n_idx)
-        # Base pairs.
+
+        # Add base pair edges.
+        if bpp_dic:
+            vp_s = vp_dic[seq_id][0] # 1-based.
+            vp_e = vp_dic[seq_id][1] # 1-based.
+            # Entry e.g. 'CLIP_01': ['130-150,0.33', '160-200,0.44', '240-260,0.55']
+            for entry in bpp_dic[seq_id]:
+                m = re.search("(\d+)-(\d+),(.+)", entry)
+                p1 = int(m.group(1)) # 1-based.
+                p2 = int(m.group(2)) # 1-based.
+                bpp_value = float(m.group(3))
+                g_p1 = p1 - 1 # 0-based base pair index.
+                g_p2 = p2 - 1 # 0-based base pair index.
+                # Filter.
+                if bpp_value < args.bps_cutoff: continue
+                # Add base pair depending on set mode.
+                add_edge = False
+                if args.bps_mode == 1:
+                    if (p1 >= vp_s and p1 <= vp_e) or (p2 >= vp_s and p2 <= vp_e):
+                        add_edge = True
+                elif args.bps_mode == 2:
+                    if p1 >= vp_s and p2 <= vp_e:
+                        add_edge = True
+                if add_edge:
+                    edge_index_1.append(g_p1)
+                    edge_index_1.append(g_p2)
+                    if args.undirected:
+                        edge_index_1.append(g_p2)
+                        edge_index_2.append(g_p1)
+
+        """
+        DAMN: what's the order now, to add. We sorted by fid, but there is no
+        fid -> data_dic association.
+        So change all loading functions to add to one feat_dic:
+
+        feat_dic = {'site1': [[0, 1, 0, 0], [0, 0, 0, 1]], ... }
+
+        str_elem_dic = {'CLIP_01': [[0.9, 0.1, 0.2, 0.4, 0.2, 0.1], [0.8, 0.2, 0.3, 0.2, 0.1, 0.2]], ...}
+
+        con_dic = {'CLIP_01': [0.1, 0.2], 'CLIP_02': [0.4, 0.5]}
+
+        Exchange:
+        read_con_into_dic
+        read_str_elem_p_into_dic
+        with:
+        read_feat_into_dic
+        SHOULD WORK!!!
+
+        """
+
+
+
+
+
+bpp_dic = {'CLIP_01': ['130-150,0.33', '160-200,0.44', '240-260,0.55'], ... }
+
+
+    # Data dictionaries.
+    pc_con_dic = {}
+    pp_con_dic = {}
+    str_elem_p_dic = {}
+    bpp_dic = {}
+    add_feat_dic = {}
+
         if pos_bpp_dic:
             vp_s = pos_vp_dic[seq_id][0] # 1-based.
             vp_e = pos_vp_dic[seq_id][1] # 1-based.
@@ -10748,18 +10850,36 @@ def read_feat_into_dic(feat_file, feat_type,
     Generated dictionary:
     {'CLIP_1': [[0.1], [-0.2]], 'CLIP_2': [[0.4], [0.2]]}
 
+    test.pp.con:
+    >CLIP_01
+    0.1
+    0.2
+    >CLIP_02
+    0.4
+    0.5
+
+    test2.pp.con:
+    >CLIP_01
+    0.1	0.2
+    0.3	0.4
+    >CLIP_02
+    0.5	0.6
+    0.7	0.8
+
     >>> num_test_in = "test_data/test.pp.con"
     >>> read_feat_into_dic(num_test_in, "N")
     {'CLIP_01': [[0.1], [0.2]], 'CLIP_02': [[0.4], [0.5]]}
+    >>> num_test_in = "test_data/test2.pp.con"
+    >>> read_feat_into_dic(num_test_in, "N")
+    {'CLIP_01': [[0.1, 0.2], [0.3, 0.4]], 'CLIP_02': [[0.5, 0.6], [0.7, 0.8]]}
+    >>> add_feat_dic = {'CLIP_01': [[0.1], [0.2]], 'CLIP_02': [[0.4], [0.5]]}
+    >>> num_test_in = "test_data/test.pp.con"
+    >>> read_feat_into_dic(num_test_in, "N", feat_dic=add_feat_dic)
+    {'CLIP_01': [[0.1, 0.1], [0.2, 0.2]], 'CLIP_02': [[0.4, 0.4], [0.5, 0.5]]}
     >>> cat_test_in = "test_data/test.tra"
     >>> tra_labels = ['C', 'F', 'N', 'T']
     >>> read_feat_into_dic(cat_test_in, "C", label_list=tra_labels)
     {'site1': [[0, 1, 0, 0], [0, 0, 0, 1]], 'site2': [[1, 0, 0, 0], [0, 0, 1, 0]]}
-
-site1	FT
-site2	CN
-string_vectorizer returns: [[0, 1, 0, 0], [0, 0, 0, 1]]
-
 
     """
     feat_dic_given = False
@@ -10778,6 +10898,7 @@ string_vectorizer returns: [[0, 1, 0, 0], [0, 0, 0, 1]]
                 if seq_id not in feat_dic:
                     feat_dic[seq_id] = string_vectorizer(cols[1], custom_alphabet=label_list)
                 else:
+                    # feat_dic already populated / initialized.
                     add_list = string_vectorizer(cols[1], custom_alphabet=label_list)
                     assert add_list, "add_list empty (feat_file: %s, seq_id: %s)" %(feat_file, seq_id)
                     # Check.
@@ -10789,27 +10910,29 @@ string_vectorizer returns: [[0, 1, 0, 0], [0, 0, 0, 1]]
         f.closed
     else:
         seq_id = ""
-        tmp_feat_dic = {}
+        pos_i = 0
         with open(feat_file) as f:
             for line in f:
                 if re.search(">.+", line):
                     m = re.search(">(.+)", line)
                     seq_id = m.group(1)
-                    if seq_id not in feat_dic:
-                        tmp_feat_dic[seq_id] = []
+                    # Init only necessary if no populated / initialized feat_dic given.
+                    if not feat_dic_given:
+                        feat_dic[seq_id] = []
+                    pos_i = 0
                 else:
                     vl = line.strip().split('\t')
                     for i,v in enumerate(vl):
                         vl[i] = float(v)
-                    tmp_feat_dic[seq_id].append(vl)
+                    if feat_dic_given:
+                        for v in vl:
+                            feat_dic[seq_id][pos_i].append(v)
+                    else:
+                        feat_dic[seq_id].append(vl)
+                    pos_i += 1
         f.closed
     assert feat_dic, "feat_dic empty"
     return feat_dic
-
-# CCCCCCCCCCCCOOOOOOOOOOOOOOOOONNNNNNNNNTTTTTTTTT
-
-
-
 
 
 ################################################################################

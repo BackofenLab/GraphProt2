@@ -738,7 +738,7 @@ def main_train(args):
 
     # Checks.
     assert os.path.exists(args.in_folder), "--in folder does not exist"
-    indiv_feat_check = args.use_pc_con + args.use_pp_con + args.use_eia + args.use_tra + args.use_rra + args.use_str_elem_p + args.use_bps
+    indiv_feat_check = args.use_pc_con + args.use_pp_con + args.use_eia + args.use_tra + args.use_rra + args.use_str_elem_p + args.use_bps + args.use_add_feat
     if indiv_feat_check and args.only_seq:
         assert False, "--only-seq useless in combination with individually selected features (--use-xxx)"
     assert args.train_vs >= 0.1 and args.train_vs <= 0.5, "Use reasonable values for --train-vs (>= 0.1 and <= 0.5)"
