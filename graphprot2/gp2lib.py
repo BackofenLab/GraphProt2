@@ -3,6 +3,7 @@
 from distutils.spawn import find_executable
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+from torch_geometric.data import Data
 import seaborn as sns
 from math import log
 import pandas as pd
@@ -10,6 +11,7 @@ import numpy as np
 import statistics
 import subprocess
 import logomaker
+import torch
 import gzip
 import uuid
 import sys
@@ -407,7 +409,8 @@ def extract_viewpoint_regions_from_fasta(seqs_dic,
 
 ################################################################################
 
-def extract_uc_region_coords_from_fasta(seqs_dic):
+def extract_uc_region_coords_from_fasta(seqs_dic,
+                                        uc_coords_dic=False):
     """
     Extract uppercase (viewpoint) start + end positions from FASTA dictionary.
     Return dictionary with vectors [start,end] (1-based indices, key:fasta_id).
@@ -418,7 +421,8 @@ def extract_uc_region_coords_from_fasta(seqs_dic):
 
     """
     assert seqs_dic, "given seqs_dic empty"
-    uc_coords_dic = {}
+    if not uc_coords_dic:
+        uc_coords_dic = {}
     # Get uppercase region coordinates for each sequence.
     for seq_id, seq in sorted(seqs_dic.items()):
         l_seq = len(seq)
@@ -9093,12 +9097,11 @@ def load_training_data(args,
     assert os.path.exists(feat_file), "%s features file expected but not does not exist" %(feat_file)
 
     # graphprot2 train output folder.
-    out_folder = args.out_folder
-    if not os.path.exists(out_folder):
-        os.makedirs(out_folder)
+    if not os.path.exists(args.out_folder):
+        os.makedirs(args.out_folder)
 
     # Channel info output file.
-    channel_infos_out = out_folder + "/" + "channel_infos.out"
+    channel_infos_out = args.out_folder + "/" + "channel_infos.out"
     channel_info_list = []
     channel_nr = 0
 
@@ -9112,7 +9115,7 @@ def load_training_data(args,
             row = line.strip()
             cols = line.strip().split("\t")
             feat_id = cols[0]
-            feat_type = cols[1]
+            feat_type = cols[1] # C,N
             feat_cat_list = cols[2].split(",")
             feat_cat_list.sort()
             feat_norm = cols[3]
@@ -9141,27 +9144,29 @@ def load_training_data(args,
         assert False, "sequence feature alphabet != A,C,G,U(,a,c,g,u)"
 
     # Read in sequences.
-    pos_seqs_dic = read_fasta_into_dic(pos_fa_in, all_uc=seqs_all_uc)
-    neg_seqs_dic = read_fasta_into_dic(neg_fa_in, all_uc=seqs_all_uc)
-    assert pos_seqs_dic, "no sequences read in from FASTA file \"%s\"" %(pos_fa_in)
-    assert neg_seqs_dic, "no sequences read in from FASTA file \"%s\"" %(neg_fa_in)
+    seqs_dic = read_fasta_into_dic(pos_fa_in, all_uc=seqs_all_uc)
+    seqs_dic = read_fasta_into_dic(neg_fa_in, all_uc=seqs_all_uc,
+                                   seqs_dic=seqs_dic)
+    assert seqs_dic, "no sequences read from FASTA files"
 
     # Check for 4 (8) distinct nucleotides.
-    pos_cc_dic = seqs_dic_count_chars(pos_seqs_dic)
-    neg_cc_dic = seqs_dic_count_chars(neg_seqs_dic)
+    cc_dic = seqs_dic_count_chars(seqs_dic)
     allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1}
     c_nts = 4
     if not seqs_all_uc:
         allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1, 'a': 1, 'c': 1, 'g': 1, 'u': 1}
         c_nts = 8
-    for nt in pos_cc_dic:
+    for nt in cc_dic:
         if nt not in allowed_nt_dic:
-            assert False, "positive sequences with invalid character \"%s\" encountered (allowed characters: ACGU(acgu)" %(nt)
-    assert len(pos_cc_dic) == c_nts, "# of distinct nucleotide characters in positive set != expected # (%i != %i)" %(len(pos_cc_dic), c_nts)
-    for nt in neg_cc_dic:
-        if nt not in allowed_nt_dic:
-            assert False, "negative sequences with invalid character \"%s\" encountered (allowed characters: ACGU(acgu)" %(nt)
-    assert len(neg_cc_dic) == c_nts, "# of distinct nucleotide characters in negative set != expected # (%i != %i)" %(len(neg_cc_dic), c_nts)
+            assert False, "sequences with invalid character \"%s\" encountered (allowed characters: ACGU(acgu)" %(nt)
+    assert len(cc_dic) == c_nts, "# of distinct nucleotide characters in sequences != expected # (%i != %i)" %(len(cc_dic), c_nts)
+
+    # Add one-hot sequence channels.
+    for c in fid2cat_dic["fa"]:
+        channel_nr += 1
+        channel_id = "fa" + "_" + c
+        channel_info = "%i\t%s\tfa\tC\tone_hot" %(channel_nr, channel_id)
+        channel_info_list.append(channel_info)
 
     # Get con_ext info used to create dataset.
     con_ext_str = "False"
@@ -9183,20 +9188,15 @@ def load_training_data(args,
     SETOUT.close()
 
     # Get uppercase (viewpoint) region start and ends for each sequence.
-    pos_vp_dic = extract_uc_region_coords_from_fasta(pos_seqs_dic)
-    neg_vp_dic = extract_uc_region_coords_from_fasta(neg_seqs_dic)
+    vp_dic = extract_uc_region_coords_from_fasta(pos_seqs_dic)
+    vp_dic = extract_uc_region_coords_from_fasta(neg_seqs_dic,
+                                                 uc_coords_dic=vp_dic)
 
     # Additional features.
     pos_pc_con_in = args.in_folder + "/" + "positives.pc.con"
     neg_pc_con_in = args.in_folder + "/" + "negatives.pc.con"
     pos_pp_con_in = args.in_folder + "/" + "positives.pp.con"
     neg_pp_con_in = args.in_folder + "/" + "negatives.pp.con"
-    pos_tra_in = args.in_folder + "/" + "positives.tra"
-    neg_tra_in = args.in_folder + "/" + "negatives.tra"
-    pos_rra_in = args.in_folder + "/" + "positives.rra"
-    neg_rra_in = args.in_folder + "/" + "negatives.rra"
-    pos_eia_in = args.in_folder + "/" + "positives.eia"
-    neg_eia_in = args.in_folder + "/" + "negatives.eia"
     pos_str_elem_p_in = args.in_folder + "/" + "positives.elem_p.str"
     neg_str_elem_p_in = args.in_folder + "/" + "negatives.elem_p.str"
     pos_bpp_in = args.in_folder + "/" + "positives.bpp.str"
@@ -9219,6 +9219,23 @@ def load_training_data(args,
     if args.use_bps:
         indiv_feat_dic["bpp.str"] = 1
 
+    # Looking for additional features.
+    std_feat_dic = {"pc.con" : 1,
+                    "pp.con" : 1,
+                    "eia" : 1,
+                    "tra" : 1,
+                    "rra" : 1,
+                    "fa" : 1,
+                    "elem_p.str" : 1,
+                    "bpp.str" : 1}
+    add_feat_dic = {}
+    for fid in fid2type_dic:
+        if fid not in std_feat_dic:
+            add_feat_dic[fid] = 1
+    if args.use_add_feat:
+        for fid in add_feat_dic:
+            indiv_feat_dic[fid] = 1
+
     # Remove features from fid2type_dic.
     if indiv_feat_dic:
         del_feat_list = []
@@ -9235,138 +9252,100 @@ def load_training_data(args,
         fid2type_dic["fa"] = "C"
 
     # Dictionaries.
-    pos_pc_con_dic = False
-    neg_pc_con_dic = False
-    pos_pp_con_dic = False
-    neg_pp_con_dic = False
-    pos_tra_dic = False
-    neg_tra_dic = False
-    pos_rra_dic = False
-    neg_rra_dic = False
-    pos_eia_dic = False
-    neg_eia_dic = False
-    pos_str_elem_p_dic = False
-    neg_str_elem_p_dic = False
-    pos_bpp_dic = False
-    neg_bpp_dic = False
-
-
-    """
-
-
-
-
-
-
-
-
-
-
-
-    """
-
+    pc_con_dic = {}
+    pp_con_dic = {}
+    str_elem_p_dic = {}
+    bpp_dic = {}
+    add_feat_dic = {}
 
     # Check and read in data.
-    for fid, ftype in sorted(fid2type_dic.items()):
+    for fid, ftype in sorted(fid2type_dic.items()): # fid e.g. fa, ftype: C,N.
         if fid == "fa":
             continue
         if fid == "bpp.str":
             assert os.path.exists(pos_bpp_in), "--in folder does not contain %s"  %(pos_bpp_in)
             assert os.path.exists(neg_bpp_in), "--in folder does not contain %s"  %(neg_bpp_in)
             print("Read in base pair data ... ")
-            pos_bpp_dic = read_bpp_into_dic(pos_bpp_in, pos_vp_dic,
-                                            bps_mode=args.bps_mode)
-            neg_bpp_dic = read_bpp_into_dic(neg_bpp_in, neg_vp_dic,
-                                            bps_mode=args.bps_mode)
-        if fid == "eia":
-            feat_id = "eia"
-            eia_alphabet = fid2cat_dic[feat_id]
-            assert os.path.exists(pos_eia_in), "--in folder does not contain %s"  %(pos_eia_in)
-            assert os.path.exists(neg_eia_in), "--in folder does not contain %s"  %(neg_eia_in)
-            print("Read in exon-intron annotations ... ")
-            pos_eia_dic = read_feat_into_dic(pos_eia_in, "C",
-                                             label_list=eia_alphabet)
-            neg_eia_dic = read_feat_into_dic(neg_eia_in, "C",
-                                             label_list=eia_alphabet)
-            for c in fid2cat_dic[feat_id]:
-                channel_nr += 1
-                channel_id = feat_id + "_" + c
-                channel_info = "%i\t%s\t%s\tC\tone_hot" %(channel_nr, channel_id, feat_id)
-                channel_info_list.append(channel_info)
+            bpp_dic = read_bpp_into_dic(pos_bpp_in, vp_dic,
+                                        bps_mode=args.bps_mode)
+            bpp_dic = read_bpp_into_dic(neg_bpp_in, neg_vp_dic,
+                                        bpp_dic=bpp_dic,
+                                        bps_mode=args.bps_mode)
+            assert bpp_dic, "no base pair information read in (bpp_dic empty)"
 
-        if fid == "elem_p.str":
-            feat_id = "elem_p.str"
+        elif fid == "elem_p.str":
             assert os.path.exists(pos_str_elem_p_in), "--in folder does not contain %s"  %(pos_str_elem_p_in)
             assert os.path.exists(neg_str_elem_p_in), "--in folder does not contain %s"  %(neg_str_elem_p_in)
             print("Read structural elements probabilities ... ")
-            pos_str_elem_p_dic = read_str_elem_p_into_dic(pos_str_elem_p_in)
-            neg_str_elem_p_dic = read_str_elem_p_into_dic(neg_str_elem_p_in)
-            for c in fid2cat_dic[feat_id]:
+            str_elem_p_dic = read_str_elem_p_into_dic(pos_str_elem_p_in)
+            str_elem_p_dic = read_str_elem_p_into_dic(neg_str_elem_p_in,
+                                                      str_elem_p_dic=str_elem_p_dic)
+            assert str_elem_p_dic, "no .elem_p.str information read in (str_elem_p_dic empty)"
+            for c in fid2cat_dic[fid]:
                 channel_nr += 1
                 channel_id = c
-                encoding = fid2norm_dic[feat_id]
-                channel_info = "%i\t%s\t%s\tN\t%s" %(channel_nr, channel_id, feat_id, encoding)
+                encoding = fid2norm_dic[fid]
+                channel_info = "%i\t%s\t%s\tN\t%s" %(channel_nr, channel_id, fid, encoding)
                 channel_info_list.append(channel_info)
 
-        if fid == "pc.con":
-            feat_id = "pc.con"
+        elif fid == "pc.con":
             assert os.path.exists(pos_pc_con_in), "--in folder does not contain %s"  %(pos_pc_con_in)
             assert os.path.exists(neg_pc_con_in), "--in folder does not contain %s"  %(neg_pc_con_in)
             print("Read in phastCons scores ... ")
-            pos_pc_con_dic = read_con_into_dic(pos_pc_con_in)
-            neg_pc_con_dic = read_con_into_dic(neg_pc_con_in)
-            for c in fid2cat_dic[feat_id]:
+            pc_con_dic = read_con_into_dic(pos_pc_con_in)
+            pc_con_dic = read_con_into_dic(neg_pc_con_in,
+                                           con_dic=pc_con_dic)
+            assert pc_con_dic, "no .pc.con information read in (pc_con_dic empty)"
+            for c in fid2cat_dic[fid]:
                 channel_nr += 1
                 channel_id = c
-                encoding = fid2norm_dic[feat_id]
-                channel_info = "%i\t%s\t%s\tN\t%s" %(channel_nr, channel_id, feat_id, encoding)
+                encoding = fid2norm_dic[fid]
+                channel_info = "%i\t%s\t%s\tN\t%s" %(channel_nr, channel_id, fid, encoding)
                 channel_info_list.append(channel_info)
 
-        if fid == "pp.con":
-            feat_id = "pp.con"
+        elif fid == "pp.con":
             assert os.path.exists(pos_pp_con_in), "--in folder does not contain %s"  %(pos_pp_con_in)
             assert os.path.exists(neg_pp_con_in), "--in folder does not contain %s"  %(neg_pp_con_in)
             print("Read in phyloP scores ... ")
-            pos_pp_con_dic = read_con_into_dic(pos_pp_con_in)
-            neg_pp_con_dic = read_con_into_dic(neg_pp_con_in)
-            for c in fid2cat_dic[feat_id]:
+            pp_con_dic = read_con_into_dic(pos_pp_con_in)
+            pp_con_dic = read_con_into_dic(neg_pp_con_in)
+                                           con_dic=pp_con_dic)
+            assert pp_con_dic, "no .pp.con information read in (pp_con_dic empty)"
+            for c in fid2cat_dic[fid]:
                 channel_nr += 1
                 channel_id = c
-                encoding = fid2norm_dic[feat_id]
-                channel_info = "%i\t%s\t%s\tN\t%s" %(channel_nr, channel_id, feat_id, encoding)
+                encoding = fid2norm_dic[fid]
+                channel_info = "%i\t%s\t%s\tN\t%s" %(channel_nr, channel_id, fid, encoding)
                 channel_info_list.append(channel_info)
 
-        if fid == "rra":
-            feat_id = "rra"
-            rra_alphabet = fid2cat_dic["rra"]
-            assert os.path.exists(pos_rra_in), "--in folder does not contain %s"  %(pos_rra_in)
-            assert os.path.exists(neg_rra_in), "--in folder does not contain %s"  %(neg_rra_in)
-            print("Read in repeat region annotations ... ")
-            pos_rra_dic = read_feat_into_dic(pos_rra_in, "C",
-                                             label_list=rra_alphabet)
-            neg_rra_dic = read_feat_into_dic(neg_rra_in, "C",
-                                             label_list=rra_alphabet)
-            for c in fid2cat_dic[feat_id]:
+        else:
+            # Additional features like .eia, .tra, .rra, or user defined.
+            feat_alphabet = fid2cat_dic[fid]
+            pos_feat_in = args.in_folder + "/positives." + fid
+            neg_feat_in = args.in_folder + "/negatives." + fid
+            assert os.path.exists(pos_feat_in), "--in folder does not contain %s"  %(pos_feat_in)
+            assert os.path.exists(neg_feat_in), "--in folder does not contain %s"  %(neg_feat_in)
+            print("Read in .%s annotations ... " %(fid))
+            add_feat_dic = read_feat_into_dic(pos_feat_in, ftype,
+                                              feat_dic=add_feat_dic,
+                                              label_list=feat_alphabet)
+            add_feat_dic = read_feat_into_dic(neg_feat_in, ftype,
+                                              feat_dic=add_feat_dic,
+                                              label_list=eia_alphabet)
+            assert add_feat_dic, "no .%s information read in (add_feat_dic empty)" %(fid)
+            if ftype == "N":
                 channel_nr += 1
-                channel_id = feat_id + "_" + c
-                channel_info = "%i\t%s\t%s\tC\tone_hot" %(channel_nr, channel_id, feat_id)
+                encoding = fid2norm_dic[fid]
+                channel_info = "%i\t%s\t%s\tN\t%s" %(channel_nr, fid2cat_dic[fid], fid, encoding)
                 channel_info_list.append(channel_info)
-
-        if fid == "tra":
-            feat_id = "tra"
-            tra_alphabet = fid2cat_dic["tra"]
-            assert os.path.exists(pos_tra_in), "--in folder does not contain %s"  %(pos_tra_in)
-            assert os.path.exists(neg_tra_in), "--in folder does not contain %s"  %(neg_tra_in)
-            print("Read in transcript region annotations ... ")
-            pos_tra_dic = read_feat_into_dic(pos_tra_in, "C",
-                                             label_list=tra_alphabet)
-            neg_tra_dic = read_feat_into_dic(neg_tra_in, "C",
-                                             label_list=tra_alphabet)
-            for c in fid2cat_dic[feat_id]:
-                channel_nr += 1
-                channel_id = feat_id + "_" + c
-                channel_info = "%i\t%s\t%s\tC\tone_hot" %(channel_nr, channel_id, feat_id)
-                channel_info_list.append(channel_info)
+            elif ftype == "C":
+                for c in fid2cat_dic[fid]:
+                    channel_nr += 1
+                    channel_id = fid + "_" + c
+                    channel_info = "%i\t%s\t%s\tC\tone_hot" %(channel_nr, channel_id, fid)
+                    channel_info_list.append(channel_info)
+            else:
+                assert False, "invalid feature type given (%s) for feature %s" %(ftype,fid)
 
     # Write used features.out file to graphprot2 train output folder.
     feat_table_out = args.out_folder + "/" + "features.out"
@@ -9425,6 +9404,480 @@ def load_training_data(args,
                                                                 g_idx=g_idx,
                                                                 n_idx=n_idx,
                                                                 plfold_bpp_cutoff=args.bps_cutoff)
+
+
+
+
+
+
+    """
+    Generate data lists to return:
+    seqs_dic, feature_list, label_list, id2idx_dic, bp_list
+
+    """
+    seqs_dic = {}
+    all_graphs = []
+    label_list = []
+    id2idx_dic = {}
+    idx2id_dic = {}
+    i = 0
+
+    # Process positive sequences.
+    for seq_id, seq in sorted(pos_seqs_dic.items()):
+        id2idx_dic[seq_id] = i
+        idx2id_dic[i] = seq_id
+        seqs_dic[seq_id] = seq
+        seq_l = len(seq)
+        i += 1
+        label_list.append(1)
+        # Init feature_list with sequence one-hot encodings.
+        feature_list = []
+        feature_list.append(string_vectorizer(seq, custom_alphabet=fid2cat_dic["fa"]))
+        assert len(feature_list) == l_seq, "len(feature_list) != l_seq for sequence ID %s" %(seq_id)
+        # Make edge indices for backbone.
+        edge_index_1 = []
+        edge_index_2 = []
+        for n_idx in range(l_seq - 1):
+            edge_index_1.append(n_idx)
+            edge_index_2.append(n_idx+1)
+            # In case of undirected graphs, add backward edges too.
+            if args.undirected:
+                edge_index_1.append(n_idx+1)
+                edge_index_2.append(n_idx)
+        # Base pairs.
+        if pos_bpp_dic:
+            vp_s = pos_vp_dic[seq_id][0] # 1-based.
+            vp_e = pos_vp_dic[seq_id][1] # 1-based.
+
+
+            for entry in bpp_dic[seq_id]:
+                m = re.search("(\d+)-(\d+),(.+)", entry)
+
+
+        # Uppercase region (viewpoint) start + end + lengths.
+        vp_s = vp_dic[seq_id][0] # 1-based.
+        vp_e = vp_dic[seq_id][1] # 1-based.
+        l_vp = vp_e - vp_s + 1
+
+
+
+        # Add base pair edges to graph.
+        if bpp_dic:
+            for entry in bpp_dic[seq_id]:
+                m = re.search("(\d+)-(\d+),(.+)", entry)
+                p1 = int(m.group(1))
+                p2 = int(m.group(2))
+                bpp_value = float(m.group(3))
+                g_p1 = p1 - 1 # 0-based base pair index.
+                g_p2 = p2 - 1 # 0-based base pair index.
+                # Filter.
+                if bpp_value < plfold_bpp_cutoff: continue
+                # Add base pair depending on set mode.
+                if bps_mode == 1:
+                    if (p1 >= vp_s and p1 <= vp_e) or (p2 >= vp_s and p2 <= vp_e):
+                        all_edges.append((g_p1+n_idx, g_p2+n_idx))
+                        all_edges.append((g_p2+n_idx, g_p1+n_idx))
+                elif bps_mode == 2:
+                    if p1 >= vp_s and p2 <= vp_e:
+                        all_edges.append((g_p1+n_idx, g_p2+n_idx))
+                        all_edges.append((g_p2+n_idx, g_p1+n_idx))
+                else:
+                    assert False, "ERROR: invalid bps_mode given (valid values: 1,2)"
+
+
+
+
+
+
+
+
+        for i,v in enumerate(pos_feat_dic[seq_id]):
+            for e in v:
+                feature_list[id_idx][i].append(e)
+
+"""
+        feature_list[i][j] = feature vector of instance i, position/node j
+        bp_list[i][j] a list of length 3, storing the base pair start (1-based),
+"""
+
+    pos_pc_con_dic = False
+    neg_pc_con_dic = False
+    pos_pp_con_dic = False
+    neg_pp_con_dic = False
+    pos_tra_dic = False
+    neg_tra_dic = False
+    pos_rra_dic = False
+    neg_rra_dic = False
+    pos_eia_dic = False
+    neg_eia_dic = False
+    pos_str_elem_p_dic = False
+    neg_str_elem_p_dic = False
+    pos_bpp_dic = False
+    neg_bpp_dic = False
+
+
+
+
+
+
+
+    for feat_id, feat_type in sorted(fid2type_dic.items()):
+        if feat_id == "fa":
+            continue
+        print("Read in feature \"%s\" ... " %(feat_id))
+        feat_nr += 1
+        # Feature files.
+        pos_feat = args.in_folder + "/" + "positives." + feat_id
+        neg_feat = args.in_folder + "/" + "negatives." + feat_id
+        assert os.path.exists(pos_feat), "%s does not exist" %(pos_feat)
+        assert os.path.exists(neg_feat), "%s does not exist" %(neg_feat)
+        # Read feature values into dictionary of lists.
+        lab_list = False
+        if feat_type == "C":
+            lab_list = fid2cat_dic[feat_id]
+        pos_feat_dic = read_feat_into_dic(pos_feat, feat_type,
+                                          label_list=lab_list)
+        neg_feat_dic = read_feat_into_dic(neg_feat, feat_type,
+                                          label_list=lab_list)
+        for seq_id in pos_feat_dic:
+            id_idx = id2idx_dic[seq_id]
+            for i,v in enumerate(pos_feat_dic[seq_id]):
+                for e in v:
+                    feature_list[id_idx][i].append(e)
+        for seq_id in neg_feat_dic:
+            id_idx = id2idx_dic[seq_id]
+            for i,v in enumerate(neg_feat_dic[seq_id]):
+                for e in v:
+                    feature_list[id_idx][i].append(e)
+
+
+
+
+
+
+    # Process negative sequences.
+    for seq_id, seq in sorted(neg_seqs_dic.items()):
+        id2idx_dic[seq_id] = i
+        idx2id_dic[i] = seq_id
+        seqs_dic[seq_id] = seq
+        i += 1
+        label_list.append(0)
+        # Init feature_list with sequence one-hot encodings.
+        feature_list.append(string_vectorizer(seq, custom_alphabet=fid2cat_dic["fa"]))
+
+
+
+
+
+
+
+
+
+        for i,c in enumerate(seq): # i from 0.. l-1
+            if seq_id in seqs_out_dic:
+                seqs_out_dic[seq_id] += c
+            else:
+                seqs_out_dic[seq_id] = c
+            all_nodes_labels.append(dict_label_idx[c])
+
+            # Make feature vector [0,1, ..] for each graph node.
+            feat_vector = []
+            if eia_dic:
+               feat_vector = feat_vector + eia_dic[seq_id][i]
+            if str_elem_p_dic:
+               feat_vector = feat_vector + str_elem_p_dic[seq_id][i]
+            if pc_con_dic:
+                feat_vector.append(pc_con_dic[seq_id][i])
+            if pp_con_dic:
+                feat_vector.append(pp_con_dic[seq_id][i])
+            if rra_dic:
+               feat_vector = feat_vector + rra_dic[seq_id][i]
+            if tra_dic:
+               feat_vector = feat_vector + tra_dic[seq_id][i]
+
+            # Convert list elements to string and save in new list.
+            if feat_vector:
+                node_attribute = [str(att) for att in feat_vector]
+                # Join elements separate by , to string and append to list.
+                all_nodes_attributes.append(",".join(node_attribute))
+
+            # Add backbone edge.
+            if g_i > 0:
+                all_edges.append((g_i-1+n_idx, g_i+n_idx))
+                all_edges.append((g_i+n_idx, g_i-1+n_idx))
+            # Increment graph node index.
+            g_i += 1
+
+        # Add base pair edges to graph.
+        if bpp_dic:
+            for entry in bpp_dic[seq_id]:
+                m = re.search("(\d+)-(\d+),(.+)", entry)
+                p1 = int(m.group(1))
+                p2 = int(m.group(2))
+                bpp_value = float(m.group(3))
+                g_p1 = p1 - 1 # 0-based base pair index.
+                g_p2 = p2 - 1 # 0-based base pair index.
+                # Filter.
+                if bpp_value < plfold_bpp_cutoff: continue
+                # Add base pair depending on set mode.
+                if bps_mode == 1:
+                    if (p1 >= vp_s and p1 <= vp_e) or (p2 >= vp_s and p2 <= vp_e):
+                        all_edges.append((g_p1+n_idx, g_p2+n_idx))
+                        all_edges.append((g_p2+n_idx, g_p1+n_idx))
+                elif bps_mode == 2:
+                    if p1 >= vp_s and p2 <= vp_e:
+                        all_edges.append((g_p1+n_idx, g_p2+n_idx))
+                        all_edges.append((g_p2+n_idx, g_p1+n_idx))
+                else:
+                    assert False, "ERROR: invalid bps_mode given (valid values: 1,2)"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def generate_geometric_data(seqs_dic, vp_dic,
+                            pc_con_dic=False,
+                            pp_con_dic=False,
+                            eia_dic=False,
+                            rra_dic=False,
+                            tra_dic=False,
+                            str_elem_p_dic=False,
+                            bpp_dic=False,
+                            plfold_bpp_cutoff=0.2,
+                            g_idx=False,
+                            n_idx=False,
+                            add_fake_g=False,
+                            fake_g_lcuc=False,
+                            add_ids_out_file=False,
+                            add_seqs_out_file=False,
+                            bps_mode=1):
+    """
+    Generate PyTorch Geometric graph format data.
+
+    seqs_dic:
+        Sequence ID -> sequence dictionary.
+    vp_dic:
+        Sequence ID -> [viewpont (uppercase) start, viewpoint end] dictionary.
+
+    Return the following lists:
+    all_nodes_labels       Nucleotide indices (dict_label_idx)
+    all_graph_indicators   Graph indices, each node of a graph
+                           gets same index
+    all_edges              Indices of edges
+    all_nodes_attributes   Node vectors
+    Also return the latest graph and node indices:
+    g_idx
+    n_idx
+
+    """
+
+    # Checks.
+    assert seqs_dic, "seqs_dic empty"
+    # Nucleotide label to idx dictionary.
+    dict_label_idx = {'A': '1',
+                      'C': '2',
+                      'G': '3',
+                      'U': '4',
+                      'a': '5',
+                      'c': '6',
+                      'g': '7',
+                      'u': '8'}
+    # Init lists.
+    all_nodes_labels = []
+    all_graph_indicators = []
+    all_edges = []
+    all_nodes_attributes = []
+
+    # Init graph and node indices (if not given).
+    if not g_idx:
+        g_idx = 0
+    if not n_idx:
+        n_idx = 1
+
+    # Store sequence ID -> site sequence.
+    seqs_out_dic = {}
+    # Sequence ID -> graph index.
+    id2gidx_dic = {}
+
+    for seq_id, seq in sorted(seqs_dic.items()):
+        # Uppercase region (viewpoint) start + end + lengths.
+        vp_s = vp_dic[seq_id][0] # 1-based.
+        vp_e = vp_dic[seq_id][1] # 1-based.
+        l_vp = vp_e - vp_s + 1
+        l_seq = len(seq)
+        # Length of graph.
+        n_nodes = l_seq
+        # Add graph indicator labels (length of graph).
+        all_graph_indicators.extend([g_idx+1]*n_nodes)
+
+        # Check for ID in given dictionaries.
+        if bpp_dic:
+            assert seq_id in bpp_dic, "sequence ID \"%s\" not in bpp_dic" %(seq_id)
+        if eia_dic:
+            assert seq_id in eia_dic, "sequence ID \"%s\" not in eia_dic" %(seq_id)
+        if pc_con_dic:
+            assert seq_id in pc_con_dic, "sequence ID \"%s\" not in pc_con_dic" %(seq_id)
+        if pp_con_dic:
+            assert seq_id in pp_con_dic, "sequence ID \"%s\" not in pp_con_dic" %(seq_id)
+        if rra_dic:
+            assert seq_id in rra_dic, "sequence ID \"%s\" not in rra_dic" %(seq_id)
+        if str_elem_p_dic:
+            assert seq_id in str_elem_p_dic, "sequence ID \"%s\" not in str_elem_p_dic" %(seq_id)
+        if tra_dic:
+            assert seq_id in tra_dic, "sequence ID \"%s\" not in tra_dic" %(seq_id)
+
+        # Add feature values per position.
+        g_i = 0
+        for i,c in enumerate(seq): # i from 0.. l-1
+            if seq_id in seqs_out_dic:
+                seqs_out_dic[seq_id] += c
+            else:
+                seqs_out_dic[seq_id] = c
+            all_nodes_labels.append(dict_label_idx[c])
+
+            # Make feature vector [0,1, ..] for each graph node.
+            feat_vector = []
+            if eia_dic:
+               feat_vector = feat_vector + eia_dic[seq_id][i]
+            if str_elem_p_dic:
+               feat_vector = feat_vector + str_elem_p_dic[seq_id][i]
+            if pc_con_dic:
+                feat_vector.append(pc_con_dic[seq_id][i])
+            if pp_con_dic:
+                feat_vector.append(pp_con_dic[seq_id][i])
+            if rra_dic:
+               feat_vector = feat_vector + rra_dic[seq_id][i]
+            if tra_dic:
+               feat_vector = feat_vector + tra_dic[seq_id][i]
+
+            # Convert list elements to string and save in new list.
+            if feat_vector:
+                node_attribute = [str(att) for att in feat_vector]
+                # Join elements separate by , to string and append to list.
+                all_nodes_attributes.append(",".join(node_attribute))
+
+            # Add backbone edge.
+            if g_i > 0:
+                all_edges.append((g_i-1+n_idx, g_i+n_idx))
+                all_edges.append((g_i+n_idx, g_i-1+n_idx))
+            # Increment graph node index.
+            g_i += 1
+
+        # Add base pair edges to graph.
+        if bpp_dic:
+            for entry in bpp_dic[seq_id]:
+                m = re.search("(\d+)-(\d+),(.+)", entry)
+                p1 = int(m.group(1))
+                p2 = int(m.group(2))
+                bpp_value = float(m.group(3))
+                g_p1 = p1 - 1 # 0-based base pair index.
+                g_p2 = p2 - 1 # 0-based base pair index.
+                # Filter.
+                if bpp_value < plfold_bpp_cutoff: continue
+                # Add base pair depending on set mode.
+                if bps_mode == 1:
+                    if (p1 >= vp_s and p1 <= vp_e) or (p2 >= vp_s and p2 <= vp_e):
+                        all_edges.append((g_p1+n_idx, g_p2+n_idx))
+                        all_edges.append((g_p2+n_idx, g_p1+n_idx))
+                elif bps_mode == 2:
+                    if p1 >= vp_s and p2 <= vp_e:
+                        all_edges.append((g_p1+n_idx, g_p2+n_idx))
+                        all_edges.append((g_p2+n_idx, g_p1+n_idx))
+                else:
+                    assert False, "ERROR: invalid bps_mode given (valid values: 1,2)"
+
+        # Update node and graph indices.
+        n_idx += n_nodes
+        g_idx += 1
+        # Store sequence ID -> graph index.
+        id2gidx_dic[seq_id] = g_idx
+
+    assert g_idx, "no graphs added (g_idx == 0)"
+
+    # Output additional infos.
+    if add_ids_out_file:
+        ADDOUT = open(add_ids_out_file, "w")
+        for seq_id, gidx in sorted(id2gidx_dic.items()):
+            ADDOUT.write("%s\t%i\n" %(seq_id, id2gidx_dic[seq_id]))
+        ADDOUT.close()
+    if add_seqs_out_file:
+        fasta_output_dic(seqs_out_dic, add_seqs_out_file,
+                         split=True,
+                         split_size=60)
+
+    # If double taking jive fake graph should be added.
+    if add_fake_g:
+        # Fake sequence.
+        fake_seq = "ACGU"
+        if fake_g_lcuc:
+            fake_seq = "ACGUacgu"
+        # Node indicators.
+        n_nodes = len(fake_seq)
+        all_graph_indicators.extend([g_idx+1]*n_nodes)
+        # Node labels and edges.
+        g_i = 0
+        for i,c in enumerate(fake_seq):
+            all_nodes_labels.append(dict_label_idx[c])
+            # Add backbone edges.
+            if g_i > 0:
+                all_edges.append((g_i-1+n_idx, g_i+n_idx))
+                all_edges.append((g_i+n_idx, g_i-1+n_idx))
+            # Increment graph node index.
+            g_i += 1
+        # Node attributes.
+        if all_nodes_attributes:
+            # Add first element n_nodes times.
+            for i in range(n_nodes):
+                all_nodes_attributes.append(all_nodes_attributes[0])
+        # Update node and graph indices.
+        n_idx += n_nodes
+        g_idx += 1
+
+    return all_nodes_labels, all_graph_indicators, all_edges, all_nodes_attributes, g_idx, n_idx
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     # Create labels.
     labels = [1]*len(pos_seqs_dic) + [0]*len(neg_seqs_dic)
@@ -10260,7 +10713,7 @@ def read_settings_into_dic(settings_file):
 ################################################################################
 
 def read_feat_into_dic(feat_file, feat_type,
-                       single_n_feat=False,
+                       feat_dic=False,
                        label_list=False):
     """
     Read in feature data from feat_file into dictionary of lists.
@@ -10268,9 +10721,6 @@ def read_feat_into_dic(feat_file, feat_type,
 
     feat_type:
         Type of feature, set "C" for categorical and "N" for numerical
-    single_n_feat:
-        Store N values (expects one per input row) as dictionary of 1d lists
-        instead of dictionary of 2d lists (even if one value per row)
     label_list:
         Needed for C feature, supply label_list to do one-hot encoding
 
@@ -10301,45 +10751,65 @@ def read_feat_into_dic(feat_file, feat_type,
     >>> num_test_in = "test_data/test.pp.con"
     >>> read_feat_into_dic(num_test_in, "N")
     {'CLIP_01': [[0.1], [0.2]], 'CLIP_02': [[0.4], [0.5]]}
-    >>> read_feat_into_dic(num_test_in, "N", single_n_feat=True)
-    {'CLIP_01': [0.1, 0.2], 'CLIP_02': [0.4, 0.5]}
     >>> cat_test_in = "test_data/test.tra"
     >>> tra_labels = ['C', 'F', 'N', 'T']
     >>> read_feat_into_dic(cat_test_in, "C", label_list=tra_labels)
     {'site1': [[0, 1, 0, 0], [0, 0, 0, 1]], 'site2': [[1, 0, 0, 0], [0, 0, 1, 0]]}
 
+site1	FT
+site2	CN
+string_vectorizer returns: [[0, 1, 0, 0], [0, 0, 0, 1]]
+
+
     """
+    feat_dic_given = False
+    if not feat_dic:
+        feat_dic = {}
+    else:
+        feat_dic_given = True
     types = ['C', 'N']
     assert feat_type in types, "invalid feature type given (expects C or N)"
-    feat_dic = {}
     if feat_type == 'C':
         assert label_list, "label_list needed if feat_type == C"
         with open(feat_file) as f:
             for line in f:
                 cols = line.strip().split("\t")
                 seq_id = cols[0]
-                feat_dic[seq_id] = string_vectorizer(cols[1], custom_alphabet=label_list)
+                if seq_id not in feat_dic:
+                    feat_dic[seq_id] = string_vectorizer(cols[1], custom_alphabet=label_list)
+                else:
+                    add_list = string_vectorizer(cols[1], custom_alphabet=label_list)
+                    assert add_list, "add_list empty (feat_file: %s, seq_id: %s)" %(feat_file, seq_id)
+                    # Check.
+                    l_old = len(feat_dic[seq_id])
+                    l_add = len(feat_list)
+                    assert l_old == l_add, "existing list length in feat_dic != list length from feat_file to add (feat_file: %s, seq_id: %s)" %(feat_file, seq_id)
+                    for i in range(l_old):
+                        feat_dic[seq_id][i] += add_list[i]
         f.closed
     else:
         seq_id = ""
+        tmp_feat_dic = {}
         with open(feat_file) as f:
             for line in f:
                 if re.search(">.+", line):
                     m = re.search(">(.+)", line)
                     seq_id = m.group(1)
-                    feat_dic[seq_id] = []
+                    if seq_id not in feat_dic:
+                        tmp_feat_dic[seq_id] = []
                 else:
-                    if single_n_feat:
-                        v = float(line.strip())
-                        feat_dic[seq_id].append(v)
-                    else:
-                        vl = line.strip().split('\t')
-                        for i,v in enumerate(vl):
-                            vl[i] = float(v)
-                        feat_dic[seq_id].append(vl)
+                    vl = line.strip().split('\t')
+                    for i,v in enumerate(vl):
+                        vl[i] = float(v)
+                    tmp_feat_dic[seq_id].append(vl)
         f.closed
     assert feat_dic, "feat_dic empty"
     return feat_dic
+
+# CCCCCCCCCCCCOOOOOOOOOOOOOOOOONNNNNNNNNTTTTTTTTT
+
+
+
 
 
 ################################################################################

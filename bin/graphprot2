@@ -120,6 +120,11 @@ def setup_argument_parser():
                    default = False,
                    action = "store_true",
                    help = "Add structural elements probabilities. Set --use-x to define which features to add on top of sequence feature (by default all --in features are used)")
+    p_trf.add_argument("--use-add-feat",
+                   dest = "use_add_feat",
+                   default = False,
+                   action = "store_true",
+                   help = "Add additional feature annotations. Set --use-x to define which features to add on top of sequence feature (by default all --in features are used)")
     p_trf.add_argument("--use-bps",
                    dest = "use_bps",
                    default = False,
@@ -146,6 +151,11 @@ def setup_argument_parser():
     # Add advanced model definition arguments group.
     p_tra = p_tr.add_argument_group("model definition arguments")
     # Optional arguments for train.
+    p_tra.add_argument("--undirected",
+                   dest = "undirected",
+                   default = False,
+                   action = "store_true",
+                   help = "Use undirected graphs for model training. By default directed graphs are used (5' to 3' direction) (default: False)")
     p_tra.add_argument("--gen-cv",
                    dest = "gen_cv",
                    default = False,
