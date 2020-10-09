@@ -8651,6 +8651,322 @@ def phylop_norm_train_scores(pos_pp_con_out, neg_pp_con_out,
 
 ################################################################################
 
+def load_predict_data(args,
+                      return_graphs=False):
+
+    """
+    Load whole site prediction data from GraphProt2 predict output folder
+    and return.
+
+    """
+
+    # Checks.
+    assert os.path.isdir(args.in_folder), "--in folder does not exist"
+    assert os.path.isdir(args.model_in_folder), "--model-in folder does not exist"
+
+    # Feature file containing info for features used for model training.
+    feat_file = args.model_in_folder + "/" + "features.out"
+    assert os.path.exists(feat_file), "%s features file expected but not does not exist" %(feat_file)
+
+    # Read in model parameters.
+    params_file = args.model_in_folder + "/final.params"
+    assert os.path.isfile(params_file), "missing model training parameter file %s" %(params_file)
+    params_dic = read_settings_into_dic(params_file)
+    assert "num_features" in params_dic, "num_features info missing in model parameter file %s" %(params_file)
+    model_num_feat = int(params_dic["num_features"])
+
+    # Data ID.
+    data_id = data_id
+    # graphprot2 predict output folder.
+    out_folder = args.out_folder
+    if not os.path.exists(out_folder):
+        os.makedirs(out_folder)
+
+    # Channel info output file.
+    channel_infos_out = out_folder + "/" + "channel_infos.out"
+    channel_info_list = []
+    channel_nr = 0
+
+    # Read in feature info.
+    fid2type_dic = {}
+    fid2cat_dic = {} # Store category labels or numerical score IDs in list.
+    fid2norm_dic = {}
+    fid2row_dic = {}
+    print("Read in feature infos from %s ... " %(feat_file))
+    with open(feat_file) as f:
+        for line in f:
+            row = line.strip()
+            cols = line.strip().split("\t")
+            feat_id = cols[0]
+            feat_type = cols[1]
+            feat_cat_list = cols[2].split(",")
+            feat_cat_list.sort()
+            feat_norm = cols[3]
+            fid2row_dic[feat_id] = row
+            assert feat_id not in fid2type_dic, "feature ID \"%s\" found twice in feature file" %(feat_id)
+            fid2type_dic[feat_id] = feat_type
+            fid2cat_dic[feat_id] = feat_cat_list
+            fid2norm_dic[feat_id] = feat_norm
+    f.closed
+    assert fid2type_dic, "no feature infos read in from graphprot2 train feature file %s" %(feat_file)
+
+    # args.mode == 2 (predict position-wise scoring profiles) check.
+    if args.mode == 2:
+        assert "bpp.str" not in fid2type_dic, "--model-in model was trained with base pair information, but profile prediction mode (--mode 2) so far does not support base pair information. Use --mode 1 or train models without base pair information"
+
+    # Read in features.out from graphprot2 gp and check.
+    gp_feat_file = args.in_folder + "/" + "features.out"
+    assert os.path.exists(gp_feat_file), "%s features file expected but not does not exist" %(gp_feat_file)
+    gp_fid2row_dic = {}
+    print("Read in feature infos from %s ... " %(gp_feat_file))
+    with open(gp_feat_file) as f:
+        for line in f:
+            row = line.strip()
+            cols = line.strip().split("\t")
+            feat_id = cols[0]
+            gp_fid2row_dic[feat_id] = row
+    f.closed
+    assert gp_fid2row_dic, "no feature infos found in graphprot2 gp feature file %s" %(gp_feat_file)
+    #assert len(fid2row_dic) == len(gp_fid2row_dic), "# features in gp + train feature files differ"
+    for fid in fid2row_dic:
+        assert fid in gp_fid2row_dic, "graphprot2 train feature ID \"%s\" not found in %s" %(fid, gp_feat_file)
+        # If predict_profiles, "fa" feature between gp + train can differ.
+        if not (args.mode == 2 and fid == "fa"):
+            assert gp_fid2row_dic[fid] == fid2row_dic[fid], "feature infos for feature ID \"%s\" differ between gp + train feature files (train: \"%s\", gp: \"%s\")" %(fid, gp_fid2row_dic[fid], fid2row_dic[fid])
+
+    # Get sequence context extension set in gp.
+    con_ext = False
+    gp_settings_file = args.in_folder + "/settings.graphprot2_gp.out"
+    if os.path.exists(gp_settings_file):
+        with open(gp_settings_file) as f:
+            for line in f:
+                cols = line.strip().split("\t")
+                if cols[0] == "con_ext":
+                    if cols[1] == "False":
+                        con_ext = False
+                    else:
+                        con_ext = int(cols[1])
+        f.closed
+    # Get base pair + con_ext settings from train.
+    bps_mode = 1
+    bps_cutoff = 0.5
+    con_ext_train = False
+    train_settings_file = args.model_in_folder + "/settings.graphprot2_train.out"
+    if os.path.exists(train_settings_file):
+        with open(train_settings_file) as f:
+            for line in f:
+                cols = line.strip().split("\t")
+                if cols[0] == "bps_mode":
+                    bps_mode = int(cols[1])
+                if cols[0] == "bps_cutoff":
+                    bps_cutoff = float(cols[1])
+                if cols[0] == "con_ext":
+                    if cols[1] == "False":
+                        con_ext_train = False
+                    else:
+                        con_ext_train = int(cols[1])
+        f.closed
+    # Compare gp + train context settings.
+    seqs_all_uc = False
+    if con_ext:
+        if not con_ext_train:
+            print("WARNING: --con-ext prediction data incompatible with trained model")
+            print("           Changing lowercase context regions to uppercase to")
+            print("            restore compatibility with trained model. To use")
+            print("             lowercase context regions in predictions train")
+            print("              a compatible model (graphprot2 gt --con-ext")
+            print("              and graphprot2 train --uc-context disabled)")
+            seqs_all_uc = True
+
+    # If we have a lowercase uppercase model.
+    if con_ext_train:
+        if con_ext:
+            if args.con_ext:
+                if con_ext_train != args.con_ext:
+                    print("WARNING: set context extension differs between trained model and --con-ext (%i != %i)" %(con_ext_train, predict_con_ext))
+            else:
+                if con_ext_train != con_ext:
+                    print("WARNING: --con-ext differs between trained model and --in dataset (%i != %i)" %(con_ext_train, con_ext))
+        else:
+            # Only a problem for --mode 1 whole site prediction.
+            if args.mode == 1:
+                assert False, "Provided model (--model-in) was trained on upper- and lowercase context, but --in dataset does not contain lowercase context. Please provide a compatible model+dataset combination for whole site prediction (--mode 1)."
+
+        if args.mode == 2:
+            # Convert profile prediction sequences to uppercase.
+            seqs_all_uc = True
+
+    # Check sequence feature.
+    assert "fa" in fid2type_dic, "feature ID \"fa\" not in feature file"
+
+    if con_ext_train:
+        assert fid2cat_dic["fa"] == ["A", "C", "G", "U", "a", "c", "g", "u"], "sequence feature alphabet != A,C,G,U,a,c,g,u"
+    else:
+        assert fid2cat_dic["fa"] == ["A", "C", "G", "U"], "sequence feature alphabet != A,C,G,U"
+
+    # Read in FASTA sequences.
+    test_fa_in = args.in_folder + "/" + "test.fa"
+    assert os.path.exists(test_fa_in), "--in folder does not contain %s"  %(test_fa_in)
+    seqs_dic = read_fasta_into_dic(test_fa_in, all_uc=seqs_all_uc)
+    assert test_seqs_dic, "no sequences read in from FASTA file \"%s\"" %(test_fa_in)
+
+    # Get uppercase (viewpoint) region start and ends for each sequence.
+    vp_dic = extract_uc_region_coords_from_fasta(test_seqs_dic)
+
+    # Data dictionaries.
+    bpp_dic = {}
+    feat_dic = {}
+
+    # Init feat_dic (storing node feature vector data) with sequence one-hot encodings.
+    for seq_id in seqs_dic:
+        seq = seqs_dic[seq_id]
+        l_seq = len(seq)
+        feat_dic[seq_id] = []
+        feat_dic[seq_id] = string_vectorizer(seq, custom_alphabet=fid2cat_dic["fa"])
+
+    # Add sequence one-hot channels.
+    for c in fid2cat_dic["fa"]:
+        channel_nr += 1
+        channel_id = "fa" + "_" + c
+        channel_info = "%i\t%s\tfa\tC\tone_hot" %(channel_nr, channel_id)
+        channel_info_list.append(channel_info)
+
+    # Check and read in more data.
+    for fid, ftype in sorted(fid2type_dic.items()): # fid e.g. fa, ftype: C,N.
+        if fid == "fa": # already added to feat_dic (first item).
+            continue
+        if fid == "bpp.str":
+            test_bpp_in = args.in_folder + "/" + "test.bpp.str"
+            assert os.path.exists(test_bpp_in), "--in folder does not contain %s"  %(test_bpp_in)
+            print("Read in base pair data ... ")
+            bpp_dic = read_bpp_into_dic(test_bpp_in, vp_dic,
+                                        bps_mode=args.bps_mode)
+            assert bpp_dic, "no base pair information read in (bpp_dic empty)"
+
+        else:
+            # All features (additional to .fa) like .elem_p.str, .con, .eia, .tra, .rra, or user defined.
+            feat_alphabet = fid2cat_dic[fid]
+            test_feat_in = args.in_folder + "/test." + fid
+            assert os.path.exists(test_feat_in), "--in folder does not contain %s"  %(test_feat_in)
+            print("Read in .%s annotations ... " %(fid))
+            feat_dic = read_feat_into_dic(test_feat_in, ftype,
+                                          feat_dic=feat_dic,
+                                          label_list=feat_alphabet)
+            assert feat_dic, "no .%s information read in (feat_dic empty)" %(fid)
+            if ftype == "N":
+                channel_nr += 1
+                encoding = fid2norm_dic[fid]
+                channel_info = "%i\t%s\t%s\tN\t%s" %(channel_nr, fid2cat_dic[fid], fid, encoding)
+                channel_info_list.append(channel_info)
+            elif ftype == "C":
+                for c in fid2cat_dic[fid]:
+                    channel_nr += 1
+                    channel_id = fid + "_" + c
+                    channel_info = "%i\t%s\t%s\tC\tone_hot" %(channel_nr, channel_id, fid)
+                    channel_info_list.append(channel_info)
+            else:
+                assert False, "invalid feature type given (%s) for feature %s" %(ftype,fid)
+
+    # Output channel infos.
+    CIOUT = open(channel_infos_out, "w")
+    CIOUT.write("ch\tch_id\tfeat_id\tfeat_type\tencoding\n")
+    for ch_info in channel_info_list:
+        CIOUT.write("%s\n" %(ch_info))
+    CIOUT.close()
+
+    """
+    Generate feature+edges lists or graph list (if return_graphs=True)
+    to return.
+
+    """
+    # Sequence ID list + label list.
+    seq_ids_list = []
+    label_list = []
+    idx2id_dic = {}
+    id2idx_dic = {}
+    i = 0
+    for seq_id,seq in sorted(seqs_dic.items()):
+        seq_ids_list.append(seq_id)
+        label_list.append(i)
+        id2idx_dic[seq_id] = i
+        idx2id_dic[i] = seq_id
+        i += 1
+
+    # If return_graphs=False.
+    all_features = []
+    # if return_graphs=True.
+    all_graphs = []
+
+    for idx, label in enumerate(label_list):
+        seq_id = seq_ids_list[idx]
+        seq = seqs_dic[seq_id]
+        l_seq = len(seq)
+
+        # Make edge indices for backbone.
+        edge_index_1 = []
+        edge_index_2 = []
+        # Edge indices 0-based!
+        for n_idx in range(l_seq - 1):
+            edge_index_1.append(n_idx)
+            edge_index_2.append(n_idx+1)
+            # In case of undirected graphs, add backward edges too.
+            if args.undirected:
+                edge_index_1.append(n_idx+1)
+                edge_index_2.append(n_idx)
+
+        # Add base pair edges.
+        if bpp_dic:
+            vp_s = vp_dic[seq_id][0] # 1-based.
+            vp_e = vp_dic[seq_id][1] # 1-based.
+            # Entry e.g. 'CLIP_01': ['130-150,0.33', '160-200,0.44', '240-260,0.55']
+            for entry in bpp_dic[seq_id]:
+                m = re.search("(\d+)-(\d+),(.+)", entry)
+                p1 = int(m.group(1)) # 1-based.
+                p2 = int(m.group(2)) # 1-based.
+                bpp_value = float(m.group(3))
+                g_p1 = p1 - 1 # 0-based base pair index.
+                g_p2 = p2 - 1 # 0-based base pair index.
+                # Filter.
+                if bpp_value < args.bps_cutoff: continue
+                # Add base pair depending on set mode.
+                add_edge = False
+                if args.bps_mode == 1:
+                    if (p1 >= vp_s and p1 <= vp_e) or (p2 >= vp_s and p2 <= vp_e):
+                        add_edge = True
+                elif args.bps_mode == 2:
+                    if p1 >= vp_s and p2 <= vp_e:
+                        add_edge = True
+                if add_edge:
+                    edge_index_1.append(g_p1)
+                    edge_index_1.append(g_p2)
+                    if args.undirected:
+                        edge_index_1.append(g_p2)
+                        edge_index_2.append(g_p1)
+
+        # Checks.
+        check_num_feat = len(feat_dic[seq_id][0])
+        assert model_num_feat == check_num_feat, "# features (num_features) from model parameter file != loaded number of node features (%i != %i)" %(model_num_feat, check_num_feat)
+
+        if return_graphs:
+            edge_index = torch.tensor([edge_index_1, edge_index_2], dtype=torch.long)
+            x = torch.tensor(feat_dic[seq_id], dtype=torch.float)
+            data = Data(x=x, edge_index=edge_index, y=label)
+            all_graphs.append(data)
+        else:
+            #all_edges.append([edge_index_1, edge_index_2])
+            all_features.append(feat_dic[seq_id])
+
+    # Return some double talking jive data.
+    if return_graphs:
+        assert all_graphs, "no graphs constructed (all_graphs empty)"
+        return seqs_dic, idx2id_dic, all_graphs
+    else:
+        assert all_features, "no graphs constructed (all_features empty)"
+        return seqs_dic, bpp_dic, idx2id_dic, all_features
+
+
+################################################################################
+
 def load_ws_predict_data(args,
                          data_id="data",
                          predict_con_ext=False,
@@ -9171,16 +9487,6 @@ def load_training_data(args,
     vp_dic = extract_uc_region_coords_from_fasta(neg_seqs_dic,
                                                  uc_coords_dic=vp_dic)
 
-    # Additional features.
-    pos_pc_con_in = args.in_folder + "/" + "positives.pc.con"
-    neg_pc_con_in = args.in_folder + "/" + "negatives.pc.con"
-    pos_pp_con_in = args.in_folder + "/" + "positives.pp.con"
-    neg_pp_con_in = args.in_folder + "/" + "negatives.pp.con"
-    pos_str_elem_p_in = args.in_folder + "/" + "positives.elem_p.str"
-    neg_str_elem_p_in = args.in_folder + "/" + "negatives.elem_p.str"
-    pos_bpp_in = args.in_folder + "/" + "positives.bpp.str"
-    neg_bpp_in = args.in_folder + "/" + "negatives.bpp.str"
-
     # Check for individually selected features.
     indiv_feat_dic = {}
     if args.use_pc_con:
@@ -9252,6 +9558,8 @@ def load_training_data(args,
         if fid == "fa": # already added to feat_dic (first item).
             continue
         if fid == "bpp.str":
+            pos_bpp_in = args.in_folder + "/" + "positives.bpp.str"
+            neg_bpp_in = args.in_folder + "/" + "negatives.bpp.str"
             assert os.path.exists(pos_bpp_in), "--in folder does not contain %s"  %(pos_bpp_in)
             assert os.path.exists(neg_bpp_in), "--in folder does not contain %s"  %(neg_bpp_in)
             print("Read in base pair data ... ")

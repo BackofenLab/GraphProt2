@@ -329,11 +329,11 @@ def setup_argument_parser():
                    choices = [1,2],
                    help = "Define prediction mode. (1) predict whole sites, (2) predict position-wise scoring profiles and extract top-scoring sites from profiles (default: 1)")
     p_pr.add_argument("--win-size",
-                   dest="list_win_sizes",
+                   dest="win_size",
                    type = int,
-                   nargs='+',
-                   default = [11],
-                   help = "Windows size(s) for calculating position-wise scoring profiles. Provide multiple sizes (e.g. --win-size 5 7 9) to compute average profiles (default: 11)")
+                   metavar='int',
+                   default = 11,
+                   help = "Windows size for calculating position-wise scoring profiles. The center position of the window gets the window score assigned (therefore only uneven --win-size numbers are supported) (default: 11)")
     p_pr.add_argument("--peak-ext",
                    dest = "peak_ext",
                    type = int,
@@ -1216,6 +1216,9 @@ def main_train(args):
 
         # Write model params file.
         PAROUT = open(final_params_path, "w")
+        if args.undirected:
+            PAROUT.write("undirected\tTrue\n")
+        PAROUT.write("num_features\t%i\n" %(num_features))
         PAROUT.write("fc_hidden_dim\t%s\n" %(str(args.fc_hidden_dim)))
         PAROUT.write("epochs\t%s\n" %(str(args.epochs)))
         PAROUT.write("patience\t%s\n" %(str(args.patience)))
@@ -1285,6 +1288,7 @@ def main_train(args):
             PAROUT = open(final_params_path, "w")
             if args.undirected:
                 PAROUT.write("undirected\tTrue\n")
+            PAROUT.write("num_features\t%i\n" %(num_features))
             PAROUT.write("fc_hidden_dim\t%s\n" %(str(args.fc_hidden_dim)))
             PAROUT.write("epochs\t%s\n" %(str(args.epochs)))
             PAROUT.write("patience\t%s\n" %(str(args.patience)))
@@ -2026,23 +2030,21 @@ def main_predict(args):
     # --model-in folder containing trained model.
     assert os.path.isdir(args.model_in_folder), "--model-in folder does not exist"
 
-    # Model + params there?
+    # Model and model parameter file.
     params_file = args.model_in_folder + "/final.params"
     model_file = args.model_in_folder + "/final.model"
     assert os.path.isfile(params_file), "missing model training parameter file %s" %(params_file)
     assert os.path.isfile(params_file), "missing model file %s" %(model_file)
-
-    # Model parameters.
+    # Read in and check model parameters.
     params_dic = gp2lib.read_settings_into_dic(params_file)
-    fc_hidden_dim = 128
-    node_hidden_dim	= 128
-    batch_size = 50
-    if "node_hidden_dim" in params_dic:
-        node_hidden_dim = int(params_dic["node_hidden_dim"])
-    if "fc_hidden_dim" in params_dic:
-        fc_hidden_dim = int(params_dic["fc_hidden_dim"])
-    if "batch_size" in params_dic:
-        batch_size = int(params_dic["batch_size"])
+    assert "node_hidden_dim" in params_dic, "node_hidden_dim info missing in model parameter file %s" %(params_file)
+    assert "fc_hidden_dim" in params_dic, "fc_hidden_dim info missing in model parameter file %s" %(params_file)
+    assert "batch_size" in params_dic, "batch_size info missing in model parameter file %s" %(params_file)
+    assert "num_features" in params_dic, "num_features info missing in model parameter file %s" %(params_file)
+    fc_hidden_dim = int(params_dic["fc_hidden_dim"])
+    node_hidden_dim	= int(params_dic["node_hidden_dim"])
+    batch_size = int(params_dic["batch_size"])
+    num_features = int(params_dic["num_features"])
     args.undirected = False
     if "undirected" in params_dic:
         args.undirected = True
@@ -2071,6 +2073,7 @@ def main_predict(args):
 
     # Output files.
     ws_scores_out = out_folder + "/" + "whole_site_scores.out"
+    ws_scores_bed = out_folder + "/" + "whole_site_scores.bed"
     score_profiles_out = out_folder + "/" + "profiles.out"
     peak_regions_bed = out_folder + "/" + "profiles_peak_regions.bed"
     peak_regions_ref_bed = out_folder + "/" + "profiles_peak_regions.ref.bed"
@@ -2087,95 +2090,9 @@ def main_predict(args):
     if os.path.exists(pe_prof_win_sc_out_file):
         os.remove(pe_prof_win_sc_out_file)
 
-
-
-    """
-    data == graphs[0]
-    len(data.x):
-        Number of nodes.
-    data.x[0]:
-        Node feature vector
-    data.x[0][0]:
-        First element of node feature vector
-    data.x[0][:3]:
-        First three elements.
-    data.x[0][1:3]:
-        Second + third element.
-    data.x[0][1:200]:
-        Second to last element (doesnt care if 2nd index to big)
-    for nfv in data.x:
-        print(nfv)
-        Go over the node feature vectors of one graph.
-
-Tensor to list.
-new_dx = []
-for nfv in data.x:
-    nfvl = nfv.tolist()
-    new_dx.append(nfvl)
-print(new_dx)
-Problem rounding errors.
-
-
-    # Construct a graph.
-    edge_index = torch.tensor([[0, 1], [1, 2]], dtype=torch.long)
-    x = torch.tensor(add_feat_dic[seq_id], dtype=torch.float)
-    data = Data(x=x, edge_index=edge_index, y=label)
-
-    data.x: tensor([[0.1100, 0.1200, 0.1300, 0.1400, 0.3100, 1.0000, 0.0000],
-            [0.1500, 0.1600, 0.1700, 0.1800, 0.3200, 1.0000, 0.0000],
-            [0.1100, 0.1200, 0.1300, 0.1400, 0.3300, 1.0000, 0.0000],
-            [0.1500, 0.1600, 0.1700, 0.1800, 0.3400, 1.0000, 0.0000]])
-    data.y: 1
-    data.edge_index: tensor([[0, 1],
-            [1, 2]])
-    data.edge_index[0]: tensor([0, 1])
-    data.edge_index[1]: tensor([1, 2])
-
-
-
-
-    """
-
-
-
-
     print("Model training input folder:       %s" %(model_folder))
     print("Prediction set input folder:       %s" %(in_folder))
     print("Prediction results output folder:  %s" %(out_folder))
-    if args.mode == 2:
-        print("Profile window size(s):           ", args.list_win_sizes)
-        print("Top-scoring sites --peak-ext:      %i" %(args.peak_ext))
-    if con_ext:
-        print("--model-in model with --con-ext %i ... " %(con_ext))
-
-    # Output mode settings.
-    settings_file = out_folder + "/settings.graphprot2_predict.out"
-    SETOUT = open(settings_file, "w")
-    for arg in vars(args):
-        SETOUT.write("%s\t%s\n" %(arg, str(getattr(args, arg))))
-    SETOUT.close()
-
-    # Check for CUDA support.
-    if torch.cuda.is_available():
-        print("CUDA: I'm available. Using GPU ... ")
-    else:
-        print("CUDA: I'm NOT available. Using CPU ... ")
-
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    # Read in prediction sequences.
-    test_fa_in = args.in_folder + "/" + "test.fa"
-    assert os.path.exists(test_fa_in), "--in folder does not contain %s"  %(test_fa_in)
-    test_seq_uc = False
-    # If profile prediction, make input sequences all uppercase.
-    if args.mode == 2:
-        test_seq_uc = True
-    test_seqs_dic = gp2lib.read_fasta_into_dic(test_fa_in, all_uc=test_seq_uc)
-    i = 0
-    idx2id_dic = {}
-    for seq_id, seq in sorted(test_seqs_dic.items()):
-        idx2id_dic[i] = seq_id
-        i += 1
 
     # Read in region information.
     id2chr_dic = {}
@@ -2201,47 +2118,31 @@ Problem rounding errors.
                 id2pol_dic[site_id] = site_pol
         f.closed
 
-    # Load whole site data and store in PyG format.
-    gp2lib.load_ws_predict_data(args,
-                                data_id=data_id,
-                                predict_con_ext=args.con_ext,
-                                add_info_out=True)
+    if args.mode == 2:
+        print("Profile window size:           %i", %(args.win_size))
+        print("Top-scoring sites --peak-ext:  %i" %(args.peak_ext))
+    if con_ext:
+        print("--model-in model with --con-ext %i ... " %(con_ext))
 
-    # Use node attributes?
-    use_node_attr = True
-    ana_file = raw_out_folder + "/" + data_id + "_node_attributes.txt"
-    if not os.path.exists(ana_file):
-        use_node_attr = False
-    if not use_node_attr:
-        print("Node attributes disabled ... ")
+    # Output mode settings.
+    settings_file = out_folder + "/settings.graphprot2_predict.out"
+    SETOUT = open(settings_file, "w")
+    for arg in vars(args):
+        SETOUT.write("%s\t%s\n" %(arg, str(getattr(args, arg))))
+    SETOUT.close()
 
-    geometric_cv_data_path = data_out_folder
+    # Check for CUDA support.
+    if torch.cuda.is_available():
+        print("CUDA: I'm available. Using GPU ... ")
+    else:
+        print("CUDA: I'm NOT available. Using CPU ... ")
 
-    print("Load PyG data again ... ")
-    print("CALEB: your bad day just got worse ... ")
-
-    dataset = TUDataset(geometric_cv_data_path, name=data_id, use_node_attr=use_node_attr)
-    l_ds = len(dataset)
-    assert l_ds, "read-in dataset empty"
-    c_seqs = len(test_seqs_dic)
-    # If fake graph was added.
-    if args.mode == 2 and con_ext:
-        assert l_ds == (c_seqs+1), "fake graph expected in dataset, but lengths differ (l_ds (%i) != c_seqs (%i) + 1)" %(l_ds, c_seqs)
-        dataset = dataset[:-1]
-
-    print("# dataset features:  %i" %(dataset.num_features))
-    print("Dataset size:        %i" %(len(dataset)))
-
-    # Load model.
-    print("Load model ... ")
-    model = FunnelGNN(input_dim=dataset.num_features, node_hidden_dim=node_hidden_dim,
-                      fc_hidden_dim=fc_hidden_dim, out_dim=2).to(device)
-    model.load_state_dict(torch.load(model_file))
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     """
     CASE 1: whole site predictions.
 
-    - Load prediction data from graphprot2 predict and store in PyG format.
+    - Load prediction data from graphprot2 predict as graphs.
     - Run whole site predictions on generated graph data.
     - Output whole site scores.
 
@@ -2249,10 +2150,23 @@ Problem rounding errors.
 
     # Whole site predictions.
     if args.mode == 1:
+        # Load data as graphs.
+        print("Load prediction data as graphs ... ")
+        seqs_dic, idx2id_dic, all_graphs = gp2lib.load_predict_data(args,
+                                                       return_graphs=True)
 
-        #predict_dataset = MyDataset(dataset)
-        #predict_loader = DataLoader(predict_dataset, batch_size=batch_size, shuffle=False)
-        predict_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+        print("# dataset features:  %i" %(num_features))
+        print("Dataset size:        %i" %(len(all_graphs)))
+
+        # Load model.
+        print("Load model ... ")
+        model = FunnelGNN(input_dim=num_features, node_hidden_dim=node_hidden_dim,
+                          fc_hidden_dim=fc_hidden_dim, out_dim=2).to(device)
+        model.load_state_dict(torch.load(model_file))
+
+        # Prepare dataset.
+        predict_dataset = MyDataset(all_graphs)
+        predict_loader = DataLoader(predict_dataset, batch_size=batch_size, shuffle=False)
 
         # Get whole site scores.
         print("Do the whole site predictions ... ")
@@ -2260,34 +2174,52 @@ Problem rounding errors.
                                           min_max_norm=True)
 
         # Checks.
-        assert len(ws_scores) == len(test_seqs_dic), "# test sequences != # whole site scores (%i != %i)" %(len(ws_scores), len(test_seqs_dic))
+        assert len(ws_scores) == len(seqs_dic), "# test sequences != # whole site scores (%i != %i)" %(len(ws_scores), len(seqs_dic))
         # Output whole site scores.
         WSOUT = open(ws_scores_out, "w")
         for i,sc in enumerate(ws_scores):
             seq_id = idx2id_dic[i]
             WSOUT.write("%s\t%f\n" %(seq_id, sc))
-
         WSOUT.close()
+        # Output BED too with scores.
+        if not only_seq:
+            WSOUT = open(ws_scores_bed, "w")
+            for i,sc in enumerate(ws_scores):
+                seq_id = idx2id_dic[i]
+                chr_id = id2chr_dic[seq_id]
+                site_s = id2s_dic[seq_id]
+                site_e = id2e_dic[seq_id]
+                site_pol = id2pol_dic[seq_id]
+                WSOUT.write("%s\t%i\t%i\t%s\t%f\t%s\n" %(chr_id, site_s, site_e, seq_id, sc, site_pol))
+            WSOUT.close()
 
-        # Get site scores.
-        #print("Get positive whole site scores (class 1 probabilities) ... ")
-        #pos_site_probs = model_util.get_site_probs(predict_loader, device, model)
-        #assert pos_site_probs, "pos_site_probs list empty"
+
+
+
+
+
 
     """
     CASE 2: profile + peak predictions.
 
-    - Predict position-wise scoring profiles using one ore more
-      windows (args.win_size)
+    - Predict position-wise scoring profiles using args.win_size
+      windows size
     - Extract peak regions from profiles (regions above args.sc_thr)
     - Predict wide profiles using --peak-ext (and optionally --con-ext)
-    - Extract peak regions from wide profiles and store top scoring positions
+    - Extract peak regions from wide profiles and store top-scoring positions
       extended by --peak-ext (and optionally --con-ext) as top-scoring
       sites
     - Merge overlapping peak regions and top-scoring sites (controlled by
       --max-merge-dist).
     - If genomic or transcript regions given as input, map peak regions
       and top-scoring sites to reference (update coordinates).
+
+
+    # Shuffle graphs.
+    random.seed(1)
+    random.shuffle(all_graphs)
+    labels = [g.y for g in all_graphs]
+
 
     """
     peaks_found = False
@@ -2297,6 +2229,132 @@ Problem rounding errors.
     if args.mode == 2:
 
         print("CALEB: I have something for you ... ")
+
+
+
+        # Load data as graphs.
+        print("Load prediction data ... ")
+        seqs_dic, bpp_dic, idx2id_dic, all_features = gp2lib.load_predict_data(args,
+                                                             return_graphs=False)
+
+        print("# dataset features:  %i" %(num_features))
+        print("Dataset size:        %i" %(len(all_graphs)))
+
+        # Load model.
+        print("Load model ... ")
+        model = FunnelGNN(input_dim=num_features, node_hidden_dim=node_hidden_dim,
+                          fc_hidden_dim=fc_hidden_dim, out_dim=2).to(device)
+        model.load_state_dict(torch.load(model_file))
+
+        # For each graph, predict profiles.
+        all_graphs = [] # window graphs ...
+        all_labels = [] # [0,0,0,0,0,1,1,1,1,1,...]
+        for idx,feat_list in all_features:
+            seq_id = idx2id_dic[idx]
+            seq = seqs_dic[seq_id]
+
+# WRITE function taking all_features, returning all_graphs+all_labels
+# Give win_size
+
+
+    for w_size in list_w_sizes:
+        # Extension left / right.
+        extlr = int(w_size/2)
+        # For each position in graph.
+        for i in range(g_len):
+            reg_s = i - extlr
+            reg_e = i + extlr + 1
+            # If lowercase context extension specified.
+            if con_ext:
+                reg_s = reg_s - lc_ext
+                reg_e = reg_e + lc_ext
+            if reg_e > g_len:
+                reg_e = g_len
+            if reg_s < 0:
+                reg_s = 0
+
+            if con_ext:
+                center_pos = i + 1
+                sl_node_labels = get_uc_lc_list_segment(list_node_labels,
+                                                        center_pos,
+                                                        vp_ext=extlr,
+                                                        con_ext=lc_ext)
+            else:
+                sl_node_labels = list_node_labels[reg_s:reg_e]
+
+            # Sublist of node attributes.
+            sl_node_attr = []
+            if use_node_attr:
+                sl_node_attr = list_node_attr[reg_s:reg_e]
+                assert len(sl_node_attr) == len(sl_node_labels), "sl_node_attr length != sl_node_labels length (%i != %i)" %(len(sl_node_attr), len(sl_node_labels))
+            g_idx += 1
+            sl_len = len(sl_node_labels)
+            if win_sc_out_file and w_size == max_w_size:
+                # Get sequence.
+                sub_seq = node_label_list_to_seq(sl_node_labels)
+                sub_seqs_list.append(sub_seq)
+                reg_se_list.append([reg_s,reg_e])
+            # Graph indicators.
+            list_graph_indicators.extend([g_idx]*sl_len)
+            # Nodel labels.
+            list_all_node_labels.extend(sl_node_labels)
+            # Node attributes.
+            if use_node_attr:
+                list_all_node_attributes.extend(sl_node_attr)
+            # Edges.
+            for n_idx_temp in range(sl_len):
+                if n_idx_temp != (sl_len - 1):
+                    list_all_edges.append((n_idx_temp + n_idx, n_idx_temp + 1 + n_idx))
+                    list_all_edges.append((n_idx_temp + 1 + n_idx, n_idx_temp + n_idx))
+            n_idx += sl_len
+    assert list_graph_indicators, "list_graph_indicators empty"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+"""
+In the end you want to get one score for each sequence position.
+So len(seq1) + len(seq2) + ...
+
+
+feat_list = [[], [], [], []]
+
+    data == graphs[0]
+    len(data.x):
+        Number of nodes.
+    data.x[0]:
+        Node feature vector
+    data.x[0][0]:
+        First element of node feature vector
+    data.x[0][:3]:
+        First three elements.
+    data.x[0][1:3]:
+        Second + third element.
+    data.x[0][1:200]:
+        Second to last element (doesnt care if 2nd index to big)
+    for nfv in data.x:
+        print(nfv)
+        Go over the node feature vectors of one graph.
+
+"""
+
+
 
         # 1-hot string to nucleotide label.
         hot2l_dic = {'1000': 1,
@@ -2531,6 +2589,8 @@ Problem rounding errors.
         print("PREDICTION OUTPUT FILES")
         print("=======================")
         print("Whole site predictions output file:\n%s" %(ws_scores_out))
+        if not only_seq:
+            print("Whole site predictions BED file:\n%s" %(ws_scores_bed))
     if args.mode == 2:
         if peaks_found:
             print("")
