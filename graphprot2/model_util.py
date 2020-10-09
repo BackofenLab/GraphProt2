@@ -4,6 +4,7 @@ from torch_geometric.utils import subgraph
 from graphprot2.MyNets import FunnelGNN
 from torch_geometric.datasets import TUDataset
 from torch_geometric.data import DataLoader
+from sklearn import metrics
 import numpy as np
 import shutil
 import sys
@@ -36,7 +37,7 @@ def train(device, model, optimizer, train_loader):
 
 ################################################################################
 
-def test(loader, device, model):
+def test_old(loader, device, model):
     """
     Test data, return loss and accuracy.
 
@@ -54,6 +55,35 @@ def test(loader, device, model):
             loss_all += loss.item() * data.num_graphs
 
     return loss_all / len(loader.dataset), correct / len(loader.dataset)
+
+
+################################################################################
+
+def test(loader, device, model):
+    """
+    Test data, return loss, accuracy, and AUC.
+
+    """
+    model.eval()
+    loss_all = 0
+    score_all = []
+    test_labels = []
+    with torch.no_grad():
+        for data in loader:
+            data = data.to(device)
+            output = model(data.x, data.edge_index, data.batch)
+            loss = F.nll_loss(output, data.y, reduction="mean")
+            loss_all += loss.item() * data.num_graphs
+            output = torch.exp(output)
+            score_all.extend(output.cpu().detach().numpy())
+            test_labels.extend(data.y.cpu().detach().numpy())
+    score_all = np.vstack(score_all)[:, 1]
+    predicted_labels = [1 if s >= 0.5 else 0 for s in score_all]
+    fpr, tpr, thresholds = metrics.roc_curve(test_labels, score_all, pos_label=1)
+    test_auc = metrics.auc(fpr, tpr)
+    test_acc = metrics.accuracy_score(test_labels, predicted_labels)
+    test_loss = loss_all / len(loader.dataset)
+    return test_loss, test_acc, test_auc
 
 
 ################################################################################
@@ -357,6 +387,7 @@ def train_default_hp_model(args, n_features, train_dataset,
     optimizer = torch.optim.Adam(model.parameters(), lr=model_lr, weight_decay=model_weight_decay)
     best_train_loss = 1000000000.0
     best_train_acc = 0
+    best_train_auc = 0
     elapsed_patience = 0
     c_epochs = 0
     for epoch in range(0, args.epochs):
@@ -364,12 +395,13 @@ def train_default_hp_model(args, n_features, train_dataset,
         if elapsed_patience > args.patience:
             break
         train_loss = train(device, model, optimizer, train_loader)
-        train_loss, train_acc = test(train_loader, device, model)
+        train_loss, train_acc, train_auc = test(train_loader, device, model)
 
         if train_loss < best_train_loss:
             elapsed_patience = 0
             best_train_loss = train_loss
             best_train_acc = train_acc
+            best_train_auc = train_auc
             torch.save(model.state_dict(), model_path)
         else:
             elapsed_patience += 1
@@ -380,6 +412,7 @@ def train_default_hp_model(args, n_features, train_dataset,
     opt_dic["opt_weight_decay"] = model_weight_decay
     opt_dic["opt_lr"] = model_lr
     opt_dic["opt_acc"] = best_train_acc
+    opt_dic["opt_auc"] = best_train_auc
     opt_dic["opt_epochs"] = c_epochs
     return opt_dic
 
@@ -388,7 +421,7 @@ def train_default_hp_model(args, n_features, train_dataset,
 
 def select_model(args, n_features, train_dataset, val_dataset,
                  model_folder, device,
-                 hps2acc_dic=None,
+                 hps2auc_dic=None,
                  hps2epo_dic=None):
     """
     Select best hyperparameter combination for given train_dataset and val_dataset.
@@ -402,6 +435,7 @@ def select_model(args, n_features, train_dataset, val_dataset,
     opt_lr = args.list_lr[0]
     opt_val_loss = 1000000000.0
     opt_acc = 0
+    opt_auc = 0
     opt_epochs = 0
     opt_dic = {}
 
@@ -421,6 +455,7 @@ def select_model(args, n_features, train_dataset, val_dataset,
                     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
                     best_val_loss = 1000000000.0
                     best_val_acc = 0
+                    best_val_auc = 0
                     elapsed_patience = 0
                     c_epochs = 0
                     for epoch in range(0, args.epochs):
@@ -428,24 +463,25 @@ def select_model(args, n_features, train_dataset, val_dataset,
                         if elapsed_patience > args.patience:
                             break
                         train_loss = train(device, model, optimizer, train_loader)
-                        val_loss, val_acc = test(val_loader, device, model)
+                        val_loss, val_acc, val_auc = test(val_loader, device, model)
 
                         if val_loss < best_val_loss:
                             #print('save model...')
                             elapsed_patience = 0
                             best_val_loss = val_loss
                             best_val_acc = val_acc
+                            best_val_auc = val_auc
                             torch.save(model.state_dict(), model_path)
                         else:
                             elapsed_patience += 1
 
                     # Store used epochs and best accuarcy for this HP combination.
-                    if hps2acc_dic is not None:
-                        if hp_str not in hps2acc_dic:
-                            hps2acc_dic[hp_str] = []
-                            hps2acc_dic[hp_str].append(best_val_acc)
+                    if hps2auc_dic is not None:
+                        if hp_str not in hps2auc_dic:
+                            hps2auc_dic[hp_str] = []
+                            hps2auc_dic[hp_str].append(best_val_auc)
                         else:
-                            hps2acc_dic[hp_str].append(best_val_acc)
+                            hps2auc_dic[hp_str].append(best_val_auc)
                     if hps2epo_dic is not None:
                         if hp_str not in hps2epo_dic:
                             hps2epo_dic[hp_str] = []
@@ -459,6 +495,7 @@ def select_model(args, n_features, train_dataset, val_dataset,
                         opt_weight_decay = weight_decay
                         opt_lr = lr
                         opt_acc = best_val_acc
+                        opt_auc = best_val_auc
                         opt_epochs = c_epochs
                         opt_batch_size = batch_size
 
@@ -467,6 +504,7 @@ def select_model(args, n_features, train_dataset, val_dataset,
     opt_dic["opt_weight_decay"] = opt_weight_decay
     opt_dic["opt_lr"] = opt_lr
     opt_dic["opt_acc"] = opt_acc
+    opt_dic["opt_auc"] = opt_auc
     opt_dic["opt_epochs"] = opt_epochs
     return opt_dic
 
