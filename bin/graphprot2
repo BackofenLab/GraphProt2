@@ -1242,7 +1242,6 @@ def main_train(args):
         PAROUT.write("lr\t%s\n" %(str(best_lr)))
         PAROUT.write("node_hidden_dim\t%s\n" %(str(best_node_hidden_dim)))
         PAROUT.write("weight_decay\t%s\n" %(str(best_weight_decay)))
-        PAROUT.write("data_id\t%s" %(data_id))
         PAROUT.close()
 
         print("Final model (hyper)parameters file:\n%s" %())
@@ -1313,7 +1312,6 @@ def main_train(args):
             PAROUT.write("lr\t%s\n" %(str(opt_lr)))
             PAROUT.write("node_hidden_dim\t%s\n" %(str(opt_node_hidden_dim)))
             PAROUT.write("weight_decay\t%s\n" %(str(opt_weight_decay)))
-            PAROUT.write("data_id\t%s" %(data_id))
             PAROUT.close()
 
             # Epochs and accuracy.
