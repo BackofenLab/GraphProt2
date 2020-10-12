@@ -9483,9 +9483,7 @@ def load_training_data(args,
     SETOUT.close()
 
     # Get uppercase (viewpoint) region start and ends for each sequence.
-    vp_dic = extract_uc_region_coords_from_fasta(pos_seqs_dic)
-    vp_dic = extract_uc_region_coords_from_fasta(neg_seqs_dic,
-                                                 uc_coords_dic=vp_dic)
+    vp_dic = extract_uc_region_coords_from_fasta(seqs_dic)
 
     # Check for individually selected features.
     indiv_feat_dic = {}
@@ -9602,7 +9600,7 @@ def load_training_data(args,
     # Check for same feature vector lengths.
     fvl_dic = {}
     for seq_id in feat_dic:
-        flv_dic[len(feat_dic[seq_id])] = 1
+        fvl_dic[len(feat_dic[seq_id][0])] = 1
     len_fvl_dic = len(fvl_dic)
     assert len_fvl_dic == 1, "Various feature vector lengths (%i) encountered in feat_dic" %(len_fvl_dic)
 

@@ -765,8 +765,8 @@ def main_train(args):
     li2label_dic = {}
 
     # Load training data.
-    seqs_dic, idx2id_dic, label_list, all_graphs = load_training_data(args,
-                                                        li2label_dic=li2label_dic)
+    seqs_dic, idx2id_dic, label_list, all_graphs = gp2lib.load_training_data(args,
+                                                          li2label_dic=li2label_dic)
 
     # Node feature vector length.
     #y_g1 = all_graphs[0].y
@@ -802,6 +802,17 @@ def main_train(args):
     #args.list_node_hidden_dim = [128]
     #args.list_weight_decay = [0.00001]
 
+    """
+
+    Default hyperparameters paper:
+    patience=10
+    batch size=50
+    epochs=100
+    fully connected layer and hidden layer node feature dimensionalities=128
+    learning rate=0.0001
+    weight decay=0.0001
+
+    """
 
     # Get HPO combinations.
     c_lr = len(args.list_lr)
@@ -2119,7 +2130,7 @@ def main_predict(args):
         f.closed
 
     if args.mode == 2:
-        print("Profile window size:           %i", %(args.win_size))
+        print("Profile window size:           %i" %(args.win_size))
         print("Top-scoring sites --peak-ext:  %i" %(args.peak_ext))
     if con_ext:
         print("--model-in model with --con-ext %i ... " %(con_ext))
@@ -2230,8 +2241,6 @@ def main_predict(args):
 
         print("CALEB: I have something for you ... ")
 
-
-
         # Load data as graphs.
         print("Load prediction data ... ")
         seqs_dic, bpp_dic, idx2id_dic, all_features = gp2lib.load_predict_data(args,
@@ -2253,108 +2262,88 @@ def main_predict(args):
             seq_id = idx2id_dic[idx]
             seq = seqs_dic[seq_id]
 
-# WRITE function taking all_features, returning all_graphs+all_labels
-# Give win_size
+        # WRITE function taking all_features, returning all_graphs+all_labels
+        # Give win_size
 
 
-    for w_size in list_w_sizes:
-        # Extension left / right.
-        extlr = int(w_size/2)
-        # For each position in graph.
-        for i in range(g_len):
-            reg_s = i - extlr
-            reg_e = i + extlr + 1
-            # If lowercase context extension specified.
-            if con_ext:
-                reg_s = reg_s - lc_ext
-                reg_e = reg_e + lc_ext
-            if reg_e > g_len:
-                reg_e = g_len
-            if reg_s < 0:
-                reg_s = 0
+        for w_size in list_w_sizes:
+            # Extension left / right.
+            extlr = int(w_size/2)
+            # For each position in graph.
+            for i in range(g_len):
+                reg_s = i - extlr
+                reg_e = i + extlr + 1
+                # If lowercase context extension specified.
+                if con_ext:
+                    reg_s = reg_s - lc_ext
+                    reg_e = reg_e + lc_ext
+                if reg_e > g_len:
+                    reg_e = g_len
+                if reg_s < 0:
+                    reg_s = 0
 
-            if con_ext:
-                center_pos = i + 1
-                sl_node_labels = get_uc_lc_list_segment(list_node_labels,
-                                                        center_pos,
-                                                        vp_ext=extlr,
-                                                        con_ext=lc_ext)
-            else:
-                sl_node_labels = list_node_labels[reg_s:reg_e]
+                if con_ext:
+                    center_pos = i + 1
+                    sl_node_labels = get_uc_lc_list_segment(list_node_labels,
+                                                            center_pos,
+                                                            vp_ext=extlr,
+                                                            con_ext=lc_ext)
+                else:
+                    sl_node_labels = list_node_labels[reg_s:reg_e]
 
-            # Sublist of node attributes.
-            sl_node_attr = []
-            if use_node_attr:
-                sl_node_attr = list_node_attr[reg_s:reg_e]
-                assert len(sl_node_attr) == len(sl_node_labels), "sl_node_attr length != sl_node_labels length (%i != %i)" %(len(sl_node_attr), len(sl_node_labels))
-            g_idx += 1
-            sl_len = len(sl_node_labels)
-            if win_sc_out_file and w_size == max_w_size:
-                # Get sequence.
-                sub_seq = node_label_list_to_seq(sl_node_labels)
-                sub_seqs_list.append(sub_seq)
-                reg_se_list.append([reg_s,reg_e])
-            # Graph indicators.
-            list_graph_indicators.extend([g_idx]*sl_len)
-            # Nodel labels.
-            list_all_node_labels.extend(sl_node_labels)
-            # Node attributes.
-            if use_node_attr:
-                list_all_node_attributes.extend(sl_node_attr)
-            # Edges.
-            for n_idx_temp in range(sl_len):
-                if n_idx_temp != (sl_len - 1):
-                    list_all_edges.append((n_idx_temp + n_idx, n_idx_temp + 1 + n_idx))
-                    list_all_edges.append((n_idx_temp + 1 + n_idx, n_idx_temp + n_idx))
-            n_idx += sl_len
-    assert list_graph_indicators, "list_graph_indicators empty"
-
-
+                # Sublist of node attributes.
+                sl_node_attr = []
+                if use_node_attr:
+                    sl_node_attr = list_node_attr[reg_s:reg_e]
+                    assert len(sl_node_attr) == len(sl_node_labels), "sl_node_attr length != sl_node_labels length (%i != %i)" %(len(sl_node_attr), len(sl_node_labels))
+                g_idx += 1
+                sl_len = len(sl_node_labels)
+                if win_sc_out_file and w_size == max_w_size:
+                    # Get sequence.
+                    sub_seq = node_label_list_to_seq(sl_node_labels)
+                    sub_seqs_list.append(sub_seq)
+                    reg_se_list.append([reg_s,reg_e])
+                # Graph indicators.
+                list_graph_indicators.extend([g_idx]*sl_len)
+                # Nodel labels.
+                list_all_node_labels.extend(sl_node_labels)
+                # Node attributes.
+                if use_node_attr:
+                    list_all_node_attributes.extend(sl_node_attr)
+                # Edges.
+                for n_idx_temp in range(sl_len):
+                    if n_idx_temp != (sl_len - 1):
+                        list_all_edges.append((n_idx_temp + n_idx, n_idx_temp + 1 + n_idx))
+                        list_all_edges.append((n_idx_temp + 1 + n_idx, n_idx_temp + n_idx))
+                n_idx += sl_len
+        assert list_graph_indicators, "list_graph_indicators empty"
 
 
+        """
+        In the end you want to get one score for each sequence position.
+        So len(seq1) + len(seq2) + ...
 
 
+        feat_list = [[], [], [], []]
 
+            data == graphs[0]
+            len(data.x):
+                Number of nodes.
+            data.x[0]:
+                Node feature vector
+            data.x[0][0]:
+                First element of node feature vector
+            data.x[0][:3]:
+                First three elements.
+            data.x[0][1:3]:
+                Second + third element.
+            data.x[0][1:200]:
+                Second to last element (doesnt care if 2nd index to big)
+            for nfv in data.x:
+                print(nfv)
+                Go over the node feature vectors of one graph.
 
-
-
-
-
-
-
-
-
-
-
-
-
-"""
-In the end you want to get one score for each sequence position.
-So len(seq1) + len(seq2) + ...
-
-
-feat_list = [[], [], [], []]
-
-    data == graphs[0]
-    len(data.x):
-        Number of nodes.
-    data.x[0]:
-        Node feature vector
-    data.x[0][0]:
-        First element of node feature vector
-    data.x[0][:3]:
-        First three elements.
-    data.x[0][1:3]:
-        Second + third element.
-    data.x[0][1:200]:
-        Second to last element (doesnt care if 2nd index to big)
-    for nfv in data.x:
-        print(nfv)
-        Go over the node feature vectors of one graph.
-
-"""
-
-
+        """
 
         # 1-hot string to nucleotide label.
         hot2l_dic = {'1000': 1,
