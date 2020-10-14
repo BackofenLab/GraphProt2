@@ -2038,6 +2038,10 @@ def main_predict(args):
     assert os.path.isdir(args.in_folder), "--in folder does not exist"
     # --model-in folder containing trained model.
     assert os.path.isdir(args.model_in_folder), "--model-in folder does not exist"
+    # Check set win_size (uneven number demanded).
+    if args.mode == 2:
+        assert args.win_size % 2, "--win-size needs to be uneven"
+        assert args.win_size > 1 and args.win_size <= 31, "use reasonable --win-size (> 1 and <= 31) or refer to wide profiles output"
 
     # Model and model parameter file.
     params_file = args.model_in_folder + "/final.params"
@@ -2128,6 +2132,7 @@ def main_predict(args):
         f.closed
 
     if args.mode == 2:
+
         print("Profile window size:           %i" %(args.win_size))
         print("Top-scoring sites --peak-ext:  %i" %(args.peak_ext))
     if con_ext:
@@ -2202,12 +2207,6 @@ def main_predict(args):
                 WSOUT.write("%s\t%i\t%i\t%s\t%f\t%s\n" %(chr_id, site_s, site_e, seq_id, sc, site_pol))
             WSOUT.close()
 
-
-
-
-
-
-
     """
     CASE 2: profile + peak predictions.
 
@@ -2256,12 +2255,23 @@ def main_predict(args):
         # For each graph, predict profiles.
         all_graphs = [] # window graphs ...
         all_labels = [] # [0,0,0,0,0,1,1,1,1,1,...]
+        extlr = int(args.win_size/2)
         for idx,feat_list in all_features:
             seq_id = idx2id_dic[idx]
             seq = seqs_dic[seq_id]
+            for idx in range(len(feat_list)):
+                reg_s = idx - extlr
+                reg_e = idx + extlr + 1
 
-        # WRITE function taking all_features, returning all_graphs+all_labels
-        # Give win_size
+
+        """
+        if con_ext:
+            Adapt nucleotide feature, 10000000 : A, 00001000 : a
+        if not con_ext:
+            1000
+            0000
+        """
+
 
 
         for w_size in list_w_sizes:
