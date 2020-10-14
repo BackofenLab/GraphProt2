@@ -26,7 +26,12 @@ class MyDataset(Dataset):
 
 
 class FunnelGNN(torch.nn.Module):
-    def __init__(self, input_dim=0, node_hidden_dim=128, fc_hidden_dim=128, out_dim=2):
+    def __init__(self,
+                 input_dim=0,
+                 node_hidden_dim=128,
+                 fc_hidden_dim=128,
+                 dropout_rate=0.5,
+                 out_dim=2):
         super(FunnelGNN, self).__init__()
         self.bn0 = torch.nn.BatchNorm1d(input_dim)
         self.conv1 = GraphConv(input_dim, node_hidden_dim)
@@ -52,9 +57,9 @@ class FunnelGNN(torch.nn.Module):
         x3 = torch.cat([gmp(x, batch), gap(x, batch), gadd(x, batch)], dim=1)
 
         x = torch.cat([x1, x2, x3], dim=1)
-        x = F.dropout(x, p=0.5, training=self.training)
+        x = F.dropout(x, p=dropout_rate, training=self.training)
         x = self.lin1(x)
-        x = F.dropout(x, p=0.5, training=self.training)
+        x = F.dropout(x, p=dropout_rate, training=self.training)
         x = F.log_softmax(self.lin2(x), dim=-1)
 
         return x
@@ -94,4 +99,3 @@ class FunnelGNN_EdgeAttr(torch.nn.Module):
         x = F.log_softmax(self.lin3(x), dim=-1)
 
         return x
-

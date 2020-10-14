@@ -5,6 +5,9 @@ from graphprot2.MyNets import FunnelGNN
 from torch_geometric.datasets import TUDataset
 from torch_geometric.data import DataLoader
 from sklearn import metrics
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
 import numpy as np
 import shutil
 import sys
@@ -264,75 +267,11 @@ def min_max_normalize_probs(x, max_x, min_x,
 
 ################################################################################
 
-def train_final_model_old(args, dataset, train_loader, test_loader,
-                          out_folder, device,
-                          data_id="data_id",
-                          out_model_file = "final.model",
-                          out_model_params_file = "final.params",
-                          opt_lr=0.0001,
-                          opt_node_hidden_dim=128,
-                          opt_weight_decay=0.00001):
-    """
-    Train final model.
-
-    """
-    # Output files.
-    model_file = out_folder + "/" + out_model_file
-    params_file = out_folder + "/" + out_model_params_file
-
-    # Define network.
-    model = FunnelGNN(input_dim=dataset.num_features, node_hidden_dim=opt_node_hidden_dim,
-                      fc_hidden_dim=args.fc_hidden_dim, out_dim=2).to(device)
-    # Define optimizer.
-    optimizer = torch.optim.Adam(model.parameters(), lr=opt_lr, weight_decay=opt_weight_decay)
-
-    best_loss = 1000000000.0
-    best_acc = 0
-    elapsed_patience = 0
-
-    # Train for epoch epochs, with patience break.
-    c_epochs = 0
-    for epoch in range(0, args.epochs):
-        if elapsed_patience > args.patience:
-            break
-        c_epochs += 1
-        # Train network, going over whole dataset.
-        train_loss = train(device, model, optimizer, train_loader)
-        # Get loss on test set.
-        test_loss, test_acc = test(test_loader, device, model)
-
-        # If loss decreases, store current model parameters and HP setting.
-        if test_loss < best_loss:
-            elapsed_patience = 0
-            best_loss = test_loss
-            torch.save(model.state_dict(), model_file)
-        else:
-            elapsed_patience += 1
-        if test_acc > best_acc:
-            best_acc = test_acc
-
-    print("# epochs elapsed:  ", c_epochs)
-    print("Model accuracy:    ", best_acc)
-
-    # Store HPs in params file.
-    PAROUT = open(params_file, "w")
-    PAROUT.write("fc_hidden_dim\t%s\n" %(str(args.fc_hidden_dim)))
-    PAROUT.write("epochs\t%s\n" %(str(args.epochs)))
-    PAROUT.write("patience\t%s\n" %(str(args.patience)))
-    PAROUT.write("batch_size\t%s\n" %(str(args.batch_size)))
-    PAROUT.write("lr\t%s\n" %(str(opt_lr)))
-    PAROUT.write("node_hidden_dim\t%s\n" %(str(opt_node_hidden_dim)))
-    PAROUT.write("weight_decay\t%s\n" %(str(opt_weight_decay)))
-    PAROUT.write("data_id\t%s" %(data_id))
-    PAROUT.close()
-
-
-################################################################################
-
 def train_final_model(args, n_features, train_dataset, train_epochs, device,
                       final_model_path = "final.model",
                       batch_size=50,
                       lr=0.0001,
+                      dr=0.5,
                       node_hidden_dim=128,
                       weight_decay=0.00001):
     """
@@ -348,8 +287,11 @@ def train_final_model(args, n_features, train_dataset, train_epochs, device,
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
     # Define network.
-    model = FunnelGNN(input_dim=n_features, node_hidden_dim=node_hidden_dim,
-                      fc_hidden_dim=args.fc_hidden_dim, out_dim=2).to(device)
+    model = FunnelGNN(input_dim=n_features,
+                      node_hidden_dim=node_hidden_dim,
+                      dropout_rate=dr,
+                      fc_hidden_dim=args.fc_hidden_dim,
+                      out_dim=2).to(device)
     # Define optimizer.
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -374,15 +316,19 @@ def train_default_hp_model(args, n_features, train_dataset,
     model_node_hidden_dim = args.list_node_hidden_dim[0]
     model_weight_decay = args.list_weight_decay[0]
     model_lr = args.list_lr[0]
+    model_dr = args.list_dr[0]
 
     train_loader = DataLoader(train_dataset, batch_size=model_batch_size, shuffle=False)
 
     # Hyperparameter string.
-    hp_str = str(model_batch_size) + "_" + str(model_node_hidden_dim) + "_" + str(model_weight_decay) + "_" + str(model_lr)
+    hp_str = str(model_batch_size) + "_" + str(model_node_hidden_dim) + "_" + str(model_weight_decay) + "_" + str(model_lr) + "_" + str(model_dr)
     model_path = model_folder + "/" + hp_str
 
-    model = FunnelGNN(input_dim=n_features, node_hidden_dim=model_node_hidden_dim,
-                     fc_hidden_dim=args.fc_hidden_dim, out_dim=2).to(device)
+    model = FunnelGNN(input_dim=n_features,
+                      node_hidden_dim=model_node_hidden_dim,
+                      fc_hidden_dim=args.fc_hidden_dim,
+                      dropout_rate=model_dr,
+                      out_dim=2).to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=model_lr, weight_decay=model_weight_decay)
     best_train_loss = 1000000000.0
@@ -411,6 +357,7 @@ def train_default_hp_model(args, n_features, train_dataset,
     opt_dic["opt_node_hidden_dim"] = model_node_hidden_dim
     opt_dic["opt_weight_decay"] = model_weight_decay
     opt_dic["opt_lr"] = model_lr
+    opt_dic["opt_dr"] = model_dr
     opt_dic["opt_acc"] = best_train_acc
     opt_dic["opt_auc"] = best_train_auc
     opt_dic["opt_epochs"] = c_epochs
@@ -421,6 +368,7 @@ def train_default_hp_model(args, n_features, train_dataset,
 
 def select_model(args, n_features, train_dataset, val_dataset,
                  model_folder, device,
+                 plot_lc_folder=False,
                  hps2auc_dic=None,
                  hps2epo_dic=None):
     """
@@ -428,16 +376,23 @@ def select_model(args, n_features, train_dataset, val_dataset,
     Return optimal hyperparameters. Use this function for cross validation to
     estimate generalization performance.
 
+    plot_lc_folder:
+        If set, plot learning curves into this folder.
+
     """
     opt_batch_size = args.list_batch_size[0]
     opt_node_hidden_dim = args.list_node_hidden_dim[0]
     opt_weight_decay = args.list_weight_decay[0]
     opt_lr = args.list_lr[0]
+    opt_dr = args.list_dr[0]
     opt_val_loss = 1000000000.0
     opt_acc = 0
     opt_auc = 0
     opt_epochs = 0
     opt_dic = {}
+    if plot_lc_folder:
+        if not os.path.exists(plot_lc_folder):
+            os.makedirs(plot_lc_folder)
 
     for batch_size in args.list_batch_size:
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
@@ -445,129 +400,85 @@ def select_model(args, n_features, train_dataset, val_dataset,
         for node_hidden_dim in args.list_node_hidden_dim:
             for weight_decay in args.list_weight_decay:
                 for lr in args.list_lr:
-                    # Hyperparameter string.
-                    hp_str = str(batch_size) + "_" + str(node_hidden_dim) + "_" + str(weight_decay) + "_" + str(lr)
-                    model_path = model_folder + "/" + hp_str
-                    # print('Processing with ', model_name + "_" + str(batch_size) + "_" + str(node_hidden_dim) + "_" + str(weight_decay) + "_" + str(lr))
-                    model = FunnelGNN(input_dim=n_features, node_hidden_dim=node_hidden_dim,
-                                     fc_hidden_dim=args.fc_hidden_dim, out_dim=2).to(device)
+                    for dr in args.list_dr:
+                        # Hyperparameter string.
+                        hp_str = str(batch_size) + "_" + str(node_hidden_dim) + "_" + str(weight_decay) + "_" + str(lr) + "_" + str(dr)
+                        model_path = model_folder + "/" + hp_str
+                        # print('Processing with ', model_name + "_" + str(batch_size) + "_" + str(node_hidden_dim) + "_" + str(weight_decay) + "_" + str(lr))
+                        model = FunnelGNN(input_dim=n_features,
+                                          node_hidden_dim=node_hidden_dim,
+                                          fc_hidden_dim=args.fc_hidden_dim,
+                                          dropout_rate=dr,
+                                          out_dim=2).to(device)
+                        optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+                        best_val_loss = 1000000000.0
+                        best_val_acc = 0
+                        best_val_auc = 0
+                        elapsed_patience = 0
+                        c_epochs = 0
+                        if plot_lc_folder:
+                            lc_plot = hp_str + ".lc.png"
+                            tll = [] # train loss list.
+                            vll = [] # validation loss list.
 
-                    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-                    best_val_loss = 1000000000.0
-                    best_val_acc = 0
-                    best_val_auc = 0
-                    elapsed_patience = 0
-                    c_epochs = 0
-                    for epoch in range(0, args.epochs):
-                        c_epochs += 1
-                        if elapsed_patience > args.patience:
-                            break
-                        train_loss = train(device, model, optimizer, train_loader)
-                        val_loss, val_acc, val_auc = test(val_loader, device, model)
+                        for epoch in range(0, args.epochs):
+                            c_epochs += 1
+                            if elapsed_patience > args.patience:
+                                break
+                            train_loss = train(device, model, optimizer, train_loader)
+                            val_loss, val_acc, val_auc = test(val_loader, device, model)
+                            tll.append(train_loss)
+                            vll.append(val_loss)
 
-                        if val_loss < best_val_loss:
-                            #print('save model...')
-                            elapsed_patience = 0
-                            best_val_loss = val_loss
-                            best_val_acc = val_acc
-                            best_val_auc = val_auc
-                            torch.save(model.state_dict(), model_path)
-                        else:
-                            elapsed_patience += 1
+                            if val_loss < best_val_loss:
+                                #print('save model...')
+                                elapsed_patience = 0
+                                best_val_loss = val_loss
+                                best_val_acc = val_acc
+                                best_val_auc = val_auc
+                                torch.save(model.state_dict(), model_path)
+                            else:
+                                elapsed_patience += 1
 
-                    # Store used epochs and best accuarcy for this HP combination.
-                    if hps2auc_dic is not None:
-                        if hp_str not in hps2auc_dic:
-                            hps2auc_dic[hp_str] = []
-                            hps2auc_dic[hp_str].append(best_val_auc)
-                        else:
-                            hps2auc_dic[hp_str].append(best_val_auc)
-                    if hps2epo_dic is not None:
-                        if hp_str not in hps2epo_dic:
-                            hps2epo_dic[hp_str] = []
-                            hps2epo_dic[hp_str].append(c_epochs)
-                        else:
-                            hps2epo_dic[hp_str].append(c_epochs)
+                        if plot_lc_folder:
+                            assert tll, "tll empty"
+                            assert vll
+                            create_lc_loss_plot(tll, vll, lc_plot)
 
-                    if best_val_loss < opt_val_loss:
-                        opt_val_loss = best_val_loss
-                        opt_node_hidden_dim = node_hidden_dim
-                        opt_weight_decay = weight_decay
-                        opt_lr = lr
-                        opt_acc = best_val_acc
-                        opt_auc = best_val_auc
-                        opt_epochs = c_epochs
-                        opt_batch_size = batch_size
+                        # Store used epochs and best accuarcy for this HP combination.
+                        if hps2auc_dic is not None:
+                            if hp_str not in hps2auc_dic:
+                                hps2auc_dic[hp_str] = []
+                                hps2auc_dic[hp_str].append(best_val_auc)
+                            else:
+                                hps2auc_dic[hp_str].append(best_val_auc)
+                        if hps2epo_dic is not None:
+                            if hp_str not in hps2epo_dic:
+                                hps2epo_dic[hp_str] = []
+                                hps2epo_dic[hp_str].append(c_epochs)
+                            else:
+                                hps2epo_dic[hp_str].append(c_epochs)
+
+                        if best_val_loss < opt_val_loss:
+                            opt_val_loss = best_val_loss
+                            opt_node_hidden_dim = node_hidden_dim
+                            opt_weight_decay = weight_decay
+                            opt_lr = lr
+                            opt_dr = dr
+                            opt_acc = best_val_acc
+                            opt_auc = best_val_auc
+                            opt_epochs = c_epochs
+                            opt_batch_size = batch_size
 
     opt_dic["opt_batch_size"] = opt_batch_size
     opt_dic["opt_node_hidden_dim"] = opt_node_hidden_dim
     opt_dic["opt_weight_decay"] = opt_weight_decay
     opt_dic["opt_lr"] = opt_lr
+    opt_dic["opt_dr"] = opt_dr
     opt_dic["opt_acc"] = opt_acc
     opt_dic["opt_auc"] = opt_auc
     opt_dic["opt_epochs"] = opt_epochs
     return opt_dic
-
-
-################################################################################
-
-def select_model_old(args, dataset, train_loader, val_loader, models_folder, device):
-    """
-    Do the hyperparameter (HP) optimization (inner CV).
-
-    For every HP combination train a model and evaluate validation loss.
-    Each time loss < opt_val_loss, store HP setting as optimal one.
-    To just train one model, give only one combination. Stored model name
-    is made up of the optimal hyperparameters for #nodes of hidden
-    dimensions, weight decay, and learning rate:
-    <node_hidden_dim>_<weight_decay>_<lr>
-
-    Return optimal HPs.
-
-    """
-
-    # Select first HP values in list.
-    opt_node_hidden_dim = args.list_node_hidden_dim[0]
-    opt_weight_decay = args.list_weight_decay[0]
-    opt_lr = args.list_lr[0]
-    opt_val_loss = 1000000000.0
-
-    # For every HP combination (inner CV).
-    for node_hidden_dim in args.list_node_hidden_dim:
-        for weight_decay in args.list_weight_decay:
-            for lr in args.list_lr:
-                model = FunnelGNN(input_dim=dataset.num_features, node_hidden_dim=node_hidden_dim,
-                                  fc_hidden_dim=args.fc_hidden_dim, out_dim=2).to(device)
-
-                optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-
-                best_val_loss = 1000000000.0
-
-                elapsed_patience = 0
-
-                for epoch in range(0, args.epochs):
-                    if elapsed_patience > args.patience:
-                        break
-                    # Train network, going over whole dataset.
-                    train_loss = train(device, model, optimizer, train_loader)
-                    # Get loss on validation set.
-                    val_loss, val_acc = test(val_loader, device, model)
-
-                    # If loss decreases, store current model parameters and HP setting.
-                    if val_loss < best_val_loss:
-                        elapsed_patience = 0
-                        best_val_loss = val_loss
-                        torch.save(model.state_dict(), models_folder + "/" + str(node_hidden_dim) + "_" + str(weight_decay) + "_" + str(lr))
-                    else:
-                        elapsed_patience += 1
-
-                # Store optimal HP parameter setting.
-                if best_val_loss < opt_val_loss:
-                    opt_val_loss = best_val_loss
-                    opt_node_hidden_dim = node_hidden_dim
-                    opt_weight_decay = weight_decay
-                    opt_lr = lr
-    return opt_node_hidden_dim, opt_weight_decay, opt_lr
 
 
 ################################################################################
@@ -1092,6 +1003,37 @@ def create_profile_dataset(save_dataset_name=None, x=None, list_node_labels=None
         f = open(raw_folder + "/" + save_dataset_name + "_node_attributes.txt", 'w')
         f.writelines([s + "\n" for s in list_all_node_attributes])
         f.close()
+
+
+################################################################################
+
+def create_lc_loss_plot(train_loss, val_loss, out_plot):
+    """
+    Input two lists with loss values on training set (train_loss), and on
+    validation set (val_loss). Length of the list == number of epochs.
+
+    """
+    assert train_loss, "given train_loss list empty"
+    assert val_loss, "given val_loss list empty"
+    l_tl = len(train_loss)
+    l_vl = len(val_loss)
+    assert l_tl == l_vl, "differing list lengths for train_loss and val_loss"
+    # Make pandas dataframe.
+    data = {'set': [], 'epoch': [], 'loss': []}
+    for i,tl in enumerate(train_loss):
+        epoch = i+1
+        data['set'].append('train_loss')
+        data['loss'].append(tl)
+        data['epoch'].append(epoch)
+    for i,vl in enumerate(val_loss):
+        epoch = i+1
+        data['set'].append('validation_loss')
+        data['loss'].append(vl)
+        data['epoch'].append(epoch)
+    df = pd.DataFrame (data, columns = ['set','loss', 'epoch'])
+    fig, ax = plt.subplots()
+    sns.lineplot(data=df, x="epoch", y="loss", hue="set")
+    fig.savefig(out_plot, dpi=125, bbox_inches='tight')
 
 
 ################################################################################
