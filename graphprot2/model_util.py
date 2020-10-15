@@ -416,10 +416,9 @@ def select_model(args, n_features, train_dataset, val_dataset,
                         best_val_auc = 0
                         elapsed_patience = 0
                         c_epochs = 0
-                        if plot_lc_folder:
-                            lc_plot = hp_str + ".lc.png"
-                            tll = [] # train loss list.
-                            vll = [] # validation loss list.
+                        lc_plot = plot_lc_folder + "/" + hp_str + ".lc.png"
+                        tll = [] # train loss list.
+                        vll = [] # validation loss list.
 
                         for epoch in range(0, args.epochs):
                             c_epochs += 1
@@ -442,7 +441,7 @@ def select_model(args, n_features, train_dataset, val_dataset,
 
                         if plot_lc_folder:
                             assert tll, "tll empty"
-                            assert vll
+                            assert vll, "vll empty"
                             create_lc_loss_plot(tll, vll, lc_plot)
 
                         # Store used epochs and best accuarcy for this HP combination.

@@ -193,7 +193,7 @@ def setup_argument_parser():
                    default = False,
                    action = "store_true",
                    help = "Plot learning curves (training vs validation loss) for each tested hyperparameter combination (default: False)")
-    p_tra.add_argument("--batch-size",
+    p_tra.add_argument("--list-batch-size",
                    dest="list_batch_size",
                    type = int,
                    metavar='int',
@@ -811,7 +811,7 @@ def main_train(args):
     #args.list_weight_decay = [0.0001, 0.00001]
     #args.list_weight_decay = [0.0, 0.0001, 0.0005]
     #args.list_lr = [0.0001]
-    #args.list_lr = [0.001, 0.0001]
+    #args.list_lr = [0.001, 0.0001] 0.005? 0.01?
     #args.list_node_hidden_dim = [128]
     #args.list_weight_decay = [0.00001]
 
@@ -871,8 +871,14 @@ def main_train(args):
         skf = StratifiedKFold(n_splits=args.gen_cv_k, shuffle=False)
         acc_list = []
         auc_list = []
-
+        # Fold count.
         i_cv = 0
+
+        # Switch for always using validation set (even with just one HPC).
+        run_hpo_gen_cv = run_hpo
+        gen_cv_always_val = True
+        if gen_cv_always_val:
+            run_hpo_gen_cv = True
 
         # Run --gen-cv-k fold cross validation with hyperparameter optimization.
         for list_tr_idx, list_te_idx in skf.split(np.zeros(len(labels)), labels):
@@ -881,7 +887,7 @@ def main_train(args):
             print("Starting --gen-cv fold %i ... " %(i_cv))
 
             test_dataset = MyDataset([all_graphs[idx] for idx in list_te_idx])
-            if run_hpo:
+            if run_hpo_gen_cv:
                 # Further split up train portion into train + validation.
                 # Training set == all list entries except last length(test_set).
                 train_dataset = MyDataset([all_graphs[idx] for idx in list_tr_idx[:-len(list_te_idx)]])
@@ -890,7 +896,7 @@ def main_train(args):
             else:
                 train_dataset = MyDataset([all_graphs[idx] for idx in list_tr_idx])
 
-            if run_hpo:
+            if run_hpo_gen_cv:
 
                 # Report set sizes.
                 c_train = len(list_tr_idx) - len(list_te_idx)
@@ -914,12 +920,17 @@ def main_train(args):
                 opt_node_hidden_dim = opt_dic["opt_node_hidden_dim"]
                 opt_weight_decay = opt_dic["opt_weight_decay"]
                 opt_lr = opt_dic["opt_lr"]
+                opt_dr = opt_dic["opt_dr"]
                 opt_acc = opt_dic["opt_acc"]
                 opt_auc = opt_dic["opt_auc"]
                 opt_epochs = opt_dic["opt_epochs"]
 
-                model = FunnelGNN(input_dim=num_features, node_hidden_dim=opt_node_hidden_dim, fc_hidden_dim=args.fc_hidden_dim, out_dim=2).to(device)
-                model_path = model_folder + "/" + str(opt_batch_size) + "_" + str(opt_node_hidden_dim) + "_" + str(opt_weight_decay) + "_" + str(opt_lr)
+                model = FunnelGNN(input_dim=num_features,
+                                  node_hidden_dim=opt_node_hidden_dim,
+                                  dropout_rate=opt_dr,
+                                  fc_hidden_dim=args.fc_hidden_dim,
+                                  out_dim=2).to(device)
+                model_path = model_folder + "/" + str(opt_batch_size) + "_" + str(opt_node_hidden_dim) + "_" + str(opt_weight_decay) + "_" + str(opt_lr) + "_" + str(opt_dr)
                 model.load_state_dict(torch.load(model_path))
 
                 # Get test error of optimized model.
@@ -943,12 +954,17 @@ def main_train(args):
                 opt_node_hidden_dim = opt_dic["opt_node_hidden_dim"]
                 opt_weight_decay = opt_dic["opt_weight_decay"]
                 opt_lr = opt_dic["opt_lr"]
+                opt_dr = opt_dic["opt_dr"]
                 opt_acc = opt_dic["opt_acc"]
                 opt_auc = opt_dic["opt_auc"]
                 opt_epochs = opt_dic["opt_epochs"]
 
-                model = FunnelGNN(input_dim=num_features, node_hidden_dim=opt_node_hidden_dim, fc_hidden_dim=args.fc_hidden_dim, out_dim=2).to(device)
-                model_path = model_folder + "/" + str(opt_batch_size) + "_" + str(opt_node_hidden_dim) + "_" + str(opt_weight_decay) + "_" + str(opt_lr)
+                model = FunnelGNN(input_dim=num_features,
+                                  node_hidden_dim=opt_node_hidden_dim,
+                                  dropout_rate=opt_dr,
+                                  fc_hidden_dim=args.fc_hidden_dim,
+                                  out_dim=2).to(device)
+                model_path = model_folder + "/" + str(opt_batch_size) + "_" + str(opt_node_hidden_dim) + "_" + str(opt_weight_decay) + "_" + str(opt_lr) + "_" + str(opt_dr)
                 model.load_state_dict(torch.load(model_path))
 
                 # Get test error of default parameters model.
@@ -1089,9 +1105,12 @@ def main_train(args):
             opt_epochs = opt_dic["opt_epochs"]
 
             # Load optimized model.
-            model = FunnelGNN(input_dim=num_features, node_hidden_dim=opt_node_hidden_dim,
-                              fc_hidden_dim=args.fc_hidden_dim, out_dim=2).to(device)
-            model_path = model_folder + "/" + str(opt_batch_size) + "_" + str(opt_node_hidden_dim) + "_" + str(opt_weight_decay) + "_" + str(opt_lr)
+            model = FunnelGNN(input_dim=num_features,
+                              node_hidden_dim=opt_node_hidden_dim,
+                              dropout_rate=opt_dr,
+                              fc_hidden_dim=args.fc_hidden_dim,
+                              out_dim=2).to(device)
+            model_path = model_folder + "/" + str(opt_batch_size) + "_" + str(opt_node_hidden_dim) + "_" + str(opt_weight_decay) + "_" + str(opt_lr) + "_" + str(opt_dr)
             model.load_state_dict(torch.load(model_path))
 
             # Get test error (left out RBP) of optimized model.
@@ -1257,6 +1276,7 @@ def main_train(args):
                                      final_model_path=final_model_path,
                                      batch_size=best_batch_size,
                                      lr=best_lr,
+                                     dr=best_dr,
                                      node_hidden_dim=best_node_hidden_dim,
                                      weight_decay=best_weight_decay)
 
@@ -1332,7 +1352,7 @@ def main_train(args):
             #model = FunnelGNN(input_dim=dataset.num_features, node_hidden_dim=opt_node_hidden_dim, fc_hidden_dim=args.fc_hidden_dim, out_dim=2).to(device)
 
             # Move final model file.
-            model_path = model_folder + "/" + str(opt_batch_size) + "_" + str(opt_node_hidden_dim) + "_" + str(opt_weight_decay) + "_" + str(opt_lr)
+            model_path = model_folder + "/" + str(opt_batch_size) + "_" + str(opt_node_hidden_dim) + "_" + str(opt_weight_decay) + "_" + str(opt_lr) + "_" + str(opt_dr)
             #model.load_state_dict(torch.load(model_path))
             assert os.path.exists(model_path), "missing model file (path: %s)" %(model_path)
             gp2lib.move_rename_file(model_path, final_model_path)
@@ -2301,8 +2321,10 @@ def main_predict(args):
 
         # Load model.
         print("Load model ... ")
-        model = FunnelGNN(input_dim=num_features, node_hidden_dim=node_hidden_dim,
-                          fc_hidden_dim=fc_hidden_dim, out_dim=2).to(device)
+        model = FunnelGNN(input_dim=num_features,
+                          node_hidden_dim=node_hidden_dim,
+                          fc_hidden_dim=fc_hidden_dim,
+                          out_dim=2).to(device)
         model.load_state_dict(torch.load(model_file))
 
         # For each graph, predict profiles.
