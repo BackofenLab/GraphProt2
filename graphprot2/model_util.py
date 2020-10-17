@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 from torch_geometric.utils import subgraph
-from graphprot2.MyNets import FunnelGNN
+from graphprot2.MyNets import FunnelGNN,FunnelGNN2,FunnelGNN3,FunnelGNN4,FunnelGNN5,FunnelGNN6,FunnelGNN7
 from torch_geometric.datasets import TUDataset
 from torch_geometric.data import DataLoader
 from sklearn import metrics
@@ -369,6 +369,7 @@ def train_default_hp_model(args, n_features, train_dataset,
 def select_model(args, n_features, train_dataset, val_dataset,
                  model_folder, device,
                  plot_lc_folder=False,
+                 model_type=1,
                  hps2auc_dic=None,
                  hps2epo_dic=None):
     """
@@ -405,11 +406,49 @@ def select_model(args, n_features, train_dataset, val_dataset,
                         hp_str = str(batch_size) + "_" + str(node_hidden_dim) + "_" + str(weight_decay) + "_" + str(lr) + "_" + str(dr)
                         model_path = model_folder + "/" + hp_str
                         # print('Processing with ', model_name + "_" + str(batch_size) + "_" + str(node_hidden_dim) + "_" + str(weight_decay) + "_" + str(lr))
-                        model = FunnelGNN(input_dim=n_features,
-                                          node_hidden_dim=node_hidden_dim,
-                                          fc_hidden_dim=args.fc_hidden_dim,
-                                          dropout_rate=dr,
-                                          out_dim=2).to(device)
+                        if model_type == 1:
+                            model = FunnelGNN(input_dim=n_features,
+                                              node_hidden_dim=node_hidden_dim,
+                                              fc_hidden_dim=args.fc_hidden_dim,
+                                              dropout_rate=dr,
+                                              out_dim=2).to(device)
+                        elif model_type == 2:
+                            model = FunnelGNN2(input_dim=n_features,
+                                              node_hidden_dim=node_hidden_dim,
+                                              fc_hidden_dim=args.fc_hidden_dim,
+                                              dropout_rate=dr,
+                                              out_dim=2).to(device)
+                        elif model_type == 3:
+                            model = FunnelGNN3(input_dim=n_features,
+                                              node_hidden_dim=node_hidden_dim,
+                                              fc_hidden_dim=args.fc_hidden_dim,
+                                              dropout_rate=dr,
+                                              out_dim=2).to(device)
+                        elif model_type == 4:
+                            model = FunnelGNN4(input_dim=n_features,
+                                              node_hidden_dim=node_hidden_dim,
+                                              fc_hidden_dim=args.fc_hidden_dim,
+                                              dropout_rate=dr,
+                                              out_dim=2).to(device)
+                        elif model_type == 5:
+                            model = FunnelGNN5(input_dim=n_features,
+                                              node_hidden_dim=node_hidden_dim,
+                                              fc_hidden_dim=args.fc_hidden_dim,
+                                              dropout_rate=dr,
+                                              out_dim=2).to(device)
+                        elif model_type == 6:
+                            model = FunnelGNN6(input_dim=n_features,
+                                              node_hidden_dim=node_hidden_dim,
+                                              fc_hidden_dim=args.fc_hidden_dim,
+                                              dropout_rate=dr,
+                                              out_dim=2).to(device)
+                        elif model_type == 7:
+                            model = FunnelGNN7(input_dim=n_features,
+                                              node_hidden_dim=node_hidden_dim,
+                                              fc_hidden_dim=args.fc_hidden_dim,
+                                              dropout_rate=dr,
+                                              out_dim=2).to(device)
+
                         optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
                         best_val_loss = 1000000000.0
                         best_val_acc = 0

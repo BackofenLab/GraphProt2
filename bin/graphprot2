@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 from torch_geometric.data import DataLoader
-from graphprot2.MyNets import FunnelGNN, MyDataset
+from graphprot2.MyNets import FunnelGNN,FunnelGNN2,FunnelGNN3,FunnelGNN4,FunnelGNN5,FunnelGNN6,FunnelGNN7,MyDataset
 from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
 from graphprot2 import model_util
 from graphprot2 import gp2lib
@@ -246,6 +246,12 @@ def setup_argument_parser():
                    nargs='+',
                    default=[0.5],
                    help="List of dropout rates for hyperparameter optimization (default: 0.5)")
+    p_tra.add_argument("--model-type",
+                   dest = "model_type",
+                   type = int,
+                   default = 1,
+                   choices = [1,2,3,4,5,6,7],
+                   help="Define which model type to use (default: 1)")
 
     """
     Model evaluation mode.
@@ -865,7 +871,7 @@ def main_train(args):
         # Chosen hyperparameters + CV results per fold output file.
         opt_cv_hps_file = out_folder + "/cv_opt_hp.out"
         OPTHP = open(opt_cv_hps_file, "w")
-        OPTHP.write("fold\topt_batch_size\topt_node_hidden_dim\topt_weight_decay\topt_lr\tacc\tauc\n")
+        OPTHP.write("fold\topt_batch_size\topt_node_hidden_dim\topt_weight_decay\topt_lr\topt_dr\tacc\tauc\n")
 
         # Split datasets into folds.
         skf = StratifiedKFold(n_splits=args.gen_cv_k, shuffle=False)
@@ -914,6 +920,7 @@ def main_train(args):
                 # Get optimal parameters for this CV split.
                 opt_dic = model_util.select_model(args, num_features, train_dataset,
                                                   val_dataset, model_folder, device,
+                                                  model_type=args.model_type,
                                                   plot_lc_folder=plot_lc_folder)
 
                 opt_batch_size = opt_dic["opt_batch_size"]
@@ -925,11 +932,56 @@ def main_train(args):
                 opt_auc = opt_dic["opt_auc"]
                 opt_epochs = opt_dic["opt_epochs"]
 
-                model = FunnelGNN(input_dim=num_features,
-                                  node_hidden_dim=opt_node_hidden_dim,
-                                  dropout_rate=opt_dr,
-                                  fc_hidden_dim=args.fc_hidden_dim,
-                                  out_dim=2).to(device)
+                if args.model_type == 1:
+                    print("Model type 1 ... ")
+                    model = FunnelGNN(input_dim=num_features,
+                                      node_hidden_dim=opt_node_hidden_dim,
+                                      dropout_rate=opt_dr,
+                                      fc_hidden_dim=args.fc_hidden_dim,
+                                      out_dim=2).to(device)
+                elif args.model_type == 2:
+                    print("Model type 2 ... ")
+                    model = FunnelGNN2(input_dim=num_features,
+                                      node_hidden_dim=opt_node_hidden_dim,
+                                      dropout_rate=opt_dr,
+                                      fc_hidden_dim=args.fc_hidden_dim,
+                                      out_dim=2).to(device)
+                elif args.model_type == 3:
+                    print("Model type 3 ... ")
+                    model = FunnelGNN3(input_dim=num_features,
+                                      node_hidden_dim=opt_node_hidden_dim,
+                                      dropout_rate=opt_dr,
+                                      fc_hidden_dim=args.fc_hidden_dim,
+                                      out_dim=2).to(device)
+                elif args.model_type == 4:
+                    print("Model type 4 ... ")
+                    model = FunnelGNN4(input_dim=num_features,
+                                      node_hidden_dim=opt_node_hidden_dim,
+                                      dropout_rate=opt_dr,
+                                      fc_hidden_dim=args.fc_hidden_dim,
+                                      out_dim=2).to(device)
+                elif args.model_type == 5:
+                    print("Model type 5 ... ")
+                    model = FunnelGNN5(input_dim=num_features,
+                                      node_hidden_dim=opt_node_hidden_dim,
+                                      dropout_rate=opt_dr,
+                                      fc_hidden_dim=args.fc_hidden_dim,
+                                      out_dim=2).to(device)
+                elif args.model_type == 6:
+                    print("Model type 6 ... ")
+                    model = FunnelGNN6(input_dim=num_features,
+                                      node_hidden_dim=opt_node_hidden_dim,
+                                      dropout_rate=opt_dr,
+                                      fc_hidden_dim=args.fc_hidden_dim,
+                                      out_dim=2).to(device)
+                elif args.model_type == 7:
+                    print("Model type 7 ... ")
+                    model = FunnelGNN7(input_dim=num_features,
+                                      node_hidden_dim=opt_node_hidden_dim,
+                                      dropout_rate=opt_dr,
+                                      fc_hidden_dim=args.fc_hidden_dim,
+                                      out_dim=2).to(device)
+
                 model_path = model_folder + "/" + str(opt_batch_size) + "_" + str(opt_node_hidden_dim) + "_" + str(opt_weight_decay) + "_" + str(opt_lr) + "_" + str(opt_dr)
                 model.load_state_dict(torch.load(model_path))
 
@@ -980,7 +1032,7 @@ def main_train(args):
             print("Selected model AUC:       %f" %(auc))
 
             # Output model state dictionary and optimized hyperparameters.
-            OPTHP.write("%i\t%s\t%s\t%s\t%s\t%s\t%s\n" %(i_cv, str(opt_batch_size), str(opt_node_hidden_dim), str(opt_weight_decay), str(opt_lr), str(acc), str(auc) ))
+            OPTHP.write("%i\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" %(i_cv, str(opt_batch_size), str(opt_node_hidden_dim), str(opt_weight_decay), str(opt_lr), str(opt_dr), str(acc), str(auc) ))
 
         OPTHP.close()
 
@@ -999,6 +1051,8 @@ def main_train(args):
         AAOUT.write("avg_acc\tstdev_acc\tavg_auc\tstdev_auc\n")
         AAOUT.write("%f\t%f\t%f\t%f\n" %(avg_acc, stdev_acc, avg_auc, stdev_auc))
         AAOUT.close()
+
+        sys.exit()
 
     """
     Run cross validation to estimate generalzation performance of generic
@@ -1023,7 +1077,7 @@ def main_train(args):
         # Chosen hyperparameters + CV results per fold output file.
         opt_cv_hps_file = out_folder + "/generic_cv_opt_hp.out"
         OPTHP = open(opt_cv_hps_file, "w")
-        OPTHP.write("fold\trbp\topt_batch_size\topt_node_hidden_dim\topt_weight_decay\topt_lr\tacc\tauc\n")
+        OPTHP.write("fold\trbp\topt_batch_size\topt_node_hidden_dim\topt_weight_decay\topt_lr\topt_dr\tacc\tauc\n")
 
         acc_list = []
         auc_list = []
@@ -1125,7 +1179,7 @@ def main_train(args):
             print("Generic model AUC:       %f" %(auc))
 
             # Output model state dictionary and optimized hyperparameters.
-            OPTHP.write("%i\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" %(i_cv, rbp_label, str(opt_batch_size), str(opt_node_hidden_dim), str(opt_weight_decay), str(opt_lr), str(acc), str(auc) ))
+            OPTHP.write("%i\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" %(i_cv, rbp_label, str(opt_batch_size), str(opt_node_hidden_dim), str(opt_weight_decay), str(opt_lr), str(opt_dr), str(acc), str(auc) ))
 
         OPTHP.close()
 
@@ -1148,6 +1202,8 @@ def main_train(args):
         AAOUT.write("avg_acc\tstdev_acc\tavg_auc\tstdev_auc\n")
         AAOUT.write("%f\t%f\t%f\t%f\n" %(avg_acc, stdev_acc, avg_auc, stdev_auc))
         AAOUT.close()
+
+        sys.exit()
 
     """
     Train final model.
