@@ -9563,7 +9563,7 @@ def load_training_data(args,
             print("Read in base pair data ... ")
             bpp_dic = read_bpp_into_dic(pos_bpp_in, vp_dic,
                                         bps_mode=args.bps_mode)
-            bpp_dic = read_bpp_into_dic(neg_bpp_in, neg_vp_dic,
+            bpp_dic = read_bpp_into_dic(neg_bpp_in, vp_dic,
                                         bpp_dic=bpp_dic,
                                         bps_mode=args.bps_mode)
             assert bpp_dic, "no base pair information read in (bpp_dic empty)"
@@ -9581,7 +9581,7 @@ def load_training_data(args,
                                           label_list=feat_alphabet)
             feat_dic = read_feat_into_dic(neg_feat_in, ftype,
                                           feat_dic=feat_dic,
-                                          label_list=eia_alphabet)
+                                          label_list=feat_alphabet)
             assert feat_dic, "no .%s information read in (feat_dic empty)" %(fid)
             if ftype == "N":
                 channel_nr += 1
@@ -9732,7 +9732,7 @@ def load_training_data(args,
                         add_edge = True
                 if add_edge:
                     edge_index_1.append(g_p1)
-                    edge_index_1.append(g_p2)
+                    edge_index_2.append(g_p2)
                     if args.undirected:
                         edge_index_1.append(g_p2)
                         edge_index_2.append(g_p1)
