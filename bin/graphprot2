@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 from torch_geometric.data import DataLoader
-from graphprot2.MyNets import FunnelGNN,FunnelGNN2,FunnelGNN3,FunnelGNN4,FunnelGNN5,FunnelGNN6,FunnelGNN7,FunnelGNN8,FunnelGNN9,MyDataset
+from graphprot2.MyNets import FunnelGNN,FunnelGNN2,FunnelGNN3,FunnelGNN4,FunnelGNN5,FunnelGNN6,FunnelGNN7,FunnelGNN8,FunnelGNN9,FunnelGNN10,FunnelGNN11,MyDataset
 from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
 from graphprot2 import model_util
 from graphprot2 import gp2lib
@@ -250,7 +250,7 @@ def setup_argument_parser():
                    dest = "model_type",
                    type = int,
                    default = 1,
-                   choices = [1,2,3,4,5,6,7,8,9],
+                   choices = [1,2,3,4,5,6,7,8,9,10,11],
                    help="Define which model type to use (default: 1)")
 
     """
@@ -991,6 +991,20 @@ def main_train(args):
                 elif args.model_type == 9:
                     print("Model type 9 ... ")
                     model = FunnelGNN9(input_dim=num_features,
+                                      node_hidden_dim=opt_node_hidden_dim,
+                                      dropout_rate=opt_dr,
+                                      fc_hidden_dim=args.fc_hidden_dim,
+                                      out_dim=2).to(device)
+                elif args.model_type == 10:
+                    print("Model type 10 ... ")
+                    model = FunnelGNN10(input_dim=num_features,
+                                      node_hidden_dim=opt_node_hidden_dim,
+                                      dropout_rate=opt_dr,
+                                      fc_hidden_dim=args.fc_hidden_dim,
+                                      out_dim=2).to(device)
+                elif args.model_type == 11:
+                    print("Model type 11 ... ")
+                    model = FunnelGNN11(input_dim=num_features,
                                       node_hidden_dim=opt_node_hidden_dim,
                                       dropout_rate=opt_dr,
                                       fc_hidden_dim=args.fc_hidden_dim,
