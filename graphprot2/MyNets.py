@@ -550,6 +550,70 @@ class FunnelGNN11(torch.nn.Module):
 
         return x
 
+
+################################################################################
+
+class FunnelGNN12(torch.nn.Module):
+    def __init__(self,
+                 input_dim=0,
+                 node_hidden_dim=128,
+                 fc_hidden_dim=128,
+                 dropout_rate=0.5,
+                 out_dim=2):
+        super(FunnelGNN12, self).__init__()
+        self.bn0 = torch.nn.BatchNorm1d(input_dim)
+        self.conv1 = GraphConv(input_dim, node_hidden_dim)
+        self.conv2 = GraphConv(node_hidden_dim, node_hidden_dim)
+        self.conv3 = GraphConv(node_hidden_dim, node_hidden_dim)
+        self.conv4 = GraphConv(node_hidden_dim, node_hidden_dim)
+        self.conv5 = GraphConv(node_hidden_dim, node_hidden_dim)
+        self.conv6 = GraphConv(node_hidden_dim, node_hidden_dim)
+        self.conv7 = GraphConv(node_hidden_dim, node_hidden_dim)
+
+        self.bn1 = torch.nn.BatchNorm1d(node_hidden_dim)
+        self.bn2 = torch.nn.BatchNorm1d(node_hidden_dim)
+        self.bn3 = torch.nn.BatchNorm1d(node_hidden_dim)
+        self.bn4 = torch.nn.BatchNorm1d(node_hidden_dim)
+        self.bn5 = torch.nn.BatchNorm1d(node_hidden_dim)
+        self.bn6 = torch.nn.BatchNorm1d(node_hidden_dim)
+        self.bn7 = torch.nn.BatchNorm1d(node_hidden_dim)
+
+        self.lin1 = Linear(14*node_hidden_dim, fc_hidden_dim)
+        self.lin2 = torch.nn.Linear(fc_hidden_dim, out_dim)
+        self.dropout_rate = dropout_rate
+
+    def forward(self, x, edge_index, batch, edge_attr=None):
+
+        x = self.bn1(F.leaky_relu(self.conv1(x, edge_index)))
+        x1 = torch.cat([gmp(x, batch), gap(x, batch)], dim=1)
+
+        x = self.bn2(F.leaky_relu(self.conv2(x, edge_index)))
+        x2 = torch.cat([gmp(x, batch), gap(x, batch)], dim=1)
+
+        x = self.bn3(F.leaky_relu(self.conv3(x, edge_index)))
+        x3 = torch.cat([gmp(x, batch), gap(x, batch)], dim=1)
+
+        x = self.bn4(F.leaky_relu(self.conv4(x, edge_index)))
+        x4 = torch.cat([gmp(x, batch), gap(x, batch)], dim=1)
+
+        x = self.bn5(F.leaky_relu(self.conv5(x, edge_index)))
+        x5 = torch.cat([gmp(x, batch), gap(x, batch)], dim=1)
+
+        x = self.bn6(F.leaky_relu(self.conv6(x, edge_index)))
+        x6 = torch.cat([gmp(x, batch), gap(x, batch)], dim=1)
+
+        x = self.bn7(F.leaky_relu(self.conv7(x, edge_index)))
+        x7 = torch.cat([gmp(x, batch), gap(x, batch)], dim=1)
+
+        x = torch.cat([x1, x2, x3, x4, x5, x6, x7], dim=1)
+        x = F.dropout(x, p=self.dropout_rate, training=self.training)
+        x = self.lin1(x)
+        x = F.dropout(x, p=self.dropout_rate, training=self.training)
+        x = F.log_softmax(self.lin2(x), dim=-1)
+
+        return x
+
+
 ################################################################################
 
 

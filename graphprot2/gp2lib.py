@@ -9586,7 +9586,7 @@ def load_training_data(args,
             if ftype == "N":
                 channel_nr += 1
                 encoding = fid2norm_dic[fid]
-                channel_info = "%i\t%s\t%s\tN\t%s" %(channel_nr, fid2cat_dic[fid], fid, encoding)
+                channel_info = "%i\t%s\t%s\tN\t%s" %(channel_nr, fid2cat_dic[fid][0], fid, encoding)
                 channel_info_list.append(channel_info)
             elif ftype == "C":
                 for c in fid2cat_dic[fid]:
@@ -13180,8 +13180,9 @@ def polish_fasta_seqs(in_fa, len_dic,
     """
     import random
     assert len_dic, "len_dic empty"
-    # Read in FASTA.
-    seqs_dic = read_fasta_into_dic(in_fa)
+    # Read in FASTA (do not skip N containing extensions here).
+    seqs_dic = read_fasta_into_dic(in_fa,
+                                   skip_n_seqs=False)
     assert len(seqs_dic) == len(len_dic), "len(seqs_dic) != len(len_dic)"
     FAOUT = open(in_fa,"w")
     for seq_id in seqs_dic:

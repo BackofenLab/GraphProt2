@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 from torch_geometric.utils import subgraph
-from graphprot2.MyNets import FunnelGNN,FunnelGNN2,FunnelGNN3,FunnelGNN4,FunnelGNN5,FunnelGNN6,FunnelGNN7,FunnelGNN8,FunnelGNN9,FunnelGNN10,FunnelGNN11
+from graphprot2.MyNets import FunnelGNN,FunnelGNN2,FunnelGNN3,FunnelGNN4,FunnelGNN5,FunnelGNN6,FunnelGNN7,FunnelGNN8,FunnelGNN9,FunnelGNN10,FunnelGNN11,FunnelGNN12
 from torch_geometric.datasets import TUDataset
 from torch_geometric.data import DataLoader
 from sklearn import metrics
@@ -468,6 +468,12 @@ def select_model(args, n_features, train_dataset, val_dataset,
                                               out_dim=2).to(device)
                         elif model_type == 11:
                             model = FunnelGNN11(input_dim=n_features,
+                                              node_hidden_dim=node_hidden_dim,
+                                              fc_hidden_dim=args.fc_hidden_dim,
+                                              dropout_rate=dr,
+                                              out_dim=2).to(device)
+                        elif model_type == 12:
+                            model = FunnelGNN12(input_dim=n_features,
                                               node_hidden_dim=node_hidden_dim,
                                               fc_hidden_dim=args.fc_hidden_dim,
                                               dropout_rate=dr,
