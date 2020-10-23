@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 from torch_geometric.data import DataLoader
-from graphprot2.MyNets import FunnelGNN,FunnelGNN2,FunnelGNN3,FunnelGNN4,FunnelGNN5,FunnelGNN6,FunnelGNN7,FunnelGNN8,FunnelGNN9,FunnelGNN10,FunnelGNN11,FunnelGNN12,MyDataset
+from graphprot2.MyNets import FunnelGNN,MyDataset
 from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
 from graphprot2 import model_util
 from graphprot2 import gp2lib
@@ -198,14 +198,14 @@ def setup_argument_parser():
                    type = int,
                    metavar='int',
                    nargs='+',
-                   default=[30, 50],
-                   help = "List of gradient descent batch sizes (default: 30 50)")
+                   default=[50],
+                   help = "List of gradient descent batch sizes (default: 50)")
     p_tra.add_argument("--epochs",
                    dest="epochs",
                    type = int,
                    metavar='int',
-                   default = 100,
-                   help = "Number of training epochs (default: 100)")
+                   default = 200,
+                   help = "Number of training epochs (default: 200)")
     p_tra.add_argument("--patience",
                    dest="patience",
                    type = int,
@@ -223,7 +223,7 @@ def setup_argument_parser():
                    type=float,
                    metavar='float',
                    nargs='+',
-                   default=[0.001, 0.0001],
+                   default=[0.01, 0.001, 0.0001],
                    help="List of learning rates for hyperparameter optimization (default: 0.001 0.0001)")
     p_tra.add_argument("--list-hidden-dim",
                    dest="list_node_hidden_dim",
@@ -232,12 +232,17 @@ def setup_argument_parser():
                    nargs='+',
                    default=[64, 128],
                    help="List of node feature dimensions in hidden layers for hyperparameter optimization (default: 64 128)")
+    p_tra.add_argument("--incr-hidden-dim",
+                   dest = "incr_hidden_dim",
+                   default = False,
+                   action = "store_true",
+                   help = "Increase node feature dimensions in subsequent hidden layers successively by a factor of 2 (default: False)")
     p_tra.add_argument("--list-weight-decay",
                    dest="list_weight_decay",
                    type=float,
                    metavar='float',
                    nargs='+',
-                   default=[0.0, 0.0001, 0.0005],
+                   default=[0.0, 0.001, 0.0001],
                    help="List of weight decays for hyperparameter optimization (default: 0.0 0.0001 0.0005)")
     p_tra.add_argument("--list-dr",
                    dest="list_dr",
@@ -246,12 +251,12 @@ def setup_argument_parser():
                    nargs='+',
                    default=[0.5],
                    help="List of dropout rates for hyperparameter optimization (default: 0.5)")
-    p_tra.add_argument("--model-type",
-                   dest = "model_type",
+    p_tra.add_argument("--nr-hidden-layers",
+                   dest = "nr_hidden_layers",
                    type = int,
-                   default = 1,
-                   choices = [1,2,3,4,5,6,7,8,9,10,11,12],
-                   help="Define which model type to use (default: 1)")
+                   default = 4,
+                   choices = [3,4,5],
+                   help="Number of hidden graph convolution layers (default: 4)")
 
     """
     Model evaluation mode.
@@ -920,7 +925,6 @@ def main_train(args):
                 # Get optimal parameters for this CV split.
                 opt_dic = model_util.select_model(args, num_features, train_dataset,
                                                   val_dataset, model_folder, device,
-                                                  model_type=args.model_type,
                                                   plot_lc_folder=plot_lc_folder)
 
                 opt_batch_size = opt_dic["opt_batch_size"]
@@ -932,90 +936,13 @@ def main_train(args):
                 opt_auc = opt_dic["opt_auc"]
                 opt_epochs = opt_dic["opt_epochs"]
 
-                if args.model_type == 1:
-                    print("Model type 1 ... ")
-                    model = FunnelGNN(input_dim=num_features,
-                                      node_hidden_dim=opt_node_hidden_dim,
-                                      dropout_rate=opt_dr,
-                                      fc_hidden_dim=args.fc_hidden_dim,
-                                      out_dim=2).to(device)
-                elif args.model_type == 2:
-                    print("Model type 2 ... ")
-                    model = FunnelGNN2(input_dim=num_features,
-                                      node_hidden_dim=opt_node_hidden_dim,
-                                      dropout_rate=opt_dr,
-                                      fc_hidden_dim=args.fc_hidden_dim,
-                                      out_dim=2).to(device)
-                elif args.model_type == 3:
-                    print("Model type 3 ... ")
-                    model = FunnelGNN3(input_dim=num_features,
-                                      node_hidden_dim=opt_node_hidden_dim,
-                                      dropout_rate=opt_dr,
-                                      fc_hidden_dim=args.fc_hidden_dim,
-                                      out_dim=2).to(device)
-                elif args.model_type == 4:
-                    print("Model type 4 ... ")
-                    model = FunnelGNN4(input_dim=num_features,
-                                      node_hidden_dim=opt_node_hidden_dim,
-                                      dropout_rate=opt_dr,
-                                      fc_hidden_dim=args.fc_hidden_dim,
-                                      out_dim=2).to(device)
-                elif args.model_type == 5:
-                    print("Model type 5 ... ")
-                    model = FunnelGNN5(input_dim=num_features,
-                                      node_hidden_dim=opt_node_hidden_dim,
-                                      dropout_rate=opt_dr,
-                                      fc_hidden_dim=args.fc_hidden_dim,
-                                      out_dim=2).to(device)
-                elif args.model_type == 6:
-                    print("Model type 6 ... ")
-                    model = FunnelGNN6(input_dim=num_features,
-                                      node_hidden_dim=opt_node_hidden_dim,
-                                      dropout_rate=opt_dr,
-                                      fc_hidden_dim=args.fc_hidden_dim,
-                                      out_dim=2).to(device)
-                elif args.model_type == 7:
-                    print("Model type 7 ... ")
-                    model = FunnelGNN7(input_dim=num_features,
-                                      node_hidden_dim=opt_node_hidden_dim,
-                                      dropout_rate=opt_dr,
-                                      fc_hidden_dim=args.fc_hidden_dim,
-                                      out_dim=2).to(device)
-                elif args.model_type == 8:
-                    print("Model type 8 ... ")
-                    model = FunnelGNN8(input_dim=num_features,
-                                      node_hidden_dim=opt_node_hidden_dim,
-                                      dropout_rate=opt_dr,
-                                      fc_hidden_dim=args.fc_hidden_dim,
-                                      out_dim=2).to(device)
-                elif args.model_type == 9:
-                    print("Model type 9 ... ")
-                    model = FunnelGNN9(input_dim=num_features,
-                                      node_hidden_dim=opt_node_hidden_dim,
-                                      dropout_rate=opt_dr,
-                                      fc_hidden_dim=args.fc_hidden_dim,
-                                      out_dim=2).to(device)
-                elif args.model_type == 10:
-                    print("Model type 10 ... ")
-                    model = FunnelGNN10(input_dim=num_features,
-                                      node_hidden_dim=opt_node_hidden_dim,
-                                      dropout_rate=opt_dr,
-                                      fc_hidden_dim=args.fc_hidden_dim,
-                                      out_dim=2).to(device)
-                elif args.model_type == 11:
-                    print("Model type 11 ... ")
-                    model = FunnelGNN11(input_dim=num_features,
-                                      node_hidden_dim=opt_node_hidden_dim,
-                                      dropout_rate=opt_dr,
-                                      fc_hidden_dim=args.fc_hidden_dim,
-                                      out_dim=2).to(device)
-                elif args.model_type == 12:
-                    print("Model type 12 ... ")
-                    model = FunnelGNN12(input_dim=num_features,
-                                      node_hidden_dim=opt_node_hidden_dim,
-                                      dropout_rate=opt_dr,
-                                      fc_hidden_dim=args.fc_hidden_dim,
-                                      out_dim=2).to(device)
+                model = FunnelGNN(input_dim=num_features,
+                                  node_hidden_dim=opt_node_hidden_dim,
+                                  dropout_rate=opt_dr,
+                                  nr_hidden_layers=args.nr_hidden_layers,
+                                  incr_hidden_dim=args.incr_hidden_dim,
+                                  fc_hidden_dim=args.fc_hidden_dim,
+                                  out_dim=2).to(device)
 
                 model_path = model_folder + "/" + str(opt_batch_size) + "_" + str(opt_node_hidden_dim) + "_" + str(opt_weight_decay) + "_" + str(opt_lr) + "_" + str(opt_dr)
                 model.load_state_dict(torch.load(model_path))
@@ -1049,6 +976,8 @@ def main_train(args):
                 model = FunnelGNN(input_dim=num_features,
                                   node_hidden_dim=opt_node_hidden_dim,
                                   dropout_rate=opt_dr,
+                                  nr_hidden_layers=args.nr_hidden_layers,
+                                  incr_hidden_dim=args.incr_hidden_dim,
                                   fc_hidden_dim=args.fc_hidden_dim,
                                   out_dim=2).to(device)
                 model_path = model_folder + "/" + str(opt_batch_size) + "_" + str(opt_node_hidden_dim) + "_" + str(opt_weight_decay) + "_" + str(opt_lr) + "_" + str(opt_dr)
@@ -1197,6 +1126,8 @@ def main_train(args):
             model = FunnelGNN(input_dim=num_features,
                               node_hidden_dim=opt_node_hidden_dim,
                               dropout_rate=opt_dr,
+                              nr_hidden_layers=args.nr_hidden_layers,
+                              incr_hidden_dim=args.incr_hidden_dim,
                               fc_hidden_dim=args.fc_hidden_dim,
                               out_dim=2).to(device)
             model_path = model_folder + "/" + str(opt_batch_size) + "_" + str(opt_node_hidden_dim) + "_" + str(opt_weight_decay) + "_" + str(opt_lr) + "_" + str(opt_dr)

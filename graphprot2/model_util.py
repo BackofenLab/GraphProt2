@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 from torch_geometric.utils import subgraph
-from graphprot2.MyNets import FunnelGNN,FunnelGNN2,FunnelGNN3,FunnelGNN4,FunnelGNN5,FunnelGNN6,FunnelGNN7,FunnelGNN8,FunnelGNN9,FunnelGNN10,FunnelGNN11,FunnelGNN12
+from graphprot2.MyNets import FunnelGNN
 from torch_geometric.datasets import TUDataset
 from torch_geometric.data import DataLoader
 from sklearn import metrics
@@ -290,6 +290,8 @@ def train_final_model(args, n_features, train_dataset, train_epochs, device,
     model = FunnelGNN(input_dim=n_features,
                       node_hidden_dim=node_hidden_dim,
                       dropout_rate=dr,
+                      nr_hidden_layers=args.nr_hidden_layers,
+                      incr_hidden_dim=args.incr_hidden_dim,
                       fc_hidden_dim=args.fc_hidden_dim,
                       out_dim=2).to(device)
     # Define optimizer.
@@ -326,6 +328,8 @@ def train_default_hp_model(args, n_features, train_dataset,
 
     model = FunnelGNN(input_dim=n_features,
                       node_hidden_dim=model_node_hidden_dim,
+                      nr_hidden_layers=args.nr_hidden_layers,
+                      incr_hidden_dim=args.incr_hidden_dim,
                       fc_hidden_dim=args.fc_hidden_dim,
                       dropout_rate=model_dr,
                       out_dim=2).to(device)
@@ -369,7 +373,6 @@ def train_default_hp_model(args, n_features, train_dataset,
 def select_model(args, n_features, train_dataset, val_dataset,
                  model_folder, device,
                  plot_lc_folder=False,
-                 model_type=1,
                  hps2auc_dic=None,
                  hps2epo_dic=None):
     """
@@ -406,78 +409,13 @@ def select_model(args, n_features, train_dataset, val_dataset,
                         hp_str = str(batch_size) + "_" + str(node_hidden_dim) + "_" + str(weight_decay) + "_" + str(lr) + "_" + str(dr)
                         model_path = model_folder + "/" + hp_str
                         # print('Processing with ', model_name + "_" + str(batch_size) + "_" + str(node_hidden_dim) + "_" + str(weight_decay) + "_" + str(lr))
-                        if model_type == 1:
-                            model = FunnelGNN(input_dim=n_features,
-                                              node_hidden_dim=node_hidden_dim,
-                                              fc_hidden_dim=args.fc_hidden_dim,
-                                              dropout_rate=dr,
-                                              out_dim=2).to(device)
-                        elif model_type == 2:
-                            model = FunnelGNN2(input_dim=n_features,
-                                              node_hidden_dim=node_hidden_dim,
-                                              fc_hidden_dim=args.fc_hidden_dim,
-                                              dropout_rate=dr,
-                                              out_dim=2).to(device)
-                        elif model_type == 3:
-                            model = FunnelGNN3(input_dim=n_features,
-                                              node_hidden_dim=node_hidden_dim,
-                                              fc_hidden_dim=args.fc_hidden_dim,
-                                              dropout_rate=dr,
-                                              out_dim=2).to(device)
-                        elif model_type == 4:
-                            model = FunnelGNN4(input_dim=n_features,
-                                              node_hidden_dim=node_hidden_dim,
-                                              fc_hidden_dim=args.fc_hidden_dim,
-                                              dropout_rate=dr,
-                                              out_dim=2).to(device)
-                        elif model_type == 5:
-                            model = FunnelGNN5(input_dim=n_features,
-                                              node_hidden_dim=node_hidden_dim,
-                                              fc_hidden_dim=args.fc_hidden_dim,
-                                              dropout_rate=dr,
-                                              out_dim=2).to(device)
-                        elif model_type == 6:
-                            model = FunnelGNN6(input_dim=n_features,
-                                              node_hidden_dim=node_hidden_dim,
-                                              fc_hidden_dim=args.fc_hidden_dim,
-                                              dropout_rate=dr,
-                                              out_dim=2).to(device)
-                        elif model_type == 7:
-                            model = FunnelGNN7(input_dim=n_features,
-                                              node_hidden_dim=node_hidden_dim,
-                                              fc_hidden_dim=args.fc_hidden_dim,
-                                              dropout_rate=dr,
-                                              out_dim=2).to(device)
-                        elif model_type == 8:
-                            model = FunnelGNN8(input_dim=n_features,
-                                              node_hidden_dim=node_hidden_dim,
-                                              fc_hidden_dim=args.fc_hidden_dim,
-                                              dropout_rate=dr,
-                                              out_dim=2).to(device)
-                        elif model_type == 9:
-                            model = FunnelGNN9(input_dim=n_features,
-                                              node_hidden_dim=node_hidden_dim,
-                                              fc_hidden_dim=args.fc_hidden_dim,
-                                              dropout_rate=dr,
-                                              out_dim=2).to(device)
-                        elif model_type == 10:
-                            model = FunnelGNN10(input_dim=n_features,
-                                              node_hidden_dim=node_hidden_dim,
-                                              fc_hidden_dim=args.fc_hidden_dim,
-                                              dropout_rate=dr,
-                                              out_dim=2).to(device)
-                        elif model_type == 11:
-                            model = FunnelGNN11(input_dim=n_features,
-                                              node_hidden_dim=node_hidden_dim,
-                                              fc_hidden_dim=args.fc_hidden_dim,
-                                              dropout_rate=dr,
-                                              out_dim=2).to(device)
-                        elif model_type == 12:
-                            model = FunnelGNN12(input_dim=n_features,
-                                              node_hidden_dim=node_hidden_dim,
-                                              fc_hidden_dim=args.fc_hidden_dim,
-                                              dropout_rate=dr,
-                                              out_dim=2).to(device)
+                        model = FunnelGNN(input_dim=n_features,
+                                          node_hidden_dim=node_hidden_dim,
+                                          fc_hidden_dim=args.fc_hidden_dim,
+                                          nr_hidden_layers=args.nr_hidden_layers,
+                                          incr_hidden_dim=args.incr_hidden_dim,
+                                          dropout_rate=dr,
+                                          out_dim=2).to(device)
 
                         optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
                         best_val_loss = 1000000000.0
@@ -485,7 +423,6 @@ def select_model(args, n_features, train_dataset, val_dataset,
                         best_val_auc = 0
                         elapsed_patience = 0
                         c_epochs = 0
-                        lc_plot = plot_lc_folder + "/" + hp_str + ".lc.png"
                         tll = [] # train loss list.
                         vll = [] # validation loss list.
 
@@ -509,6 +446,7 @@ def select_model(args, n_features, train_dataset, val_dataset,
                                 elapsed_patience += 1
 
                         if plot_lc_folder:
+                            lc_plot = plot_lc_folder + "/" + hp_str + ".lc.png"
                             assert tll, "tll empty"
                             assert vll, "vll empty"
                             create_lc_loss_plot(tll, vll, lc_plot)
