@@ -1249,6 +1249,13 @@ def main_train(args):
         best_hps = ""
         best_auc = 0
         best_epo = 0
+
+        # Output HP combinations and their average AUC.
+        hp_comb_avg_auc_out = out_folder + "/" + "train_cv_hp_comb_avg_auc.out"
+
+        HPRESOUT = open(hp_comb_avg_auc_out, "w")
+        HPRESOUT.write("batch_size\tnode_hidden_dim\tweight_decay\tlr\tdr\tmean_epo\tmean_auc\tauc_list\n")
+
         print("Calculate mean AUC for each HP setting and select best ... ")
         for hps in hps2auc_dic:
             # Checks.
@@ -1262,12 +1269,18 @@ def main_train(args):
             # Mean AUC.
             mean_auc = statistics.mean(hps2auc_dic[hps])
             # For now use median epochs to train final model.
-            median_epo = statistics.mean(hps2epo_dic[hps])
-            if mean_auc > best_avg_auc:
+            median_epo = statistics.median(hps2epo_dic[hps])
+            if mean_auc > best_auc:
                 best_hps = hps
                 best_auc = mean_auc
                 best_epo = median_epo
+            # Output stats.
+            hpsl = hps.split("_")
+            aucsl = [str(e) for e in hps2auc_dic[hps]]
+            aucs = ",".join(aucsl)
+            HPRESOUT.write("%s\t%s\t%s\t%s\t%s\t%i\t%s\t%s\n" %(hpsl[0], hpsl[1], hpsl[2], hpsl[3], hpsl[4], median_epo, str(mean_auc), aucs))
 
+        HPRESOUT.close()
         assert best_hps, "No HP combination selected (best_hps empty)"
 
         # Train final model.
@@ -1285,16 +1298,16 @@ def main_train(args):
         print("Learning rate = ", best_lr)
         print("Dropout rate = ", best_dr)
         print("Median used epochs = ", best_epo)
-        print("Average validation AUC = ", best_aUc)
+        print("Average validation AUC = ", best_auc)
 
         print("Use best HP setting to train final model ... ")
         print("CALEB: tickets please ... ")
-
+        #print("MATRIX: ... I lied.")
         train_dataset = MyDataset(all_graphs)
         c_train = len(all_graphs)
         print("# of training instances: %i" %(c_train))
 
-        model_util.train_final_model(args, dataset, train_dataset, best_epo, device,
+        model_util.train_final_model(args, num_features, train_dataset, best_epo, device,
                                      final_model_path=final_model_path,
                                      batch_size=best_batch_size,
                                      lr=best_lr,
@@ -1322,7 +1335,7 @@ def main_train(args):
         PAROUT.write("weight_decay\t%s\n" %(str(best_weight_decay)))
         PAROUT.close()
 
-        print("Final model (hyper)parameters file:\n%s" %())
+        print("Final model (hyper)parameters file:")
         print(final_params_path)
         print("Final model file:")
         print(final_model_path)
@@ -1370,8 +1383,6 @@ def main_train(args):
             opt_acc = opt_dic["opt_acc"]
             opt_auc = opt_dic["opt_auc"]
             opt_epochs = opt_dic["opt_epochs"]
-
-            #model = FunnelGNN(input_dim=dataset.num_features, node_hidden_dim=opt_node_hidden_dim, fc_hidden_dim=args.fc_hidden_dim, out_dim=2).to(device)
 
             # Move final model file.
             model_path = model_folder + "/" + str(opt_batch_size) + "_" + str(opt_node_hidden_dim) + "_" + str(opt_weight_decay) + "_" + str(opt_lr) + "_" + str(opt_dr)
@@ -5125,6 +5136,26 @@ def main_gp(args):
 
 ################################################################################
 
+def drop_a_line():
+    """
+    Drop a line.
+
+    """
+    lines = []
+    a = """
+       \"Of all the RBP-BSP tools in the world,
+           this is definitely one of them.\"
+"""
+    b = """
+                     \"Let's Party!\"
+"""
+    lines.append(a)
+    lines.append(b)
+    return(random.choice(lines))
+
+
+################################################################################
+
 if __name__ == '__main__':
     # Setup argparse.
     parser = setup_argument_parser()
@@ -5143,10 +5174,9 @@ if __name__ == '__main__':
     print(" / /_/ / /  / /_/ / /_/ / / / / ____/ /  / /_/ / /_    ")
     print(" \____/_/   \__,_/ .___/_/ /_/_/   /_/   \____/\__/    ")
     print("                /_/                                    ")
-    print("")
-    print("       \"Of all the RBP-BSP tools in the world, ")
-    print("           this is definitely one of them.\"   ")
-    print("")
+
+    # Drop a line.
+    print(drop_a_line())
 
     # Are my tools ready?
     assert gp2lib.is_tool("bedtools"), "bedtools not in PATH"
