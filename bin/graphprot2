@@ -843,9 +843,10 @@ def main_train(args):
     c_nhd = len(args.list_node_hidden_dim)
     c_wd = len(args.list_weight_decay)
     c_bs = len(args.list_batch_size)
+    c_dr = len(args.list_dr)
 
     # Number of HP combinations.
-    nr_hp_comb = c_lr*c_nhd*c_wd*c_bs
+    nr_hp_comb = c_lr*c_nhd*c_wd*c_bs*c_dr
     run_hpo = True
     print("Number of hyperparameter (HP) combinations:  %i" %(nr_hp_comb))
     if nr_hp_comb == 1:

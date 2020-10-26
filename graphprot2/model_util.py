@@ -1037,9 +1037,11 @@ def create_lc_loss_plot(train_loss, val_loss, out_plot):
         data['loss'].append(vl)
         data['epoch'].append(epoch)
     df = pd.DataFrame (data, columns = ['set','loss', 'epoch'])
-    fig, ax = plt.subplots()
+    #fig, ax = plt.subplots()
+    fig = plt.figure()
     sns.lineplot(data=df, x="epoch", y="loss", hue="set")
     fig.savefig(out_plot, dpi=125, bbox_inches='tight')
+    plt.close(fig)
 
 
 ################################################################################
