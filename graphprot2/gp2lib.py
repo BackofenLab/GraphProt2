@@ -456,6 +456,9 @@ def read_str_elem_p_into_dic(str_elem_p_file,
     Read values into dictionary with sequence ID -> 2d list mapping, and
     return dictionary.
 
+    p_to_str:
+        Read in probs as strings.
+
     Example input:
     >CLIP_01
     0.9	0.1	0.2	0.4	0.2	0.1
@@ -1182,7 +1185,7 @@ def calc_str_elem_up_bpp(in_fasta, out_bpp, out_str,
             # Output centered values.
             pos = i+1 # one-based sequence position.
             #OUTSTR.write("%i\t%f\t%f\t%f\t%f\t%f\t%f\n" %(pos,p_u,p_e,p_h,p_i,p_m,p_s))
-            OUTSTR.write("%f\t%f\t%f\t%f\t%f\t%f\n" %(p_u,p_e,p_h,p_i,p_m,p_s))
+            OUTSTR.write("%f\t%f\t%f\t%f\t%f\n" %(p_e,p_h,p_i,p_m,p_s))
             if stats_dic:
                 if id2ucr_dic:
                     # If id2ucr_dic, record values only for uppercase part of sequence.
@@ -3481,6 +3484,82 @@ def dic_remove_entries(in_dic, filter_dic):
         if filter_id in in_dic:
             del in_dic[filter_id]
     return in_dic
+
+
+################################################################################
+
+def gtf_extract_unique_exon_bed(in_gtf, out_bed,
+                                use_ei_labels=False):
+    """
+    Given a .gtf file with exon features, extract exon unique (!) regions.
+    Since the Ensembl exon_id regions are not unique regarding their genomic
+    coordinates, create own IDs each representing one unique genomic region
+    (unique start+end+strand info).
+
+    Output .bed will look like this (column 4 ID == new exon ID):
+    chr1	1000	2000	NEXT1	0	+
+    chr1	3000	4000	NEXT2	0	+
+    chr1	8000	9000	NEXT3	0	-
+    chr1	6000	7000	NEXT4	0	-
+    ...
+
+    use_ei_labels:
+        Instead of using exon ID, just print "E" in column 4.
+
+    """
+
+    # Store exon ID region data.
+    reg_str_dic = {}
+
+    # Open GTF either as .gz or as text file.
+    if re.search(".+\.gz$", in_gtf):
+        f = gzip.open(in_gtf, 'rt')
+    else:
+        f = open(in_gtf, "r")
+    for line in f:
+        # Skip header.
+        if re.search("^#", line):
+            continue
+        cols = line.strip().split("\t")
+        chr_id = cols[0]
+        feature = cols[2]
+        feat_s = int(cols[3])
+        feat_e = int(cols[4])
+        feat_pol = cols[6]
+        infos = cols[8]
+        if not feature == "exon":
+            continue
+
+        # Restrict to standard chromosomes.
+        new_chr_id = check_convert_chr_id(chr_id)
+        if not new_chr_id:
+            continue
+        else:
+            chr_id = new_chr_id
+
+        # Make start coordinate 0-base (BED standard).
+        feat_s = feat_s - 1
+
+        # Store exon data.
+        check_reg_str = "%s,%i,%i,%s" %(chr_id,feat_s,feat_e,feat_pol)
+        reg_str_dic[check_reg_str] = 1
+
+    f.close()
+
+    # Output genomic exon regions.
+    OUTBED = open(out_bed, "w")
+
+    assert reg_str_dic, "no exon regions read in"
+
+    c_ex = 0
+    for reg_str in reg_str_dic:
+        cols = reg_str.split(",")
+        c_ex += 1
+        ex_id = "NEXT" + str(c_ex)
+        if use_ei_labels:
+            ex_id = "E"
+        OUTBED.write("%s\t%s\t%s\t%s\t0\t%s\n" % (cols[0], cols[1], cols[2], ex_id, cols[3]))
+    OUTBED.close()
 
 
 ################################################################################

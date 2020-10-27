@@ -119,16 +119,21 @@ def setup_argument_parser():
                    default = False,
                    action = "store_true",
                    help = "Add structural elements probabilities. Set --use-x to define which features to add on top of sequence feature (by default all --in features are used)")
-    p_trf.add_argument("--use-add-feat",
-                   dest = "use_add_feat",
-                   default = False,
-                   action = "store_true",
-                   help = "Add additional feature annotations. Set --use-x to define which features to add on top of sequence feature (by default all --in features are used)")
     p_trf.add_argument("--use-bps",
                    dest = "use_bps",
                    default = False,
                    action = "store_true",
                    help = "Add base pairs to graph. Set --use-x to define which features to add on top of sequence feature (by default all --in features are used)")
+    p_trf.add_argument("--use-add-feat",
+                   dest = "use_add_feat",
+                   default = False,
+                   action = "store_true",
+                   help = "Add additional feature annotations. Set --use-x to define which features to add on top of sequence feature (by default all --in features are used)")
+    p_trf.add_argument("--str-elem-1h",
+                   dest="str_elem_1h",
+                   default = False,
+                   action = "store_true",
+                   help = "Use one-hot encoding for structural elements probabilities (assign 1 to highest probability, and 0 to others) (default: False)")
     p_trf.add_argument("--bps-mode",
                    dest = "bps_mode",
                    type = int,
@@ -223,15 +228,15 @@ def setup_argument_parser():
                    type=float,
                    metavar='float',
                    nargs='+',
-                   default=[0.01, 0.001, 0.0001],
-                   help="List of learning rates for hyperparameter optimization (default: 0.001 0.0001)")
+                   default=[0.0001],
+                   help="List of learning rates for hyperparameter optimization (default: 0.0001)")
     p_tra.add_argument("--list-hidden-dim",
                    dest="list_node_hidden_dim",
                    type=int,
                    metavar='int',
                    nargs='+',
-                   default=[64, 128],
-                   help="List of node feature dimensions in hidden layers for hyperparameter optimization (default: 64 128)")
+                   default=[128],
+                   help="List of node feature dimensions in hidden layers for hyperparameter optimization (default: 128)")
     p_tra.add_argument("--incr-hidden-dim",
                    dest = "incr_hidden_dim",
                    default = False,
@@ -242,14 +247,14 @@ def setup_argument_parser():
                    type=float,
                    metavar='float',
                    nargs='+',
-                   default=[0.0, 0.001, 0.0001],
-                   help="List of weight decays for hyperparameter optimization (default: 0.0 0.0001 0.0005)")
+                   default=[0.001],
+                   help="List of weight decays for hyperparameter optimization (default: 0.001)")
     p_tra.add_argument("--list-dr",
                    dest="list_dr",
                    type=float,
                    metavar='float',
                    nargs='+',
-                   default=[0.5],
+                   default=[0.2],
                    help="List of dropout rates for hyperparameter optimization (default: 0.5)")
     p_tra.add_argument("--nr-hidden-layers",
                    dest = "nr_hidden_layers",
@@ -3792,7 +3797,7 @@ def main_gt(args):
         FEATOUT.write("fa\tC\tA,C,G,U\t-\n")
     if args.add_str:
         FEATOUT.write("bpp.str\tN\tbp_prob\tprob\n")
-        FEATOUT.write("elem_p.str\tN\tp_u,p_e,p_h,p_i,p_m,p_s\tprob\n")
+        FEATOUT.write("elem_p.str\tN\tp_e,p_h,p_i,p_m,p_s\tprob\n")
     if args.pc_bw:
         FEATOUT.write("pc.con\tN\tphastcons_score\tprob\n")
     if args.pp_bw:
