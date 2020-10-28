@@ -93,42 +93,42 @@ def setup_argument_parser():
                    dest = "use_pc_con",
                    default = False,
                    action = "store_true",
-                   help = "Add phastCons conservation scores. Set --use-x to define which features to add on top of sequence feature (by default all --in features are used)")
+                   help = "Add phastCons conservation scores. Set --use-xxx to define which features to add on top of sequence feature (by default all --in features are used)")
     p_trf.add_argument("--use-phylop",
                    dest = "use_pp_con",
                    default = False,
                    action = "store_true",
-                   help = "Add phyloP conservation scores. Set --use-x to define which features to add on top of sequence feature (by default all --in features are used)")
+                   help = "Add phyloP conservation scores. Set --use-xxx to define which features to add on top of sequence feature (by default all --in features are used)")
     p_trf.add_argument("--use-eia",
                    dest = "use_eia",
                    default = False,
                    action = "store_true",
-                   help = "Add exon-intron annotations. Set --use-x to define which features to add on top of sequence feature (by default all --in features are used)")
+                   help = "Add exon-intron annotations. Set --use-xxx to define which features to add on top of sequence feature (by default all --in features are used)")
     p_trf.add_argument("--use-tra",
                    dest = "use_tra",
                    default = False,
                    action = "store_true",
-                   help = "Add transcript region annotations. Set --use-x to define which features to add on top of sequence feature (by default all --in features are used)")
+                   help = "Add transcript region annotations. Set --use-xxx to define which features to add on top of sequence feature (by default all --in features are used)")
     p_trf.add_argument("--use-rra",
                    dest = "use_rra",
                    default = False,
                    action = "store_true",
-                   help = "Add repeat region annotations. Set --use-x to define which features to add on top of sequence feature (by default all --in features are used)")
+                   help = "Add repeat region annotations. Set --use-xxx to define which features to add on top of sequence feature (by default all --in features are used)")
     p_trf.add_argument("--use-str-elem-p",
                    dest = "use_str_elem_p",
                    default = False,
                    action = "store_true",
-                   help = "Add structural elements probabilities. Set --use-x to define which features to add on top of sequence feature (by default all --in features are used)")
+                   help = "Add structural elements probabilities. Set --use-xxx to define which features to add on top of sequence feature (by default all --in features are used)")
     p_trf.add_argument("--use-bps",
                    dest = "use_bps",
                    default = False,
                    action = "store_true",
-                   help = "Add base pairs to graph. Set --use-x to define which features to add on top of sequence feature (by default all --in features are used)")
+                   help = "Add base pairs to graph. Set --use-xxx to define which features to add on top of sequence feature (by default all --in features are used)")
     p_trf.add_argument("--use-add-feat",
                    dest = "use_add_feat",
                    default = False,
                    action = "store_true",
-                   help = "Add additional feature annotations. Set --use-x to define which features to add on top of sequence feature (by default all --in features are used)")
+                   help = "Add additional feature annotations. Set --use-xxx to define which features to add on top of sequence feature (by default all --in features are used)")
     p_trf.add_argument("--str-elem-1h",
                    dest="str_elem_1h",
                    default = False,
@@ -255,7 +255,7 @@ def setup_argument_parser():
                    metavar='float',
                    nargs='+',
                    default=[0.2],
-                   help="List of dropout rates for hyperparameter optimization (default: 0.5)")
+                   help="List of dropout rates for hyperparameter optimization (default: 0.2 (for --undirected 0.3))")
     p_tra.add_argument("--nr-hidden-layers",
                    dest = "nr_hidden_layers",
                    type = int,
@@ -607,6 +607,21 @@ def setup_argument_parser():
                    metavar='int',
                    default = 150,
                    help = "RNAplfold -W parameter value (default: 150)")
+    p_gta.add_argument("--feat-in",
+                   dest="feat_in",
+                   type=str,
+                   metavar='str',
+                   help = "Provide tabular file with additional position-wise genomic region features (infos and paths to BED files) to add")
+    p_gta.add_argument("--feat-in-1h",
+                   dest="feat_in_1h",
+                   default = False,
+                   action = "store_true",
+                   help = "Use one-hot encoding for all additional position-wise features from --feat-in table, ignoring table type definitions (default: False)")
+    p_gta.add_argument("--feat-in-norm",
+                   dest="feat_in_norm",
+                   default = False,
+                   action = "store_true",
+                   help = "Normalize feature values (min-max normalization (0..1) of --feat-in features. --feat-in table column 3 information further controls feature normalization (default: False)")
 
     """
     Test / prediction set generation mode.
@@ -857,7 +872,9 @@ def main_train(args):
     if nr_hp_comb == 1:
         run_hpo = False
         print("# HP combinations to test == 1. No HP optimization needed ...")
-
+        # In case of one combination, set list_dr to 0.3.
+        if args.undirected:
+            args.list_dr[0] = 0.3
 
     """
     Run cross validation (--gen-cv, --gen-cv-k) to estimate generalization
@@ -3081,6 +3098,25 @@ def main_gt(args):
         assert args.exon_intron_annot, "--eia-ib requires --eia to be effective"
     if args.exon_intron_n:
         assert args.exon_intron_annot, "--eia-n requires --eia to be effective"
+    # Additional feature checks.
+    if args.feat_in_1h and not args.feat_in:
+        assert False, "--feat-in-1h requires --feat-in"
+    if args.feat_in_norm and not args.feat_in:
+        assert False, "--feat-in-norm requires --feat-in"
+    if args.feat_in:
+        assert gp2lib.bed_check_six_col_format(args.feat_in, nr_cols=4), "--feat-in table file: 4 columns (data ID, data type, BED path) expected"
+        # Check feature ID lengths and BED file paths.
+        max_feat_id_len = 20
+        with open(args.feat_in) as f:
+            for line in f:
+                row = line.strip()
+                cols = line.strip().split("\t")
+                feat_id = cols[0]
+                bed_file = cols[3]
+                assert len(feat_id) <= max_feat_id_len, "in --feat-in: column 1 feature ID \"%s\" length > 20 encountered (use shorter ID length)" %(feat_id)
+                assert os.path.exists(bed_file), "--feat-in column 4 BED file \"%s\" does not exist" %(bed_file)
+        f.closed
+
 
     # If --in column 4 IDs should be kept, check their uniqueness.
     if args.keep_ids:
@@ -3771,6 +3807,7 @@ def main_gt(args):
     neg_tra_stats_dic = None
     pos_rra_stats_dic = None
     neg_rra_stats_dic = None
+    add_feat_dic_list = None
     if args.report and args.add_str:
         pos_str_stats_dic = {}
         neg_str_stats_dic = {}
@@ -3826,7 +3863,6 @@ def main_gt(args):
         FEATOUT.write("eia\tC\t%s\t-\n" %(lls))
     if args.rep_reg_annot:
         FEATOUT.write("rra\tC\tN,R\t-\n")
-    FEATOUT.close()
 
     """
     1) Secondary structure features.
@@ -3986,7 +4022,7 @@ def main_gt(args):
                                             id2ucr_dic=id2ucr_dic,
                                             codon_annot=args.tr_reg_codon_annot,
                                             border_annot=args.tr_reg_border_annot,
-                                            merge_split_regions=True)
+                                            mergepos_str_stats_dic_split_regions=True)
         gp2lib.bed_get_transcript_annotations_from_gtf(tr_ids_dic,
                                             neg_transcript_to_genome_bed,
                                             args.in_gtf, neg_tra_out,
@@ -4098,6 +4134,115 @@ def main_gt(args):
 
 
     """
+    6) Additional BED features.
+
+    Feature ID (column 1):
+    Up to 20 characters, ID for features, used as file ending
+    Feature type (column 2):
+    C (categorical), N (numerical)
+    Feature format (column 3):
+        0 (treat feature as categorical == no normalization, do not change values)
+        1 (col5 value == score), meaning apply min-max normalization
+        2 (col5 value == p-value)
+    Feature BED file path (column 4):
+    Path to BED file to annotate feature regions.
+
+    """
+    if args.feat_in:
+
+        print("Extracting additional BED features from --feat-in ... ")
+
+        # Store dataset infos.
+        fids_dic = {}
+        fid2type_dic = {} # C,N
+        fid2format_dic = {} # 0,1,2
+        fid2path_dic = {}
+        # Read in infos.
+        with open(args.feat_in) as f:
+            for line in f:
+                row = line.strip()
+                cols = line.strip().split("\t")
+                feat_id = cols[0]
+                feat_type = cols[1]
+                feat_format = int(cols[2])
+                bed_path = cols[3]
+                # Convert to valid file ending.
+                new_feat_id = gp2lib.get_valid_file_ending(feat_id)
+                if feat_id != new_feat_id:
+                    print("Converted feature ID \"%s\" to \"%s\" to have valid file ending" %(feat_id, new_feat_id))
+                assert new_feat_id not in fids_dic, "non-unique feature ID \"%s\" in --feat-in table file" %(new_feat_id)
+                fids_dic[new_feat_id] = 1
+                fid2type_dic[new_feat_id] = feat_type
+                fid2format_dic[new_feat_id] = feat_format
+                fid2path_dic[new_feat_id] = bed_path
+        f.closed
+        assert fids_dic, "no features read in from --feat-in table"
+
+        if args.report:
+            add_feat_dic_list = []
+
+        for feat_id in fids_dic:
+            bed_path = fid2path_dic[feat_id]
+            feat_type = fid2type_dic[feat_id]
+            feat_format = fid2format_dic[feat_id]
+            p_values = False
+            if feat_format == 2:
+                p_values = True
+            # If all BED features should be treated as one-hot.
+            if args.feat_in_1h:
+                feat_type = "C"
+            # Output feature info.
+            if feat_type == "C":
+                FEATOUT.write("%s\tC\t0,1\tone_hot\n" %(feat_id))
+            else:
+                if feat_format:
+                    if p_values:
+                        FEATOUT.write("%s\tN\tbed_score\tprob\n" %(feat_id))
+                    else:
+                        FEATOUT.write("%s\tN\tbed_score\tminmax_norm\n" %(feat_id))
+                else:
+                    FEATOUT.write("%s\tN\tbed_score\t-\n" %(feat_id))
+
+            # Stats dictionaries.
+            pos_stats_dic = None
+            neg_stats_dic = None
+            if args.report:
+                pos_stats_dic = {}
+                neg_stats_dic = {}
+
+            print("Extracting \"%s\" feature ... " %(feat_id))
+
+            # Training set.
+            pos_feat_out = args.out_folder + "/" + "positives." + feat_id
+            gp2lib.bed_get_feature_annotations(pos_bed_out, bed_path, pos_feat_out,
+                                               feat_type=feat_type,
+                                               stats_dic=pos_stats_dic,
+                                               disable_pol=disable_pol)
+            # Add additional stats to pos_stats_dic.
+            if args.report:
+                pos_stats_dic["set"] = "positives"
+                pos_stats_dic["feat_id"] = feat_id
+                add_feat_dic_list.append(pos_stats_dic)
+            neg_feat_out = args.out_folder + "/" + "negatives." + feat_id
+            gp2lib.bed_get_feature_annotations(neg_bed_out, bed_path, neg_feat_out,
+                                               feat_type=feat_type,
+                                               stats_dic=neg_stats_dic,
+                                               disable_pol=disable_pol)
+            # Add additional stats to neg_stats_dic.
+            if args.report:
+                neg_stats_dic["set"] = "negatives"
+                neg_stats_dic["feat_id"] = feat_id
+                add_feat_dic_list.append(neg_stats_dic)
+            # Normalize feature values.
+            if args.feat_in_norm and feat_format and feat_type == "N":
+                print("Min-max normalizing \"%s\" feature values ... " %(feat_id))
+                gp2lib.feat_min_max_norm_train_scores(pos_feat_out, neg_feat_out,
+                                                      p_values=p_values,
+                                                      int_whole_nr=True)
+
+    FEATOUT.close()
+
+    """
     Generate HTML report including various training dataset statistics.
 
     """
@@ -4164,6 +4309,7 @@ def main_gt(args):
                                            neg_tra_stats_dic=neg_tra_stats_dic,
                                            pos_rra_stats_dic=pos_rra_stats_dic,
                                            neg_rra_stats_dic=neg_rra_stats_dic,
+                                           add_feat_dic_list=add_feat_dic_list,
                                            target_gbtc_dic=target_gbtc_dic,
                                            all_gbtc_dic=all_gbtc_dic,
                                            t2hc_dic=t2hc_dic,

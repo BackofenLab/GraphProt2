@@ -7379,6 +7379,7 @@ def gp2_gt_generate_html_report(pos_seqs_dic, neg_seqs_dic, out_folder,
                                 neg_tra_stats_dic=False,
                                 pos_rra_stats_dic=False,
                                 neg_rra_stats_dic=False,
+                                add_feat_dic_list=False,
                                 target_gbtc_dic=False,
                                 all_gbtc_dic=False,
                                 t2hc_dic=False,
@@ -7411,6 +7412,10 @@ def gp2_gt_generate_html_report(pos_seqs_dic, neg_seqs_dic, out_folder,
         Positive set phastcons scores statistics dictionary
     neg_phastcons_stats_dic:
         Negative set phastcons scores statistics dictionary
+    add_feat_dic_list:
+        List of dictionaries with additional BED feature statistics,
+        where positive and corresponding negative set are stored together,
+        so indices 1,2 3,4 5,6 ... belong together (positive stats dic first).
     out_folder:
         graphprot2 gt results output folder, to store report in.
     rna:
@@ -7440,6 +7445,11 @@ def gp2_gt_generate_html_report(pos_seqs_dic, neg_seqs_dic, out_folder,
     assert dataset_type in ds_types, "invalid dataset type given (expected g, s, or t)"
     # Import markdown to generate report.
     from markdown import markdown
+
+    # Checks.
+    if add_feat_dic_list:
+        if len(add_feat_dic_list) % 2:
+            assert False, "even number of dictionaries expected for given add_feat_dic_list"
 
     # Output subfolder for plots.
     plots_folder = plots_subfolder
@@ -7651,6 +7661,10 @@ by GraphProt2 (graphprot2 gt):
     if t2hc_dic and t2i_dic:
         mdtext += "\n"
         mdtext += "- [Target region overlap statistics](#tro-stats)"
+    if add_feat_dic_list:
+        mdtext += "\n"
+        mdtext += "- [BED feature statistics](#bed-stats)\n"
+        mdtext += "- [BED feature coverage distribution](#bed-plot)"
     mdtext += "\n&nbsp;\n"
 
     # Make general stats table.
@@ -8155,6 +8169,123 @@ overlapping with the region.
             mdtext += "| ... | &nbsp; | &nbsp; |  &nbsp; |\n"
             mdtext += "\n&nbsp;\n&nbsp;\n"
 
+    # Additional BED annotations.
+    if add_feat_dic_list:
+        mdtext += """
+## BED feature statistics ### {#bed-stats}
+
+Additional BED annotation feature statistics (from --feat-in table) for the
+positive and negative dataset.
+
+"""
+        pos_cov_dic = {}
+        neg_cov_dic = {}
+        for i in range(0, len(add_feat_dic_list) - 1, 2):
+            pos_stats_dic = add_feat_dic_list[i]
+            neg_stats_dic = add_feat_dic_list[i+1]
+            feat_id = pos_stats_dic["feat_id"]
+            feat_type = pos_stats_dic["feat_type"]
+            pos_total_pos = pos_stats_dic["total_pos"]
+            neg_total_pos = neg_stats_dic["total_pos"]
+            pos_perc_zero_sites = "%.2f" % ((pos_stats_dic['zero_sites'] / pos_stats_dic['total_sites'])*100) + " %"
+            neg_perc_zero_sites = "%.2f" % ((neg_stats_dic['zero_sites'] / neg_stats_dic['total_sites'])*100) + " %"
+            if feat_type == "C":
+                pos_c_0 = pos_stats_dic["0"]
+                pos_c_1 = pos_stats_dic["1"]
+                neg_c_0 = neg_stats_dic["0"]
+                neg_c_1 = neg_stats_dic["1"]
+                pos_perc_0 = "%.2f" % ((pos_c_0 / pos_total_pos)*100) + " %"
+                pos_perc_1 = "%.2f" % ((pos_c_1 / pos_total_pos)*100) + " %"
+                neg_perc_0 = "%.2f" % ((neg_c_0 / neg_total_pos)*100) + " %"
+                neg_perc_1 = "%.2f" % ((neg_c_1 / neg_total_pos)*100) + " %"
+            else:
+                pos_mean = pos_stats_dic["mean"]
+                pos_stdev = pos_stats_dic["stdev"]
+                neg_mean = neg_stats_dic["mean"]
+                neg_stdev = neg_stats_dic["stdev"]
+                pos_c_0 = pos_stats_dic["zero_pos"]
+                neg_c_0 = neg_stats_dic["zero_pos"]
+                pos_c_1 = pos_total_pos - pos_c_0
+                neg_c_1 = neg_total_pos - neg_c_0
+                pos_perc_0 = "%.2f" % ((pos_c_0 / pos_total_pos)*100) + " %"
+                pos_perc_1 = "%.2f" % ((pos_c_1 / pos_total_pos)*100) + " %"
+                neg_perc_0 = "%.2f" % ((neg_c_0 / neg_total_pos)*100) + " %"
+                neg_perc_1 = "%.2f" % ((neg_c_1 / neg_total_pos)*100) + " %"
+
+            # Store feature coverage (percentage of positions overlapping).
+            pos_feat_cov = (pos_c_1 / pos_total_pos) * 100
+            neg_feat_cov = (neg_c_1 / neg_total_pos) * 100
+            pos_cov_dic[feat_id] = pos_feat_cov
+            neg_cov_dic[feat_id] = neg_feat_cov
+
+            mdtext += """
+### BED annotation file feature \"%s\" statistics
+
+""" %(feat_id)
+
+            if feat_type == "C":
+                mdtext += """
+
+**Table:** BED feature region length + score statistics for the
+positive and negative set.
+Feature type is one-hot encoding, i.e., every overlapping position
+gets a 1 assigned, every not overlapping position a 0.
+
+"""
+            else:
+                mdtext += """
+
+**Table:** BED feature region length + score statistics for the
+positive and negative set.
+Feature type is numerical, i.e., every position gets the score of the
+overlapping feature region assigned. In case of no feature region overlap,
+the position gets a score of 0.
+
+"""
+            mdtext += "| &nbsp; Attribute &nbsp; | &nbsp; Positives &nbsp; | &nbsp; Negatives &nbsp; |\n"
+            mdtext += "| :-: | :-: | :-: |\n"
+            mdtext += "| mean length | %.2f (+-%.2f) | %.2f (+-%.2f) |\n" %(pos_stats_dic["mean_l"], pos_stats_dic["stdev_l"], neg_stats_dic["mean_l"], neg_stats_dic["stdev_l"])
+            mdtext += "| median length | %i | %i |\n" %(pos_stats_dic["median_l"], neg_stats_dic["median_l"])
+            mdtext += "| min length | %i | %i |\n" %(pos_stats_dic["min_l"], neg_stats_dic["min_l"])
+            mdtext += "| max length | %i | %i |\n" %(pos_stats_dic["max_l"], neg_stats_dic["max_l"])
+            if feat_type == "C":
+                mdtext += "| # total positions | %i | %i |\n" %(pos_total_pos, neg_total_pos)
+                mdtext += "| # 0 positions | %i (%s) | %i (%s) |\n" %(pos_c_0, pos_perc_0, neg_c_0, neg_perc_0)
+                mdtext += "| # 1 positions | %i (%s) | %i (%s) |\n" %(pos_c_1, pos_perc_1, neg_c_1, neg_perc_1)
+                mdtext += '| % all-zero sites |' + " %s | %s |\n" %(pos_perc_zero_sites, neg_perc_zero_sites)
+            else:
+                mdtext += "| # total positions | %i | %i |\n" %(pos_total_pos, neg_total_pos)
+                mdtext += "| # 0 positions | %i (%s) | %i (%s) |\n" %(pos_c_0, pos_perc_0, neg_c_0, neg_perc_0)
+                mdtext += "| # non-0 positions | %i (%s) | %i (%s) |\n" %(pos_c_1, pos_perc_1, neg_c_1, neg_perc_1)
+                mdtext += '| % all-zero sites |' + " %s | %s |\n" %(pos_perc_zero_sites, neg_perc_zero_sites)
+                mdtext += "| mean score | %.3f (+-%.3f) | %.3f (+-%.3f) |\n" %(pos_mean, pos_stdev, neg_mean, neg_stdev)
+            mdtext += "\n&nbsp;\n&nbsp;\n"
+
+        # Create additional BED features coverage plot.
+        mdtext += """
+## BED feature coverage distribution ### {#bed-plot}
+
+Additional BED feature coverage distributions for the
+positive and negative dataset.
+
+"""
+        create_train_set_bed_feat_cov_plot(pos_cov_dic, neg_cov_dic,
+                                           bed_cov_plot_out,
+                                           theme=args.theme)
+        bed_cov_plot_path = plots_folder + "/" + bed_cov_plot
+        mdtext += '<img src="' + bed_cov_plot_path + '" alt="BED feature coverage distribution"' + "\n"
+        mdtext += 'title="BED feature coverage distribution" width="800" />' + "\n"
+        mdtext += """
+**Figure:** Additional BED feature coverage distributions for the
+positive and negative dataset. Feature coverage means how much
+percent of the positive or negative regions are covered by the
+respective BED feature (i.e., overlap with it). The BED feature
+IDs from --feat-in are given on the y-axis, their coverage on the
+x-axis.
+
+&nbsp;
+
+"""
 
     print("Generate HTML report ... ")
 
@@ -8168,6 +8299,91 @@ overlapping with the region.
     OUTHTML = open(html_out,"w")
     OUTHTML.write("%s\n" %(md2html))
     OUTHTML.close()
+
+
+################################################################################
+
+def create_train_set_bed_feat_cov_plot(pos_cov_dic, neg_cov_dic, out_plot,
+                                       theme=1):
+    """
+    Create a grouped bar plot, showing the coverage for each BED feature
+    from --feat-in over the positive and negative set. Coverage means
+    how much percentage of the positive or negative regions are covered
+    by the BED feature (== overlap with it).
+    Input dictionaries for positives (pos_cov_dic) and negatives
+    (neg_cov_dic) store for each feature ID (key) the coverage of
+    the feature in percent (value).
+    Create a dataframe using Pandas, and use seaborn for plotting.
+    Store plot in out_plot.
+
+    MV colors:
+    #69e9f6, #f154b2
+
+    """
+
+    # Checker.
+    assert pos_cov_dic, "given dictionary pos_cov_dic empty"
+    assert neg_cov_dic, "given dictionary neg_cov_dic empty"
+    # Make pandas dataframe.
+    pos_label = "Positives"
+    neg_label = "Negatives"
+    data = {'set': [], 'feat_id': [], 'perc': []}
+
+    for feat_id in pos_cov_dic:
+        data['set'].append(pos_label)
+        data['feat_id'].append(feat_id)
+        data['perc'].append(pos_cov_dic[feat_id])
+    for feat_id in neg_cov_dic:
+        data['set'].append(neg_label)
+        data['feat_id'].append(feat_id)
+        data['perc'].append(neg_cov_dic[feat_id])
+    df = pd.DataFrame (data, columns = ['set','feat_id', 'perc'])
+
+    # Scale height depending on # of features.
+    c_ids = len(pos_cov_dic)
+    fheight = 1.5 * c_ids
+
+    if theme == 1:
+        # Make plot.
+        sns.set(style="darkgrid")
+        g = sns.catplot(x="perc", y="feat_id", hue="set", data=df,
+                        kind="bar", palette=["#69e9f6", "#f154b2"],
+                        edgecolor="lightgrey",
+                        legend=False)
+        g.fig.set_figwidth(15)
+        g.fig.set_figheight(fheight)
+        # Modify axes.
+        ax = g.axes
+        ax[0,0].set_xlabel("Feature coverage (%)",fontsize=20)
+        ax[0,0].set(ylabel=None)
+        ax[0,0].tick_params(axis='x', labelsize=16)
+        ax[0,0].tick_params(axis='y', labelsize=20)
+        # Add legend at specific position.
+        plt.legend(loc=(1.01, 0.4), fontsize=16)
+        g.savefig(out_plot, dpi=100, bbox_inches='tight')
+
+    elif theme == 2:
+        text_color = "#fcc826"
+        plot_color = "#fd3b9d"
+        box_color = "#2f19f3"
+        # Make plot.
+        sns.set(style="darkgrid", rc={ "axes.labelcolor": text_color, "text.color": text_color, "xtick.color": text_color, "ytick.color": text_color, "grid.color": plot_color, "axes.edgecolor": plot_color})
+
+        g = sns.catplot(x="perc", y="feat_id", hue="set", data=df,
+                        kind="bar", palette=["blue", "darkblue"],
+                        edgecolor="#fcc826",
+                        legend=False)
+        g.fig.set_figwidth(15)
+        g.fig.set_figheight(fheight)
+        # Modify axes.
+        ax = g.axes
+        ax[0,0].set_xlabel("Percentage (%)",fontsize=20)
+        ax[0,0].set(ylabel=None)
+        ax[0,0].tick_params(axis='x', labelsize=16)
+        ax[0,0].tick_params(axis='y', labelsize=20)
+        # Add legend at specific position.
+        plt.legend(loc=(1.01, 0.4), fontsize=16, framealpha=0)
+        g.savefig(out_plot, dpi=100, bbox_inches='tight', transparent=True)
 
 
 ################################################################################
@@ -8726,6 +8942,355 @@ def phylop_norm_train_scores(pos_pp_con_out, neg_pp_con_out,
                 else:
                     OUTN.write("%s\n" %(str(pp_sc_norm)))
     OUTN.close()
+
+
+################################################################################
+
+def feat_min_max_norm_train_scores(pos_feat_out, neg_feat_out,
+                                   p_values=False,
+                                   dec_round=4,
+                                   int_whole_nr=True):
+    """
+    Read in feature files for positive and negative set, min max normalize
+    values, and overwrite (!) existing feature files.
+    Min max normalization resulting in new scores from 0 to 1.
+
+    p_values:
+        If True, treat scores as p-values, i.e., normalized score
+        == 1 - score
+    int_whole_nr:
+        If True, output whole numbers without decimal places.
+
+    """
+    pos_sc_dic = {}
+    neg_sc_dic = {}
+    site_id = ""
+    sc_max = -1000000
+    sc_min = 1000000
+
+    # Read in positive scores.
+    with open(pos_feat_out) as f:
+        for line in f:
+            if re.search(">.+", line):
+                m = re.search(">(.+)", line)
+                site_id = m.group(1)
+                pos_sc_dic[site_id] = []
+            else:
+                sc = float(line.strip())
+                pos_sc_dic[site_id].append(sc)
+                if sc > sc_max:
+                    sc_max = sc
+                if sc < sc_min:
+                    sc_min = sc
+    f.closed
+    assert pos_sc_dic, "no entries read into pos_sc_dic dictionary"
+
+    # Read in negative scores.
+    with open(neg_feat_out) as f:
+        for line in f:
+            if re.search(">.+", line):
+                m = re.search(">(.+)", line)
+                site_id = m.group(1)
+                neg_sc_dic[site_id] = []
+            else:
+                sc = float(line.strip())
+                neg_sc_dic[site_id].append(sc)
+                if sc > sc_max:
+                    sc_max = sc
+                if sc < sc_min:
+                    sc_min = sc
+    f.closed
+    assert neg_sc_dic, "no entries read into neg_sc_dic dictionary"
+
+    # Min max normalize positive scores and output to original file.
+    OUTP = open(pos_feat_out,"w")
+    for site_id in pos_sc_dic:
+        OUTP.write(">%s\n" %(site_id))
+        for sc in pos_sc_dic[site_id]:
+            if sc == 0:
+                OUTP.write("0\n")
+            else:
+                if p_values:
+                    sc_norm = 1 - sc
+                else:
+                    sc_norm = min_max_normalize(sc, sc_max, sc_min)
+                sc_norm = round(sc_norm, dec_round)
+                if int_whole_nr and not sc_norm % 1:
+                    OUTP.write("%i\n" %(int(sc_norm)))
+                else:
+                    OUTP.write("%s\n" %(str(sc_norm)))
+    OUTP.close()
+
+    # Min max normalize negative scores and output to original file.
+    OUTN = open(neg_feat_out,"w")
+    for site_id in neg_sc_dic:
+        OUTN.write(">%s\n" %(site_id))
+        for sc in neg_sc_dic[site_id]:
+            if sc == 0:
+                OUTN.write("0\n")
+            else:
+                if p_values:
+                    sc_norm = 1 - sc
+                else:
+                    sc_norm = min_max_normalize(sc, sc_max, sc_min)
+                sc_norm = round(sc_norm, dec_round)
+                if int_whole_nr and not sc_norm % 1:
+                    OUTN.write("%i\n" %(int(sc_norm)))
+                else:
+                    OUTN.write("%s\n" %(str(sc_norm)))
+    OUTN.close()
+
+
+################################################################################
+
+def bed_get_feature_annotations(in_bed, feat_bed, feat_out,
+                                feat_type="C",
+                                stats_dic=None,
+                                disable_pol=False):
+
+    """
+    Overlap in_bed with feat_bed, and annotate overlapping regions
+    depending on set feat_type (C, N).
+    C: categorical, one-hot, store 1 for overlapping position and
+    0 for not overlapping position.
+    N: numerical, i.e., use column 5 feat_bed score to store as score
+    for each overlapping position, and 0 for not overlapping position.
+    Store feature file to feat_out.
+
+    Format of feat_out file depends on feat_type:
+    if "C":
+    id1<tab>00000111111 ...
+    if "N":
+    >id1
+    value1
+    value2
+    ...
+
+    in_bed:
+        Input BED regions, annotate each position.
+    feat_bed:
+        Feature BED regions, use for annotating in_bed positions.
+    feat_out:
+        Output feature annotation file. Format depends on feat_type.
+    feat_type:
+        "C" for categorical, or "N" for numerical output annotations.
+    disable_pol:
+        If yes, disable strandedness (== do not set -s in intersectBed),
+        i.e., do not differentiate between strands when adding
+        annotations.
+
+    >>> in_bed = "test_data/feat_in.bed"
+    >>> feat_bed_old_nick = "test_data/feat_old_nick.bed"
+    >>> feat_bed_feat_666 = "test_data/feat_666.bed"
+    >>> old_nick_exp1 = "test_data/feat_old_nick_1.exp.out"
+    >>> old_nick_exp2 = "test_data/feat_old_nick_2.exp.out"
+    >>> feat_666_exp1 = "test_data/feat_666_1.exp.out"
+    >>> feat_666_exp2 = "test_data/feat_666_2.exp.out"
+    >>> old_nick_out = "test_data/test.tmp.old_nick"
+    >>> feat_666_out = "test_data/test.tmp.feat_666"
+    >>> bed_get_feature_annotations(in_bed, feat_bed_old_nick, old_nick_out, feat_type="C", disable_pol=True)
+    >>> diff_two_files_identical(old_nick_out, old_nick_exp1)
+    True
+    >>> bed_get_feature_annotations(in_bed, feat_bed_feat_666, feat_666_out, feat_type="N", disable_pol=True)
+    >>> diff_two_files_identical(feat_666_out, feat_666_exp1)
+    True
+    >>> bed_get_feature_annotations(in_bed, feat_bed_old_nick, old_nick_out, feat_type="C", disable_pol=False)
+    >>> diff_two_files_identical(old_nick_out, old_nick_exp2)
+    True
+    >>> bed_get_feature_annotations(in_bed, feat_bed_feat_666, feat_666_out, feat_type="N", disable_pol=False)
+    >>> diff_two_files_identical(feat_666_out, feat_666_exp2)
+    True
+
+    """
+    # Checks.
+    ftl = ["C", "N"]
+    assert feat_type in ftl, "invalid feat_type given (allowed: C,N)"
+
+    # Temp overlap results file.
+    random_id = uuid.uuid1()
+    tmp_out = str(random_id) + ".tmp.out"
+
+    if stats_dic is not None:
+        stats_dic["total_pos"] = 0
+        stats_dic["feat_type"] = feat_type
+        stats_dic["zero_sites"] = 0
+        stats_dic["total_sites"] = 0
+        stats_dic["mean_l"] = 0
+        stats_dic["median_l"] = 0
+        stats_dic["min_l"] = 0
+        stats_dic["max_l"] = 0
+        stats_dic["stdev_l"] = 0
+        if feat_type == "C":
+            stats_dic["0"] = 0
+            stats_dic["1"] = 0
+        else:
+            stats_dic["mean"] = 0
+            stats_dic["stdev"] = 0
+            stats_dic["zero_pos"] = 0
+            # Value list.
+            v_list = []
+        # BED region lengths list.
+        len_list = []
+
+    # Read in in_bed, store start + end coordinates.
+    id2s_dic = {}
+    id2e_dic = {}
+    # Store positional values list for each site in dic.
+    id2vl_dic = {}
+    with open(in_bed) as f:
+        for line in f:
+            row = line.strip()
+            cols = line.strip().split("\t")
+            site_s = int(cols[1])
+            site_e = int(cols[2])
+            site_id = cols[3]
+            assert site_id not in id2s_dic, "non-unique site ID \"%s\" in in_bed" %(site_id)
+            id2s_dic[site_id] = site_s
+            id2e_dic[site_id] = site_e
+            site_l = site_e - site_s
+            id2vl_dic[site_id] = ["0"]*site_l
+    f.closed
+    assert id2s_dic, "given in_bed \"%s\" empty?" %(in_bed)
+
+    # Store feature region lengths.
+    if stats_dic:
+        with open(feat_bed) as f:
+            for line in f:
+                row = line.strip()
+                cols = line.strip().split("\t")
+                site_s = int(cols[1])
+                site_e = int(cols[2])
+                site_l = site_e - site_s
+                len_list.append(site_l)
+        f.closed
+
+    # Run overlap calculation to get overlapping regions.
+    intersect_params = "-s -wb"
+    if disable_pol:
+        intersect_params = "-wb"
+    intersect_bed_files(in_bed, feat_bed, intersect_params, tmp_out)
+
+    # Get annotations.
+    with open(tmp_out) as f:
+        for line in f:
+            row = line.strip()
+            cols = line.strip().split("\t")
+            s = int(cols[1]) + 1 # Make one-based.
+            e = int(cols[2])
+            site_id = cols[3]
+            site_s = id2s_dic[site_id] + 1 # Make one-based.
+            site_e = id2e_dic[site_id]
+            site_pol = cols[5]
+            score = cols[10]
+            # + case.
+            if site_pol == "+" or disable_pol:
+                for i in range(site_s, site_e+1):
+                    if i >= s and i <= e:
+                        # Get list index.
+                        li = i - site_s
+                        if feat_type == "C":
+                            id2vl_dic[site_id][li] = "1"
+                        else:
+                            id2vl_dic[site_id][li] = score
+            else:
+                for i in range(site_s, site_e+1):
+                    if i >= s and i <= e:
+                        # Get list index.
+                        li = site_e - i
+                        if feat_type == "C":
+                            id2vl_dic[site_id][li] = "1"
+                        else:
+                            id2vl_dic[site_id][li] = score
+    f.closed
+
+    # Output annotations to file.
+    OUTLAB = open(feat_out,"w")
+
+    # Output labels for each site.
+    for site_id in id2vl_dic:
+        if feat_type == "C":
+            # List to string.
+            label_str = "".join(id2vl_dic[site_id])
+            OUTLAB.write("%s\t%s\n" %(site_id, label_str))
+            if stats_dic:
+                stats_dic["total_sites"] += 1
+                site_0 = True
+                for v in id2vl_dic[site_id]:
+                    stats_dic[v] += 1
+                    if v == "1":
+                        site_0 = False
+                    stats_dic["total_pos"] += 1
+                if site_0:
+                    stats_dic["zero_sites"] += 1
+        else:
+            OUTLAB.write(">%s\n" %(site_id))
+            site_0 = True
+            for v in id2vl_dic[site_id]:
+                OUTLAB.write("%s\n" %(v))
+                if stats_dic:
+                    v_list.append(float(v))
+                    if v == "0":
+                        stats_dic["zero_pos"] += 1
+                    else:
+                        site_0 = False
+            if stats_dic:
+                stats_dic["total_sites"] += 1
+                if site_0:
+                    stats_dic["zero_sites"] += 1
+    OUTLAB.close()
+
+    # Additional stats if feat_type numerical.
+    if stats_dic:
+        if feat_type == "N":
+            assert v_list, "no values stored in v_list"
+            stats_dic["mean"] = statistics.mean(v_list)
+            stats_dic["stdev"] = statistics.stdev(v_list)
+            stats_dic["total_pos"] = len(v_list)
+
+        assert len_list, "no lengths stored in length list"
+        stats_dic["mean_l"] = statistics.mean(len_list)
+        stats_dic["median_l"] = statistics.median(len_list)
+        stats_dic["stdev_l"] = statistics.stdev(len_list)
+        stats_dic["max_l"] = max(len_list)
+        stats_dic["min_l"] = min(len_list)
+
+    # Take out the trash.
+    litter_street = True
+    if litter_street:
+        if os.path.exists(tmp_out):
+            os.remove(tmp_out)
+
+
+################################################################################
+
+def get_valid_file_ending(s):
+    """
+    Modified after:
+    https://stackoverflow.com/questions/295135/turn-a-string-into-a-valid-filename
+
+    def get_valid_filename(s):
+        s = str(s).strip().replace(' ', '_')
+        return re.sub(r'(?u)[^-\w.]', '', s)
+
+    In addition, start and end of file ending should start with word or
+    number.
+
+    >>> s = "___.hallole123.so_hallole123.___"
+    >>> get_valid_file_ending(s)
+    'hallole123.so_hallole123'
+    >>> get_valid_file_ending("john's new arctic warfare")
+    'johns_new_arctic_warfare'
+
+    """
+    assert s, "given s empty"
+    # Strip and replace spaces with _.
+    s = str(s).strip().replace(' ', '_')
+    # Remove non-word characters from start and end.
+    m = re.search('\W*([a-zA-Z0-9].+[a-zA-Z0-9])\W*', s)
+    if m:
+        return re.sub(r'(?u)[^-\w.]', '', m.group(1))
+    else:
+        return re.sub(r'(?u)[^-\w.]', '', s)
 
 
 ################################################################################
