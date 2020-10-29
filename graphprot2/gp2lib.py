@@ -10220,22 +10220,33 @@ def load_training_data(args,
             assert os.path.exists(pos_feat_in), "--in folder does not contain %s"  %(pos_feat_in)
             assert os.path.exists(neg_feat_in), "--in folder does not contain %s"  %(neg_feat_in)
             print("Read in .%s annotations ... " %(fid))
+            n_to_1h = False
+            # Special case: convert elem_p.str probabilities to 1-hot encoding.
+            if fid == "elem_p.str" and args.str_elem_1h:
+                n_to_1h = True
             feat_dic = read_feat_into_dic(pos_feat_in, ftype,
                                           feat_dic=feat_dic,
+                                          n_to_1h=n_to_1h,
                                           label_list=feat_alphabet)
             feat_dic = read_feat_into_dic(neg_feat_in, ftype,
                                           feat_dic=feat_dic,
+                                          n_to_1h=n_to_1h,
                                           label_list=feat_alphabet)
             assert feat_dic, "no .%s information read in (feat_dic empty)" %(fid)
+            if fid == "elem_p.str" and args.str_elem_1h:
+                ftype = "C"
             if ftype == "N":
-                channel_nr += 1
-                encoding = fid2norm_dic[fid]
-                channel_info = "%i\t%s\t%s\tN\t%s" %(channel_nr, fid2cat_dic[fid][0], fid, encoding)
-                channel_info_list.append(channel_info)
-            elif ftype == "C":
-                for c in fid2cat_dic[fid]:
+                for c in feat_alphabet:
                     channel_nr += 1
-                    channel_id = fid + "_" + c
+                    channel_id = c
+                    encoding = fid2norm_dic[fid]
+                    channel_info = "%i\t%s\t%s\tN\t%s" %(channel_nr, channel_id, fid, encoding)
+                    channel_info_list.append(channel_info)
+            elif ftype == "C":
+                for c in feat_alphabet:
+                    channel_nr += 1
+                    #channel_id = fid + "_" + c
+                    channel_id = c
                     channel_info = "%i\t%s\t%s\tC\tone_hot" %(channel_nr, channel_id, fid)
                     channel_info_list.append(channel_info)
             else:
@@ -10262,6 +10273,8 @@ def load_training_data(args,
                         FEATOUT.write("fa\tC\tA,C,G,U\t-\n")
                     else:
                         FEATOUT.write("fa\tC\tA,C,G,U,a,c,g,u\t-\n")
+                elif feat_id == "elem_p.str" and args.str_elem_1h:
+                    FEATOUT.write("elem_p.str\tC\tp_e,p_h,p_i,p_m,p_s\t-\n")
                 else:
                     FEATOUT.write("%s\n" %(row))
     f.closed
@@ -11132,6 +11145,7 @@ def read_settings_into_dic(settings_file):
 
 def read_feat_into_dic(feat_file, feat_type,
                        feat_dic=False,
+                       n_to_1h=False,
                        label_list=False):
     """
     Read in feature data from feat_file into dictionary of lists.
@@ -11141,6 +11155,9 @@ def read_feat_into_dic(feat_file, feat_type,
         Type of feature, set "C" for categorical and "N" for numerical
     label_list:
         Needed for C feature, supply label_list to do one-hot encoding
+    n_to_1h:
+        For structural elements probabilities, to convert them into
+        one-hot encodings.
 
     1) Categorical data (C)
     Categorical (feat_type == C) data example, with label_list = ['E', 'I']:
@@ -11240,6 +11257,9 @@ def read_feat_into_dic(feat_file, feat_type,
                     vl = line.strip().split('\t')
                     for i,v in enumerate(vl):
                         vl[i] = float(v)
+                    if n_to_1h:
+                        vl_1h = convert_prob_list_to_1h(vl)
+                        vl = vl_1h
                     if feat_dic_given:
                         for v in vl:
                             feat_dic[seq_id][pos_i].append(v)
@@ -11612,6 +11632,30 @@ def scores_to_plot_df(scores):
         data['score'].append(s)
     plot_df = pd.DataFrame(data, columns = ['pos', 'score'])
     return plot_df
+
+
+################################################################################
+
+def convert_prob_list_to_1h(lst):
+    """
+    Convert list of probabilities or score values into one-hot encoding list,
+    where element with highest prob./score gets 1, others 0.
+
+    >>> lst = [0.3, 0.5, 0.2, 0.1, 0.1]
+    >>> convert_prob_list_to_1h(lst)
+    [0, 1, 0, 0, 0]
+
+    """
+    assert lst, "given lst empty"
+    new_lst = [0]*len(lst)
+    max_i = 0
+    max_e = 0
+    for i,e in enumerate(lst):
+        if e > max_e:
+            max_e = e
+            max_i = i
+    new_lst[max_i] = 1
+    return new_lst
 
 
 ################################################################################
