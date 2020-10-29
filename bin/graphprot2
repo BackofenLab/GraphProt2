@@ -3259,11 +3259,13 @@ def main_gt(args):
                                             id2pl_dic=id2pl_dic,
                                             id_prefix="neg")
 
-        print("# negative sites found in --neg-in:         %i" %(ps_count_dic['c_in']))
+        print("# negative sites found in --neg-in:         %i" %(ns_count_dic['c_in']))
 
         if ns_count_dic['c_filt_max_len']:
             print("# negative sites filtered by --max-len:     %i" %(ns_count_dic['c_filt_max_len']))
-        if ps_count_dic['c_filt_thr']:
+        if ns_count_dic['c_filt_ref']:
+            print("# negative sites removed (reference ID):    %i" %(ns_count_dic['c_filt_ref']))
+        if ns_count_dic['c_filt_thr']:
             print("# negative sites filtered by --thr:         %i" %(ns_count_dic['c_filt_thr']))
         assert ns_count_dic['c_out'], "no negative sites remaining after filtering and extension ... "
         print("# negative sites read in (post-filtering):  %i" %(ns_count_dic['c_out']))
@@ -5354,3 +5356,5 @@ if __name__ == '__main__':
         main_gt(args)
     elif args.which == 'gp':
         main_gp(args)
+
+################################################################################
