@@ -13843,8 +13843,8 @@ def calc_ext_str_features(id2bedrow_dic, chr_len_dic,
     BPPOUT.close()
 
     # Remove tmp files.
-    #if os.path.exists(tmp_fa):
-    #    os.remove(tmp_fa)
+    if os.path.exists(tmp_fa):
+        os.remove(tmp_fa)
     if os.path.exists(tmp_bed):
         os.remove(tmp_bed)
     if os.path.exists(tmp_bpp_out):
