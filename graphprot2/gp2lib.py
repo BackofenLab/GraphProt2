@@ -13987,7 +13987,7 @@ def drop_a_line():
     c = """
           \"I eat Green Berets for breakfast.\"
 """
-    c = """
+    d = """
            \"There's always barber college.\"
 """
 
