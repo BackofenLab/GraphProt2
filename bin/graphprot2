@@ -11,6 +11,7 @@ import argparse
 import random
 import shutil
 import torch
+import uuid
 import copy
 import sys
 import os
@@ -544,6 +545,11 @@ def setup_argument_parser():
                    default = False,
                    action = "store_true",
                    help = "Label regions not covered by intron or exon regions as N instead of labelling them as introns (I) (in combination with --eia) (default: False)")
+    p_gta.add_argument("--eia-all-ex",
+                   dest="eia_all_ex",
+                   default = False,
+                   action = "store_true",
+                   help = "Use all annotated exons in --gtf file, instead of exons of most prominent transcripts or exon defined by --tr-list. Set --tr-list will this be effective only for --tra (default: False)")
     p_gta.add_argument("--tr-list",
                    dest="tr_list",
                    type=str,
@@ -3099,8 +3105,14 @@ def main_gt(args):
         assert args.tr_reg_annot, "--tra-borders requires --tra to be effective"
     if args.intron_border_annot:
         assert args.exon_intron_annot, "--eia-ib requires --eia to be effective"
+    if args.eia_all_ex:
+        assert args.exon_intron_annot, "--eia-all-ex requires --eia to be effective"
     if args.exon_intron_n:
         assert args.exon_intron_annot, "--eia-n requires --eia to be effective"
+    if args.eia_all_ex:
+        assert not args.intron_border_annot, "--eia-all-ex incompatible with --eia-ib"
+        assert not args.exon_intron_n, "--eia-all-ex incompatible with --eia-n"
+
     # Additional feature checks.
     if args.feat_in_1h and not args.feat_in:
         assert False, "--feat-in-1h requires --feat-in"
@@ -3119,7 +3131,6 @@ def main_gt(args):
                 assert len(feat_id) <= max_feat_id_len, "in --feat-in: column 1 feature ID \"%s\" length > 20 encountered (use shorter ID length)" %(feat_id)
                 assert os.path.exists(bed_file), "--feat-in column 4 BED file \"%s\" does not exist" %(bed_file)
         f.closed
-
 
     # If --in column 4 IDs should be kept, check their uniqueness.
     if args.keep_ids:
@@ -4045,50 +4056,63 @@ def main_gt(args):
         print("Get transcript annotations for genomic sites ... ")
         # Get transcript IDs to use for exon-intron or transcript region annotation.
         tr_ids_dic = {}
-        if args.tr_list:
-            print("Using transcript list from --tr-list to define transcript regions ... ")
-            # Read in transcript IDs from --tr-list.
-            tr_ids_dic = gp2lib.read_ids_into_dic(args.tr_list)
-            # Read in all transcript IDs in --gtf.
-            all_tr_ids_dic = gp2lib.gtf_get_transcript_ids(args.in_gtf)
-            # Check if given --tr list IDs are in --gtf.
-            del_tr_l = []
-            for tr_id in tr_ids_dic:
-                if tr_id not in all_tr_ids_dic:
-                    print("WARNING: transcript ID \"%s\" from --tr-list not found in --gtf. Ignoring transcript ... " %(tr_id))
-                    del_tr_l.append(tr_id)
-            for tr_id in del_tr_l:
-                del tr_ids_dic[tr_id]
-            assert tr_ids_dic, "no transcript IDs from --tr-list remain after removing IDs not found in --gtf"
-        else:
-            # Create exon BED file from most prominent transcripts.
-            strict=False
-            if strict:
-                print("Get most prominent transcript for each gene from --gtf (TSL1-5 only)... ")
+        # Extract tr_ids_dic.
+        if args.tr_reg_annot or not args.eia_all_ex:
+            if args.tr_list:
+                print("Using transcript list from --tr-list to define transcript regions ... ")
+                # Read in transcript IDs from --tr-list.
+                tr_ids_dic = gp2lib.read_ids_into_dic(args.tr_list)
+                # Read in all transcript IDs in --gtf.
+                all_tr_ids_dic = gp2lib.gtf_get_transcript_ids(args.in_gtf)
+                # Check if given --tr list IDs are in --gtf.
+                del_tr_l = []
+                for tr_id in tr_ids_dic:
+                    if tr_id not in all_tr_ids_dic:
+                        print("WARNING: transcript ID \"%s\" from --tr-list not found in --gtf. Ignoring transcript ... " %(tr_id))
+                        del_tr_l.append(tr_id)
+                for tr_id in del_tr_l:
+                    del tr_ids_dic[tr_id]
+                assert tr_ids_dic, "no transcript IDs from --tr-list remain after removing IDs not found in --gtf"
             else:
-                print("Get most prominent transcript for each gene from --gtf ... ")
-            # Don't be strict (!= only TSL1-5 allowed).
-            tr_ids_dic = gp2lib.gtf_extract_most_prominent_transcripts(args.in_gtf,
-                                            "dummy",
-                                            strict=strict,
-                                            return_ids_dic=tr_ids_dic)
+                # Create exon BED file from most prominent transcripts.
+                strict=False
+                if strict:
+                    print("Get most prominent transcript for each gene from --gtf (TSL1-5 only)... ")
+                else:
+                    print("Get most prominent transcript for each gene from --gtf ... ")
+                # Don't be strict (!= only TSL1-5 allowed).
+                tr_ids_dic = gp2lib.gtf_extract_most_prominent_transcripts(args.in_gtf,
+                                                "dummy",
+                                                strict=strict,
+                                                return_ids_dic=tr_ids_dic)
 
         # Exon-intron annotations for genomic sites.
         if args.exon_intron_annot:
+            # All exons BED (--eia-all-ex case).
+            all_exon_bed = False
+            if args.eia_all_ex:
+                random_id = uuid.uuid1()
+                all_exon_bed = str(random_id) + ".tmp.bed"
+                print("Extract all exon regions from --gtf (--eia-all-ex enabled) ... ")
+                gp2lib.gtf_extract_unique_exon_bed(args.in_gtf, all_exon_bed,
+                                                   use_ei_labels=True)
+
             print("Extract exon-intron annotations for genomic sites ... ")
-            if args.tr_list:
-                print("Use exon regions of --tr-list transcripts from --gtf ... ")
-            else:
-                print("Use exon regions of most prominent transcripts from --gtf ... ")
-            if args.intron_border_annot:
-                print("Intron border annotation enabled ... ")
-            if args.exon_intron_n:
-                print("Non-intron non-exon region annotation enabled ... ")
+            if not all_exon_bed:
+                if args.tr_list:
+                    print("Use exon regions of --tr-list transcripts from --gtf ... ")
+                else:
+                    print("Use exon regions of most prominent transcripts from --gtf ... ")
+                if args.intron_border_annot:
+                    print("Intron border annotation enabled ... ")
+                if args.exon_intron_n:
+                    print("Non-intron non-exon region annotation enabled ... ")
             # Positives.
             gp2lib.bed_get_exon_intron_annotations_from_gtf(tr_ids_dic, pos_bed_out,
                                         args.in_gtf, pos_eia_out,
                                         stats_dic=pos_eia_stats_dic,
                                         id2ucr_dic=id2ucr_dic,
+                                        own_exon_bed=all_exon_bed,
                                         n_labels=args.exon_intron_n,
                                         intron_border_labels=args.intron_border_annot)
             # Negatives.
@@ -4096,8 +4120,12 @@ def main_gt(args):
                                         args.in_gtf, neg_eia_out,
                                         stats_dic=neg_eia_stats_dic,
                                         id2ucr_dic=id2ucr_dic,
+                                        own_exon_bed=all_exon_bed,
                                         n_labels=args.exon_intron_n,
                                         intron_border_labels=args.intron_border_annot)
+            if all_exon_bed:
+                if os.path.exists(all_exon_bed):
+                    os.remove(all_exon_bed)
 
         # Transcript region annotations for genomic sites.
         if args.tr_reg_annot:
@@ -5293,30 +5321,6 @@ def main_gp(args):
 
 ################################################################################
 
-def drop_a_line():
-    """
-    Drop a line.
-
-    """
-    lines = []
-    a = """
-       \"Of all the RBP-BSP tools in the world,
-           this is definitely one of them.\"
-"""
-    b = """
-                     \"Let's Party!\"
-"""
-    c = """
-          \"I eat Green Berets for breakfast.\"
-"""
-    lines.append(a)
-    lines.append(b)
-    lines.append(c)
-    return(random.choice(lines))
-
-
-################################################################################
-
 if __name__ == '__main__':
     # Setup argparse.
     parser = setup_argument_parser()
@@ -5337,7 +5341,7 @@ if __name__ == '__main__':
     print("                /_/                                    ")
 
     # Drop a line.
-    print(drop_a_line())
+    print(gp2lib.drop_a_line())
 
     # Are my tools ready?
     assert gp2lib.is_tool("bedtools"), "bedtools not in PATH"

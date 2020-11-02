@@ -11,6 +11,7 @@ import numpy as np
 import statistics
 import subprocess
 import logomaker
+import random
 import torch
 import gzip
 import uuid
@@ -1891,6 +1892,7 @@ def bed_get_exon_intron_annotations_from_gtf(tr_ids_dic, in_bed,
                                              in_gtf, eia_out,
                                              stats_dic=None,
                                              id2ucr_dic=False,
+                                             own_exon_bed=False,
                                              n_labels=False,
                                              intron_border_labels=False):
 
@@ -1918,6 +1920,10 @@ def bed_get_exon_intron_annotations_from_gtf(tr_ids_dic, in_bed,
         where both positions are 1-based.
         Set to define regions for which to extract exon-intron annotation
         stats, stored in stats_dic.
+    own_exon_bed:
+        Supply own exon BED file. This disables n_labels and
+        intron_border_labels annotations. Also tr_ids_dic is not used anymore
+        for defining transcript / exon regions.
     n_labels:
         If True, label all positions not covered by intron or exon regions
         with "N".
@@ -1950,20 +1956,24 @@ def bed_get_exon_intron_annotations_from_gtf(tr_ids_dic, in_bed,
     True
 
     """
-    # Checker.
-    assert tr_ids_dic, "given dictionary tr_ids_dic empty"
+    if own_exon_bed:
+        intron_border_labels = False
+        n_labels = False
+        exon_bed = own_exon_bed
+    else:
+        # Checker.
+        assert tr_ids_dic, "given dictionary tr_ids_dic empty"
+        random_id = uuid.uuid1()
+        exon_bed = str(random_id) + ".tmp.bed"
 
-    # Generate .tmp files.
-    random_id = uuid.uuid1()
-    exon_bed = str(random_id) + ".tmp.bed"
     intron_bed = False
     if intron_border_labels or n_labels:
         random_id = uuid.uuid1()
-        intron_bed = str(random_id) + ".tmp.bed"
+        intron_bed = str(random_id) + ".intron.tmp.bed"
     random_id = uuid.uuid1()
-    border_bed = str(random_id) + ".tmp.bed"
+    border_bed = str(random_id) + ".border.tmp.bed"
     random_id = uuid.uuid1()
-    merged_bed = str(random_id) + ".tmp.bed"
+    merged_bed = str(random_id) + ".merged.tmp.bed"
     random_id = uuid.uuid1()
     tmp_out = str(random_id) + ".tmp.out"
 
@@ -1978,10 +1988,11 @@ def bed_get_exon_intron_annotations_from_gtf(tr_ids_dic, in_bed,
             stats_dic["T"] = 0
 
     # Get exon (+ intron) regions from GTF.
-    gtf_extract_exon_bed(in_gtf, exon_bed,
-                        out_intron_bed=intron_bed,
-                        use_ei_labels=True,
-                        tr_ids_dic=tr_ids_dic)
+    if not own_exon_bed:
+        gtf_extract_exon_bed(in_gtf, exon_bed,
+                            out_intron_bed=intron_bed,
+                            use_ei_labels=True,
+                            tr_ids_dic=tr_ids_dic)
 
     # Extract intron border positions to BED.
     if intron_border_labels:
@@ -2091,7 +2102,8 @@ def bed_get_exon_intron_annotations_from_gtf(tr_ids_dic, in_bed,
 
     # Remove tmp files.
     if os.path.exists(exon_bed):
-        os.remove(exon_bed)
+        if not own_exon_bed:
+            os.remove(exon_bed)
     if intron_bed:
         if os.path.exists(intron_bed):
             os.remove(intron_bed)
@@ -13955,6 +13967,35 @@ def seq_get_vp_region(seq):
     if m:
         vp_seq = m.group(1)
     return vp_seq
+
+
+################################################################################
+
+def drop_a_line():
+    """
+    Drop a line.
+
+    """
+    lines = []
+    a = """
+       \"Of all the RBP-BSP tools in the world,
+           this is definitely one of them.\"
+"""
+    b = """
+                     \"Let's Party!\"
+"""
+    c = """
+          \"I eat Green Berets for breakfast.\"
+"""
+    c = """
+           \"There's always barber college.\"
+"""
+
+    lines.append(a)
+    lines.append(b)
+    lines.append(c)
+    lines.append(d)
+    return(random.choice(lines))
 
 
 ################################################################################
