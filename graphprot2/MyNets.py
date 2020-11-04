@@ -105,6 +105,9 @@ class FunnelGNN(torch.nn.Module):
             self.bn4 = torch.nn.BatchNorm1d(node_hidden_dim4)
             lin1_in_dim += 2*node_hidden_dim4
         if nr_hidden_layers == 5:
+            self.conv4 = GraphConv(node_hidden_dim3, node_hidden_dim4)
+            self.bn4 = torch.nn.BatchNorm1d(node_hidden_dim4)
+            lin1_in_dim += 2*node_hidden_dim4
             self.conv5 = GraphConv(node_hidden_dim4, node_hidden_dim5)
             self.bn5 = torch.nn.BatchNorm1d(node_hidden_dim5)
             lin1_in_dim += 2*node_hidden_dim5
