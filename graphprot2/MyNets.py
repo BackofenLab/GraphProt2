@@ -128,6 +128,8 @@ class FunnelGNN(torch.nn.Module):
             x = self.bn4(F.leaky_relu(self.conv4(x, edge_index)))
             x4 = torch.cat([gmp(x, batch), gap(x, batch)], dim=1)
         if self.nr_hidden_layers == 5:
+            x = self.bn4(F.leaky_relu(self.conv4(x, edge_index)))
+            x4 = torch.cat([gmp(x, batch), gap(x, batch)], dim=1)
             x = self.bn5(F.leaky_relu(self.conv5(x, edge_index)))
             x5 = torch.cat([gmp(x, batch), gap(x, batch)], dim=1)
 
