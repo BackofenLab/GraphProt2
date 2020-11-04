@@ -944,6 +944,35 @@ def bed_check_six_col_format(bed_file):
 
 ################################################################################
 
+def count_file_rows(in_file,
+                    nr_cols=False):
+    """
+    Count number of file rows. If nr_cols set, demand certain (nr_cols) number
+    of columns (separated by tab), in order for row to be counted.
+
+    >>> test_file = "test_data/test1.bed"
+    >>> count_file_rows(test_file)
+    7
+    >>> test_file = "test_data/empty_file"
+    >>> count_file_rows(test_file)
+    0
+
+    """
+    c = 0
+    with open(in_file) as f:
+        for line in f:
+            cols = line.strip().split("\t")
+            if nr_cols:
+                if len(cols) == nr_cols:
+                    c += 1
+            else:
+                c += 1
+    f.closed
+    return c
+
+
+################################################################################
+
 def bpp_callback(v, v_size, i, maxsize, what, data=None):
     """
     This uses the Python3 API (RNA.py) of ViennaRNA (tested with v 2.4.13).
@@ -3811,7 +3840,7 @@ def gtf_extract_gene_bed(in_gtf, out_bed,
         # Make start coordinate 0-base (BED standard).
         feat_s = feat_s - 1
 
-        # Extract transcript ID and from infos.
+        # Extract gene ID and from infos.
         m = re.search('gene_id "(.+?)"', infos)
         assert m, "gene_id entry missing in GTF file \"%s\", line \"%s\"" %(in_gtf, line)
         gene_id = m.group(1)
