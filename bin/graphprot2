@@ -135,23 +135,12 @@ def setup_argument_parser():
                    default = False,
                    action = "store_true",
                    help = "Use one-hot encoding for structural elements probabilities (assign 1 to highest probability, and 0 to others) (default: False)")
-    p_trf.add_argument("--bps-mode",
-                   dest = "bps_mode",
-                   type = int,
-                   default = 1,
-                   choices = [1,2],
-                   help="Defines which base pairs are added to the graphs. --bpp-mode 1 : base pairs with start or end in viewpoint region. --bpp-mode 2 : only base pairs with start+end in viewpoint (default: 1)")
     p_trf.add_argument("--bps-prob-cutoff",
                    dest = "bps_cutoff",
                    type = float,
                    metavar='float',
                    default = 0.5,
                    help = "Base pair probability cutoff for filtering base pairs added to the graph (default: 0.5)")
-    p_trf.add_argument("--uc-context",
-                   dest = "uc_context",
-                   default = False,
-                   action = "store_true",
-                   help = "Convert lowercase context (if present, added by graphprot2 gt --con-ext) to uppercase (default: False)")
 
     # Add advanced model definition arguments group.
     p_tra = p_tr.add_argument_group("model definition arguments")
@@ -274,11 +263,16 @@ def setup_argument_parser():
     # Add required arguments group.
     p_evm = p_ev.add_argument_group("required arguments")
     # Required arguments for eval.
-    p_evm.add_argument("--in",
-                   dest="in_folder",
+    p_evm.add_argument("--train-in",
+                   dest="in_train_folder",
                    type=str,
                    required = True,
                    help = "Input model training folder (output of graphprot2 train)")
+    p_evm.add_argument("--gt-in",
+                   dest="in_gt_folder",
+                   type=str,
+                   required = True,
+                   help = "Input training data folder (output of graphprot2 gt)")
     p_evm.add_argument("--out",
                    dest="out_folder",
                    type=str,
@@ -369,12 +363,6 @@ def setup_argument_parser():
                    metavar='int',
                    default = 30,
                    help = "Up- and downstream peak position extension for extracting top-scoring sites from fixed-window profiles (default: 30)")
-    p_pr.add_argument("--con-ext",
-                   dest = "con_ext",
-                   type = int,
-                   metavar='int',
-                   default = False,
-                   help = "Up- and downstream context extension for extracting top-scoring sites from fixed-window profiles. By default uses --con-ext info from --model-in (if set in graphprot2 train), but restricts it to a maximum of 50 (default: False)")
     p_pr.add_argument("--thr",
                    dest="sc_thr",
                    type = float,
@@ -438,13 +426,7 @@ def setup_argument_parser():
                    type = int,
                    metavar='int',
                    default = 30,
-                   help = "Up- and downstream sequence extension of sites (site definition by --mode) with uppercase characters (default: 30)")
-    p_gt.add_argument("--con-ext",
-                   dest = "con_ext",
-                   type = int,
-                   metavar='int',
-                   default = False,
-                   help = "Up- and downstream context sequence extension of sites (site definition by --mode) with lowercase characters. Note that statistics (--report) are produced only for uppercase sequence parts (defined by --seq-ext) (default: False)")
+                   help = "Up- and downstream sequence extension length of sites (site definition by --mode) (default: 30)")
     p_gt.add_argument("--thr",
                    dest="sc_thr",
                    type = float,
@@ -483,11 +465,6 @@ def setup_argument_parser():
                    default = False,
                    action = "store_true",
                    help = "Do not filter positives based on gene coverage (gene annotations from --gtf) (default: False)")
-    p_gt.add_argument("--con-ext-pre",
-                   dest="pre_con_ext_merge",
-                   default = False,
-                   action = "store_true",
-                   help = "Add --con-ext extension before selecting for highest-scoring sites in case of overlaps (not afterwards) (default: False)")
     p_gt.add_argument("--neg-comp-thr",
                    dest="neg_comp_thr",
                    type = float,
@@ -797,6 +774,10 @@ def main_train(args):
     if args.str_elem_1h:
         assert args.use_str_elem_p, "--str-elem-1h requires --use-str-elem-p to be set"
 
+    # Silence con_ext options.
+    args.bps_mode = 1
+    args.uc_context = False
+
     # Generate results output folder.
     out_folder = args.out_folder
     if not os.path.exists(out_folder):
@@ -842,6 +823,9 @@ def main_train(args):
     random.seed(1)
     random.shuffle(all_graphs)
     labels = [g.y for g in all_graphs]
+
+    # gadd pooling.
+    args.gadd = False
 
     # Hyperparameters.
     #args.list_lr = [0.001, 0.0001]
@@ -972,6 +956,7 @@ def main_train(args):
                                   node_hidden_dim=opt_node_hidden_dim,
                                   dropout_rate=opt_dr,
                                   nr_hidden_layers=args.nr_hidden_layers,
+                                  add_gadd=args.gadd,
                                   incr_hidden_dim=args.incr_hidden_dim,
                                   fc_hidden_dim=args.fc_hidden_dim,
                                   out_dim=2).to(device)
@@ -1009,6 +994,7 @@ def main_train(args):
                                   node_hidden_dim=opt_node_hidden_dim,
                                   dropout_rate=opt_dr,
                                   nr_hidden_layers=args.nr_hidden_layers,
+                                  add_gadd=args.gadd,
                                   incr_hidden_dim=args.incr_hidden_dim,
                                   fc_hidden_dim=args.fc_hidden_dim,
                                   out_dim=2).to(device)
@@ -1159,6 +1145,7 @@ def main_train(args):
                               node_hidden_dim=opt_node_hidden_dim,
                               dropout_rate=opt_dr,
                               nr_hidden_layers=args.nr_hidden_layers,
+                              add_gadd=args.gadd,
                               incr_hidden_dim=args.incr_hidden_dim,
                               fc_hidden_dim=args.fc_hidden_dim,
                               out_dim=2).to(device)
@@ -1356,8 +1343,6 @@ def main_train(args):
         PAROUT.write("epochs\t%s\n" %(str(args.epochs)))
         PAROUT.write("patience\t%s\n" %(str(args.patience)))
         PAROUT.write("model_epochs\t%s\n" %(str(best_epo)))
-        PAROUT.write("train_cv\t%s\n" %(str(args.train_cv)))
-        PAROUT.write("train_cv_k\t%s\n" %(str(args.train_cv_k)))
         PAROUT.write("nr_hp_comb\t%s\n" %(str(nr_hp_comb)))
         PAROUT.write("val_auc\t%s\n" %(str(best_auc)))
         PAROUT.write("batch_size\t%s\n" %(str(best_batch_size)))
@@ -1365,6 +1350,9 @@ def main_train(args):
         PAROUT.write("dr\t%s\n" %(str(best_dr)))
         PAROUT.write("node_hidden_dim\t%s\n" %(str(best_node_hidden_dim)))
         PAROUT.write("weight_decay\t%s\n" %(str(best_weight_decay)))
+        PAROUT.write("incr_hidden_dim\t%s\n" %(str(args.incr_hidden_dim)))
+        PAROUT.write("undirected\t%s\n" %(str(args.undirected)))
+        PAROUT.write("nr_hidden_layers\t%s\n" %(str(args.nr_hidden_layers)))
         PAROUT.close()
 
         print("Final model (hyper)parameters file:")
@@ -1431,8 +1419,6 @@ def main_train(args):
             PAROUT.write("epochs\t%s\n" %(str(args.epochs)))
             PAROUT.write("patience\t%s\n" %(str(args.patience)))
             PAROUT.write("model_epochs\t%s\n" %(str(opt_epochs)))
-            PAROUT.write("train_cv\t%s\n" %(str(args.train_cv)))
-            PAROUT.write("train_vs\t%s\n" %(str(args.train_vs)))
             PAROUT.write("nr_hp_comb\t%s\n" %(str(nr_hp_comb)))
             PAROUT.write("val_acc\t%s\n" %(str(opt_acc)))
             PAROUT.write("val_auc\t%s\n" %(str(opt_auc)))
@@ -1441,6 +1427,9 @@ def main_train(args):
             PAROUT.write("dr\t%s\n" %(str(opt_dr)))
             PAROUT.write("node_hidden_dim\t%s\n" %(str(opt_node_hidden_dim)))
             PAROUT.write("weight_decay\t%s\n" %(str(opt_weight_decay)))
+            PAROUT.write("incr_hidden_dim\t%s\n" %(str(args.incr_hidden_dim)))
+            PAROUT.write("undirected\t%s\n" %(str(args.undirected)))
+            PAROUT.write("nr_hidden_layers\t%s\n" %(str(args.nr_hidden_layers)))
             PAROUT.close()
 
             # Epochs and accuracy.
@@ -1484,60 +1473,89 @@ def main_eval(args):
 
     print("Running for you in EVAL mode ... ")
 
-    assert os.path.isdir(args.in_folder), "--in folder does not exist"
-    # Get model parameters.
-    params_file = args.in_folder + "/final.params"
-    assert os.path.isfile(params_file), "missing model training parameter file %s" %(params_file)
+    assert os.path.isdir(args.in_train_folder), "--train-in folder does not exist"
+    # Model + model parameter file.
+    params_file = args.in_train_folder + "/final.params"
+    model_file = args.in_train_folder + "/final.model"
+    assert os.path.isfile(model_file), "--train-in folder is missing a model file. Run graphprot2 train without --gen-cv to generate and store a model" %(model_file)
+    assert os.path.isfile(params_file), "--train-in folder is missing a model parameter file. Disable --gen-cv when running graphprot2 train to generate and store a model" %(params_file)
+
+    # Read in model parameters.
     params_dic = gp2lib.read_settings_into_dic(params_file)
-    fc_hidden_dim = 128
-    node_hidden_dim	= 128
-    data_id = "data"
-    if "node_hidden_dim" in params_dic:
-        node_hidden_dim = int(params_dic["node_hidden_dim"])
-    if "fc_hidden_dim" in params_dic:
-        fc_hidden_dim = int(params_dic["fc_hidden_dim"])
-    if "data_id" in params_dic:
-        data_id = params_dic["data_id"]
-    # Data folder (containing PTG model training data).
-    data_folder = args.in_folder + "/" + data_id
-    # PTG raw data subfolder.
-    data_raw_folder = data_folder + "/raw"
+    # Check parameters.
+    assert "node_hidden_dim" in params_dic, "node_hidden_dim info missing in model parameter file %s" %(params_file)
+    assert "fc_hidden_dim" in params_dic, "fc_hidden_dim info missing in model parameter file %s" %(params_file)
+    assert "batch_size" in params_dic, "batch_size info missing in model parameter file %s" %(params_file)
+    assert "num_features" in params_dic, "num_features info missing in model parameter file %s" %(params_file)
+    assert "dr" in params_dic, "dropout rate info missing in model parameter file %s" %(params_file)
+    assert "lr" in params_dic, "learning rate info missing in model parameter file %s" %(params_file)
+    assert "incr_hidden_dim" in params_dic, "incr_hidden_dim info missing in model parameter file %s" %(params_file)
+    assert "undirected" in params_dic, "undirected info missing in model parameter file %s" %(params_file)
+    assert "nr_hidden_layers" in params_dic, "nr_hidden_layers info missing in model parameter file %s" %(params_file)
+    # Set parameters.
+    fc_hidden_dim = int(params_dic["fc_hidden_dim"])
+    node_hidden_dim	= int(params_dic["node_hidden_dim"])
+    batch_size = int(params_dic["batch_size"])
+    num_features = int(params_dic["num_features"])
+    args.num_features = num_features
+    nr_hidden_layers = int(params_dic["nr_hidden_layers"])
+    dr = float(params_dic["dr"])
+    dr_str = params_dic["dr"]
+    lr_str = params_dic["lr"]
+    incr_hidden_dim = False
+    if params_dic["incr_hidden_dim"] == "True":
+        incr_hidden_dim = True
+    undirected = False
+    args.undirected = False
+    if params_dic["undirected"] == "True":
+        undirected = True
+        args.undirected = True
+
     # Plot format.
     plot_format = "png"
     if args.plot_format == 2:
         plot_format = "pdf"
 
-    print("fc_hidden_dim:    %i" %(fc_hidden_dim))
-    print("node_hidden_dim:  %i" %(node_hidden_dim))
-
-    model_file = args.in_folder + "/final.model"
-    assert os.path.isdir(data_folder), "missing data folder %s" %(data_folder)
-    assert os.path.isdir(data_raw_folder), "missing raw data folder %s" %(data_raw_folder)
-    assert os.path.isfile(model_file), "missing model file %s" %(model_file)
-
+    # More checks.
     assert args.motif_sc_thr <= 1 and args.motif_sc_thr >= -1, "--motif-sc-thr must be within -1 and 1"
+    # Window size.
+    assert args.list_win_sizes, "empty --win-sizes list given"
+    min_win_size = 666666
+    for win_size in args.list_win_sizes:
+        if (win_size-1) % 2:
+            assert False, "only uneven window size values supported"
+        if win_size < 5:
+            assert False, "window size should be >= 5"
+        if win_size < min_win_size:
+            min_win_size = win_size
+    # Motif size.
+    for motif_size in args.list_motif_sizes:
+        if (motif_size-1) % 2:
+            assert False, "only uneven motif size values supported"
+        if motif_size < 5:
+            assert False, "motif sizes should be >= 5"
+        if motif_size > 21:
+            assert False, "motif sizes should be <= 21"
 
     # Get graphprot2 train parameters.
-    gp2_train_param_file = args.in_folder + "/settings.graphprot2_train.out"
-    assert os.path.isfile(gp2_train_param_file), "missing --in parameter file %s" %(gp2_train_param_file)
-    gp2_train_param_dic = {}
-    with open(gp2_train_param_file) as f:
+    gp2_train_settings_file = args.in_train_folder + "/settings.graphprot2_train.out"
+    assert os.path.isfile(gp2_train_settings_file), "missing --train-in settings file %s" %(gp2_train_settings_file)
+    gp2_train_settings_dic = {}
+    with open(gp2_train_settings_file) as f:
         for line in f:
             row = line.strip()
             cols = line.strip().split("\t")
-            gp2_train_param_dic[cols[0]] = cols[1]
+            gp2_train_settings_dic[cols[0]] = cols[1]
     f.closed
-    if "use_bps" in gp2_train_param_dic:
-        assert gp2_train_param_dic["use_bps"] == "False", "graphprot2 eval currently does not support --use-bps in grahprot2 train"
-    assert "con_ext" in gp2_train_param_dic, "con_ext info tag missing in %s" %(gp2_train_param_file)
-    # Get nucleotide alphabet + con_ext info.
-    con_ext = False
-    con_ext_str = gp2_train_param_dic["con_ext"]
-    if con_ext_str != "False": # if not False, must be INT.
-        con_ext = int(con_ext_str)
+    assert "use_bps" in gp2_train_settings_dic, "use_bps info missing in --train-in settings file %s" %(gp2_train_settings_dic)
+    assert "str_elem_1h" in gp2_train_settings_dic, "str_elem_1h info missing in --train-in settings file %s" %(gp2_train_settings_dic)
+    assert gp2_train_settings_dic["use_bps"] == "False", "--train-in model was trained with base pair information, but so far graphprot2 (v%s) does not support the visualization of base pair information" %(__version__)
+    args.str_elem_1h = False
+    if gp2_train_settings_dic["str_elem_1h"] == "True":
+        args.str_elem_1h = True
 
     # Get graphprot2 train features.
-    gp2_train_feat_out_file = args.in_folder + "/features.out"
+    gp2_train_feat_out_file = args.in_train_folder + "/features.out"
     assert os.path.isfile(gp2_train_feat_out_file), "missing --in feature file %s" %(gp2_train_feat_out_file)
     gp2_train_feat_dic = {}
     feat_alphabet_dic = {}
@@ -1552,102 +1570,18 @@ def main_eval(args):
             feat_alphabet_dic[feat_id] = feat_cat_list
     f.closed
     assert gp2_train_feat_dic, "no features found in %s" %(gp2_train_feat_out_file)
-    assert "bpp.str" not in gp2_train_feat_dic, "graphprot2 eval currently does not support models trained with base pair information"
+    assert "bpp.str" not in gp2_train_feat_dic, "--train-in model was trained with base pair information, but so far graphprot2 (v%s) does not support the visualization of base pair information" %(__version__)
 
-    # Check for node attributes data.
-    use_node_attr = True
-    ana_file = data_raw_folder + "/" + data_id + "_node_attributes.txt"
-    if not os.path.exists(ana_file):
-        use_node_attr = False
+    # Check for CUDA support.
+    if torch.cuda.is_available():
+        print("CUDA: I'm available. Using GPU ... ")
+    else:
+        print("CUDA: I'm NOT available. Using CPU ... ")
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # Get channel info.
-    if use_node_attr:
-        channel_info_file = args.in_folder + "/channel_infos.out"
-        assert os.path.isfile(channel_info_file), "missing channel information file %s" %(channel_info_file)
-        ch2label = {}
-        ch2featid = {}
-        featid2ch_dic = {} # feature ID to channels list.
-        featid2alpha_dic = {}
-        with open(channel_info_file) as f:
-            for line in f:
-                if re.search("^ch", line):
-                    continue
-                cols = line.strip().split("\t")
-                ch = int(cols[0])
-                ch_id = cols[1]
-                feat_id = cols[2]
-                feat_type = cols[3]
-                if feat_id in featid2ch_dic:
-                    featid2ch_dic[feat_id].append(ch)
-                else:
-                    featid2ch_dic[feat_id] = [ch]
-                if feat_type == "C":
-                    m = re.search(".+_(.+)", ch_id)
-                    label = m.group(1)
-                    ch2label[ch] = label
-                    if feat_id in featid2alpha_dic:
-                        featid2alpha_dic[feat_id].append(label)
-                    else:
-                        featid2alpha_dic[feat_id] = [label]
-                else:
-                    ch2label[ch] = False
-                ch2featid[ch] = feat_id
-        f.closed
-        assert ch2featid, "no channel infos read in"
-
-    # Read in additional infos.
-    add_out_folder = data_folder + "/add_info"
-    pos_add_ids_out_file = add_out_folder + "/positives.add_info.ids"
-    neg_add_ids_out_file = add_out_folder + "/negatives.add_info.ids"
-    pos_add_seqs_out_file = add_out_folder + "/positives.add_info.fa"
-    neg_add_seqs_out_file = add_out_folder + "/negatives.add_info.fa"
-    assert os.path.isfile(pos_add_ids_out_file), "missing additional file pos_add_ids_out_file"
-    assert os.path.isfile(neg_add_ids_out_file), "missing additional file neg_add_ids_out_file"
-    assert os.path.isfile(pos_add_seqs_out_file), "missing additional file pos_add_seqs_out_file"
-    assert os.path.isfile(neg_add_seqs_out_file), "missing additional file neg_add_seqs_out_file"
-    pos_seqs_dic = gp2lib.read_fasta_into_dic(pos_add_seqs_out_file)
-    pos_ids_dic = {}
-    with open(pos_add_ids_out_file) as f:
-        for line in f:
-            cols = line.strip().split("\t")
-            pos_ids_dic[cols[0]] = int(cols[1])
-    f.closed
-    # Store graph ID -> sequence ID.
-    gid2sid_dic = {}
-    for seq_id in pos_ids_dic:
-        gid2sid_dic[pos_ids_dic[seq_id]] = seq_id
-
-    # Results output folders.
-    out_folder = args.out_folder
-    if not os.path.exists(out_folder):
-        os.makedirs(out_folder)
-    data_out_folder = out_folder + "/" + data_id
-    raw_out_folder = data_out_folder + "/raw"
-    proc_out_folder = data_out_folder + "/processed"
-    if not os.path.exists(raw_out_folder):
-        os.makedirs(raw_out_folder)
-    if not os.path.exists(proc_out_folder):
-        os.makedirs(proc_out_folder)
-
-    # Window size.
-    assert args.list_win_sizes, "empty --win-sizes list given"
-    min_win_size = 666666
-    for win_size in args.list_win_sizes:
-        if (win_size-1) % 2:
-            assert False, "only uneven window size values supported"
-        if win_size < 5:
-            assert False, "window size should be >= 5"
-        if win_size < min_win_size:
-            min_win_size = win_size
-
-    # Motif size.
-    for motif_size in args.list_motif_sizes:
-        if (motif_size-1) % 2:
-            assert False, "only uneven motif size values supported"
-        if motif_size < 5:
-            assert False, "motif sizes should be >= 5"
-        if motif_size > 21:
-            assert False, "motif sizes should be <= 21"
+    # Context + bp settings.
+    args.bps_mode = 1
+    args.con_ext = False
 
     # Output mode settings.
     settings_file = args.out_folder + "/" + "/settings.graphprot2_eval.out"
@@ -1655,6 +1589,192 @@ def main_eval(args):
     for arg in vars(args):
         SETOUT.write("%s\t%s\n" %(arg, str(getattr(args, arg))))
     SETOUT.close()
+
+    # Load data.
+    seqs_dic, idx2id_dic, all_features, ch_info_dic = gp2lib.load_eval_data(args)
+
+    # Load trained model.
+    print("Load model ... ")
+    model = FunnelGNN(input_dim=num_features,
+                      node_hidden_dim=node_hidden_dim,
+                      dropout_rate=dr,
+                      nr_hidden_layers=nr_hidden_layers,
+                      incr_hidden_dim=incr_hidden_dim,
+                      fc_hidden_dim=fc_hidden_dim,
+                      out_dim=2).to(device)
+
+    model_path = args.in_train_folder + "/" + str(batch_size) + "_" + str(node_hidden_dim) + "_" + str(weight_decay) + "_" + lr_str + "_" + dr_str
+    model.load_state_dict(torch.load(model_path))
+
+
+
+    # Predict.
+    """
+    all_features
+    all_scores[0] = [sc1, sc2, sc3 ...]
+    Length = sequence length
+
+    all_features[0][0] : first sequence, first feature vector
+
+    all_win_graphs = []
+    seq_len_list = []
+    for idx,feat_list in enumerate(all_features):
+        l_seq = len(feat_list)
+        seq_len_list.append(l_seq)
+        win_scores = []
+        for w_size in list_w_sizes:
+
+    extlr = int(w_size/2)
+    seq_lengths_list = []
+
+
+
+        extlr = int(w_size/2)
+        # For each position in graph.
+        for i in range(g_len):
+            reg_s = i - extlr
+            reg_e = i + extlr + 1
+            # If lowercase context extension specified.
+            if con_ext:
+                reg_s = reg_s - lc_ext
+                reg_e = reg_e + lc_ext
+            if reg_e > g_len:
+                reg_e = g_len
+            if reg_s < 0:
+                reg_s = 0
+
+            if con_ext:
+                center_pos = i + 1
+                sl_node_labels = get_uc_lc_list_segment(list_node_labels,
+                                                        center_pos,
+                                                        vp_ext=extlr,
+                                                        con_ext=lc_ext)
+            else:
+                sl_node_labels = list_node_labels[reg_s:reg_e]
+
+
+
+
+
+
+
+
+
+
+    for idx, label in enumerate(label_list):
+        seq_id = seq_ids_list[idx]
+        seq = seqs_dic[seq_id]
+        l_seq = len(seq)
+        seq_lengths_list.append(l_seq)
+
+
+        # Make edge indices for backbone.
+        edge_index_1 = []
+        edge_index_2 = []
+        # Edge indices 0-based!
+        for n_idx in range(l_seq - 1):
+            edge_index_1.append(n_idx)
+            edge_index_2.append(n_idx+1)
+            # In case of undirected graphs, add backward edges too.
+            if args.undirected:
+                edge_index_1.append(n_idx+1)
+                edge_index_2.append(n_idx)
+
+
+        # Add base pair edges.
+        if bpp_dic:
+            vp_s = vp_dic[seq_id][0] # 1-based.
+            vp_e = vp_dic[seq_id][1] # 1-based.
+            # Entry e.g. 'CLIP_01': ['130-150,0.33', '160-200,0.44', '240-260,0.55']
+            for entry in bpp_dic[seq_id]:
+                m = re.search("(\d+)-(\d+),(.+)", entry)
+                p1 = int(m.group(1)) # 1-based.
+                p2 = int(m.group(2)) # 1-based.
+                bpp_value = float(m.group(3))
+                g_p1 = p1 - 1 # 0-based base pair index.
+                g_p2 = p2 - 1 # 0-based base pair index.
+                # Filter.
+                if bpp_value < args.bps_cutoff: continue
+                # Add base pair depending on set mode.
+                add_edge = False
+                if args.bps_mode == 1:
+                    if (p1 >= vp_s and p1 <= vp_e) or (p2 >= vp_s and p2 <= vp_e):
+                        add_edge = True
+                elif args.bps_mode == 2:
+                    if p1 >= vp_s and p2 <= vp_e:
+                        add_edge = True
+                if add_edge:
+                    edge_index_1.append(g_p1)
+                    edge_index_1.append(g_p2)
+                    if args.undirected:
+                        edge_index_1.append(g_p2)
+                        edge_index_2.append(g_p1)
+
+
+
+        edge_index = torch.tensor([edge_index_1, edge_index_2], dtype=torch.long)
+        x = torch.tensor(feat_dic[seq_id], dtype=torch.float)
+        data = Data(x=x, edge_index=edge_index, y=label)
+        all_graphs.append(data)
+
+
+
+
+
+
+
+
+        # Load data as graphs.
+        print("Load prediction data as graphs ... ")
+        seqs_dic, idx2id_dic, all_graphs = gp2lib.load_predict_data(args,
+                                                       return_graphs=True)
+
+        print("# dataset features:  %i" %(num_features))
+        print("Dataset size:        %i" %(len(all_graphs)))
+
+        # Load model.
+        print("Load model ... ")
+        model = FunnelGNN(input_dim=num_features,
+                          node_hidden_dim=node_hidden_dim,
+                          fc_hidden_dim=fc_hidden_dim,
+                          dropout_rate=dr,
+                          out_dim=2).to(device)
+        model.load_state_dict(torch.load(model_file))
+
+        # Prepare dataset.
+        predict_dataset = MyDataset(all_graphs)
+        predict_loader = DataLoader(predict_dataset, batch_size=batch_size, shuffle=False)
+
+        # Get whole site scores.
+        print("Do the whole site predictions ... ")
+        ws_scores = model_util.get_scores(predict_loader, device, model,
+                                          min_max_norm=True)
+
+        # Checks.
+        assert len(ws_scores) == len(seqs_dic), "# test sequences != # whole site scores (%i != %i)" %(len(ws_scores), len(seqs_dic))
+        # Output whole site scores.
+        WSOUT = open(ws_scores_out, "w")
+        for i,sc in enumerate(ws_scores):
+            seq_id = idx2id_dic[i]
+            WSOUT.write("%s\t%f\n" %(seq_id, sc))
+        WSOUT.close()
+        # Output BED too with scores.
+        if not only_seq:
+            WSOUT = open(ws_scores_bed, "w")
+            for i,sc in enumerate(ws_scores):
+                seq_id = idx2id_dic[i]
+                chr_id = id2chr_dic[seq_id]
+                site_s = id2s_dic[seq_id]
+                site_e = id2e_dic[seq_id]
+                site_pol = id2pol_dic[seq_id]
+                WSOUT.write("%s\t%i\t%i\t%s\t%f\t%s\n" %(chr_id, site_s, site_e, seq_id, sc, site_pol))
+            WSOUT.close()
+
+
+
+    """
+
+
 
     # Read in PTG raw data.
     dataset = TUDataset(data_folder, name=data_id, use_node_attr=use_node_attr)
@@ -2166,6 +2286,9 @@ def main_predict(args):
         print("Predicting whole sites ... ")
     if args.mode == 2:
         print("Predicting profiles and top-scoring sites ... ")
+
+    # Silence con_ext options.
+    args.con_ext = False
 
     # --in folder containing prediction data.
     assert os.path.isdir(args.in_folder), "--in folder does not exist"
@@ -2844,6 +2967,9 @@ def main_gt(args):
     # Custom base pairs check.
     if args.bp_in:
         assert args.add_str, "--bp-in requires --str to be set for structure calculation"
+    # Silence con_ext options.
+    args.con_ext = False
+    args.pre_con_ext_merge = False
 
     # Write generated feature infos to table.
     FEATOUT = open(feat_table_out, "w")

@@ -617,8 +617,8 @@ def read_bpp_into_dic(bpp_file, vp_dic,
     Return dictionary with base pair+probability list for each sequence
     (key: sequence id, value: "bp_start-bp_end,bp_prob").
     bps_mode: define which base pairs get extracted.
-    bps_mode=1 : bps in extended vp region with start or end in base vp
-    bps_mode=2 : only bps with start+end in base vp
+    bps_mode=1 : only bps with start+end in base vp
+    bps_mode=2 : bps in extended vp region with start or end in base vp
 
     >>> bpp_test = "test_data/test.bpp"
     >>> vp_dic = {"CLIP_01": [150, 250]}
@@ -9336,6 +9336,212 @@ def get_valid_file_ending(s):
 
 ################################################################################
 
+def load_eval_data(args):
+
+    """
+    Load training data for graphprot2 eval, to generate motifs and profiles.
+
+    """
+
+    # Checks.
+    assert os.path.isdir(args.in_train_folder), "--train-in folder does not exist"
+    assert os.path.isdir(args.in_gt_folder), "--gt-in folder does not exist"
+
+    # Feature file containing info for features used for model training.
+    feat_file = args.in_train_folder + "/" + "features.out"
+    assert os.path.exists(feat_file), "%s features file expected but not does not exist" %(feat_file)
+
+    # graphprot2 predict output folder.
+    out_folder = args.out_folder
+    if not os.path.exists(out_folder):
+        os.makedirs(out_folder)
+
+    # Channel info output file.
+    channel_infos_out = out_folder + "/" + "channel_infos.out"
+    channel_info_list = []
+    channel_nr = 0
+
+    # Read in feature info.
+    fid2type_dic = {}
+    fid2cat_dic = {} # Store category labels or numerical score IDs in list.
+    fid2norm_dic = {}
+    fid2row_dic = {}
+    print("Read in feature infos from %s ... " %(feat_file))
+    with open(feat_file) as f:
+        for line in f:
+            row = line.strip()
+            cols = line.strip().split("\t")
+            feat_id = cols[0]
+            feat_type = cols[1]
+            feat_cat_list = cols[2].split(",")
+            feat_cat_list.sort()
+            feat_norm = cols[3]
+            fid2row_dic[feat_id] = row
+            assert feat_id not in fid2type_dic, "feature ID \"%s\" found twice in feature file" %(feat_id)
+            fid2type_dic[feat_id] = feat_type
+            fid2cat_dic[feat_id] = feat_cat_list
+            fid2norm_dic[feat_id] = feat_norm
+    f.closed
+    assert fid2type_dic, "no feature infos read in from graphprot2 train feature file %s" %(feat_file)
+
+    # Check for base pair model.
+    assert "bpp.str" not in fid2type_dic, "--train-in model was trained with base pair information, but graphprot2 eval so far does not support the visualization of base pair information"
+
+    # Read in features.out from graphprot2 gt and check.
+    gt_feat_file = args.in_gt_folder + "/" + "features.out"
+    assert os.path.exists(gp_feat_file), "%s features file expected but not does not exist" %(gp_feat_file)
+    gt_fid2row_dic = {}
+    print("Read in feature infos from %s ... " %(gt_feat_file))
+    with open(gp_feat_file) as f:
+        for line in f:
+            row = line.strip()
+            cols = line.strip().split("\t")
+            feat_id = cols[0]
+            gt_fid2row_dic[feat_id] = row
+    f.closed
+    assert gt_fid2row_dic, "no feature infos found in --gt-in feature file %s" %(gt_feat_file)
+    # Compare gt+train features.
+    for fid in fid2row_dic:
+        assert fid in gp_fid2row_dic, "graphprot2 train feature ID \"%s\" not found in %s" %(fid, gp_feat_file)
+
+    # Context + bp settings.
+    seqs_all_uc = True
+    bps_mode = 1
+
+    # Check sequence feature.
+    assert "fa" in fid2type_dic, "feature ID \"fa\" not in feature file"
+    assert fid2cat_dic["fa"] == ["A", "C", "G", "U"], "sequence feature alphabet != A,C,G,U"
+
+    # Read in FASTA sequences.
+    pos_fa_in = args.in_gt_folder + "/" + "positives.fa"
+    assert os.path.exists(pos_fa_in), "--gt-in folder does not contain %s"  %(pos_fa_in)
+    seqs_dic = read_fasta_into_dic(pos_fa_in, all_uc=seqs_all_uc)
+    assert seqs_dic, "no sequences read in from FASTA file \"%s\"" %(pos_fa_in)
+
+    # Get uppercase (viewpoint) region start and ends for each sequence.
+    vp_dic = extract_uc_region_coords_from_fasta(seqs_dic)
+
+    # Data dictionaries.
+    bpp_dic = {}
+    feat_dic = {}
+
+    # Init feat_dic (storing node feature vector data) with sequence one-hot encodings.
+    for seq_id in seqs_dic:
+        seq = seqs_dic[seq_id]
+        l_seq = len(seq)
+        feat_dic[seq_id] = []
+        feat_dic[seq_id] = string_vectorizer(seq, custom_alphabet=fid2cat_dic["fa"])
+
+    # Channel info dictionary.
+    ch_info_dic = {}
+
+    # Add sequence one-hot channels.
+    ch_info_dic["fa"] = ["C", [], []]
+    for c in fid2cat_dic["fa"]:
+        channel_nr += 1
+        channel_id = "fa" + "_" + c
+        channel_info = "%i\t%s\tfa\tC\tone_hot" %(channel_nr, channel_id)
+        channel_info_list.append(channel_info)
+        ch_info_dic["fa"][1].append(channel_nr-1)
+        ch_info_dic["fa"][2].append(channel_id)
+
+    # Check and read in more data.
+    for fid, ftype in sorted(fid2type_dic.items()): # fid e.g. fa, ftype: C,N.
+        if fid == "fa": # already added to feat_dic (first item).
+            continue
+        # base pairs not supported by eval so far, so do not load.
+        #if fid == "bpp.str":
+        #    test_bpp_in = args.in_folder + "/" + "test.bpp.str"
+        #    assert os.path.exists(test_bpp_in), "--in folder does not contain %s"  %(test_bpp_in)
+        #    print("Read in base pair data ... ")
+        #    bpp_dic = read_bpp_into_dic(test_bpp_in, vp_dic,
+        #                                bps_mode=args.bps_mode)
+        #    assert bpp_dic, "no base pair information read in (bpp_dic empty)"
+
+        # All features (additional to .fa) like .elem_p.str, .con, .eia, .tra, .rra, or user defined.
+        feat_alphabet = fid2cat_dic[fid]
+        pos_feat_in = args.in_folder + "/positives." + fid
+        assert os.path.exists(pos_feat_in), "--in folder does not contain %s"  %(pos_feat_in)
+        print("Read in .%s annotations ... " %(fid))
+        n_to_1h = False
+        # Special case: convert elem_p.str probabilities to 1-hot encoding.
+        if fid == "elem_p.str" and args.str_elem_1h:
+            n_to_1h = True
+        feat_dic = read_feat_into_dic(pos_feat_in, ftype,
+                                      feat_dic=feat_dic,
+                                      n_to_1h=n_to_1h,
+                                      label_list=feat_alphabet)
+        assert feat_dic, "no .%s information read in (feat_dic empty)" %(fid)
+        if fid == "elem_p.str" and args.str_elem_1h:
+            ftype = "C"
+        ch_info_dic[fid] = [ftype, [], []]
+        if ftype == "N":
+            for c in feat_alphabet:
+                channel_nr += 1
+                channel_id = c
+                encoding = fid2norm_dic[fid]
+                channel_info = "%i\t%s\t%s\tN\t%s" %(channel_nr, channel_id, fid, encoding)
+                channel_info_list.append(channel_info)
+                ch_info_dic[fid][1].append(channel_nr-1)
+                ch_info_dic[fid][2].append(channel_id)
+        elif ftype == "C":
+            for c in feat_alphabet:
+                channel_nr += 1
+                #channel_id = fid + "_" + c
+                channel_id = c
+                channel_info = "%i\t%s\t%s\tC\tone_hot" %(channel_nr, channel_id, fid)
+                channel_info_list.append(channel_info)
+                ch_info_dic[fid][1].append(channel_nr-1)
+                ch_info_dic[fid][2].append(channel_id)
+        else:
+            assert False, "invalid feature type given (%s) for feature %s" %(ftype,fid)
+
+    # Output channel infos.
+    CIOUT = open(channel_infos_out, "w")
+    CIOUT.write("ch\tch_id\tfeat_id\tfeat_type\tencoding\n")
+    for ch_info in channel_info_list:
+        CIOUT.write("%s\n" %(ch_info))
+    CIOUT.close()
+
+    """
+    Generate feature+edges lists or graph list (if return_graphs=True)
+    to return.
+
+    """
+    # Sequence ID list + label list.
+    seq_ids_list = []
+    label_list = []
+    idx2id_dic = {}
+    id2idx_dic = {}
+    i = 0
+    for seq_id,seq in sorted(seqs_dic.items()):
+        seq_ids_list.append(seq_id)
+        label_list.append(i)
+        id2idx_dic[seq_id] = i
+        idx2id_dic[i] = seq_id
+        i += 1
+
+    # Store node data in list of 2d lists.
+    all_features = []
+
+    for idx, label in enumerate(label_list):
+        seq_id = seq_ids_list[idx]
+        seq = seqs_dic[seq_id]
+        l_seq = len(seq)
+
+        # Checks.
+        check_num_feat = len(feat_dic[seq_id][0])
+        assert args.num_features == check_num_feat, "# features (num_features) from model parameter file != loaded number of node features (%i != %i)" %(model_num_feat, check_num_feat)
+        # Appendo.
+        all_features.append(feat_dic[seq_id])
+
+    # Return some double talking jive data.
+    assert all_features, "all_features empty"
+    return seqs_dic, idx2id_dic, all_features, ch_info_dic
+
+
+################################################################################
+
 def load_predict_data(args,
                       return_graphs=False):
 
@@ -9360,8 +9566,6 @@ def load_predict_data(args,
     assert "num_features" in params_dic, "num_features info missing in model parameter file %s" %(params_file)
     model_num_feat = int(params_dic["num_features"])
 
-    # Data ID.
-    data_id = data_id
     # graphprot2 predict output folder.
     out_folder = args.out_folder
     if not os.path.exists(out_folder):
