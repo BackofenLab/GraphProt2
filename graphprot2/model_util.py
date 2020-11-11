@@ -116,7 +116,7 @@ def get_scores(loader, device, model,
     with torch.no_grad():
         for data in loader:
             data = data.to(device)
-            l_x = len(data.x)
+            #l_x = len(data.x)
             #print("len.x:", l_x)
             #print("data.x:", data.x)
             #print("data.y:", data.y)

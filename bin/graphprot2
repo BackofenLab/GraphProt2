@@ -305,11 +305,16 @@ def setup_argument_parser():
                    default = 0.3,
                    help = "Minimum profile score of position to be included in motif (default: 0.3)")
     p_ev.add_argument("--win-size",
-                   dest="list_win_sizes",
+                   dest="win_size",
                    type = int,
-                   nargs='+',
-                   default = [7],
-                   help = "Windows size(s) for calculating position-wise scoring profiles. Provide multiple sizes (e.g. --win-size 5 7 9) to compute average profiles (default: 7)")
+                   default = 7,
+                   metavar='int',
+                   help = "Windows size for calculating position-wise scoring profiles (default: 7)")
+    p_tra.add_argument("--bottoms-up",
+                   dest = "bottoms_up",
+                   default = False,
+                   action = "store_true",
+                   help = "Plot bottom profiles and motifs as well (default: False)")
     p_ev.add_argument("--plot-format",
                    dest="plot_format",
                    type = int,
@@ -1519,15 +1524,10 @@ def main_eval(args):
     # More checks.
     assert args.motif_sc_thr <= 1 and args.motif_sc_thr >= -1, "--motif-sc-thr must be within -1 and 1"
     # Window size.
-    assert args.list_win_sizes, "empty --win-sizes list given"
-    min_win_size = 666666
-    for win_size in args.list_win_sizes:
-        if (win_size-1) % 2:
-            assert False, "only uneven window size values supported"
-        if win_size < 5:
-            assert False, "window size should be >= 5"
-        if win_size < min_win_size:
-            min_win_size = win_size
+    if (args.win_size-1) % 2:
+        assert False, "only uneven window size values supported (5,7,9, ...)"
+    if args.win_size < 5:
+        assert False, "window size should be >= 5"
     # Motif size.
     for motif_size in args.list_motif_sizes:
         if (motif_size-1) % 2:
@@ -1572,6 +1572,12 @@ def main_eval(args):
     assert gp2_train_feat_dic, "no features found in %s" %(gp2_train_feat_out_file)
     assert "bpp.str" not in gp2_train_feat_dic, "--train-in model was trained with base pair information, but so far graphprot2 (v%s) does not support the visualization of base pair information" %(__version__)
 
+    # Some facts.
+    print("# dataset features:    %i" %(dataset.num_features))
+    print("Window size:          ", args.win_size)
+    print("Top site numbers:     ", args.list_nr_top_sites)
+    print("Motif sizes:          ", args.list_motif_sizes)
+
     # Check for CUDA support.
     if torch.cuda.is_available():
         print("CUDA: I'm available. Using GPU ... ")
@@ -1591,10 +1597,13 @@ def main_eval(args):
     SETOUT.close()
 
     # Load data.
+    print("Load positive training set from --train-in ... ")
     seqs_dic, idx2id_dic, all_features, ch_info_dic = gp2lib.load_eval_data(args)
+    l_dataset = len(all_features)
+    print("Dataset size:          %i" %(len(l_dataset)))
 
     # Load trained model.
-    print("Load model ... ")
+    print("Load trained model from --train-in ... ")
     model = FunnelGNN(input_dim=num_features,
                       node_hidden_dim=node_hidden_dim,
                       dropout_rate=dr,
@@ -1606,448 +1615,116 @@ def main_eval(args):
     model_path = args.in_train_folder + "/" + str(batch_size) + "_" + str(node_hidden_dim) + "_" + str(weight_decay) + "_" + lr_str + "_" + dr_str
     model.load_state_dict(torch.load(model_path))
 
+    # Create whole site graphs.
+    all_graphs = []
 
-
-    # Predict.
-    """
-    all_features
-    all_scores[0] = [sc1, sc2, sc3 ...]
-    Length = sequence length
-
-    all_features[0][0] : first sequence, first feature vector
-
-    all_win_graphs = []
-    seq_len_list = []
-    for idx,feat_list in enumerate(all_features):
-        l_seq = len(feat_list)
-        seq_len_list.append(l_seq)
-        win_scores = []
-        for w_size in list_w_sizes:
-
-    extlr = int(w_size/2)
-    seq_lengths_list = []
-
-
-
-        extlr = int(w_size/2)
-        # For each position in graph.
-        for i in range(g_len):
-            reg_s = i - extlr
-            reg_e = i + extlr + 1
-            # If lowercase context extension specified.
-            if con_ext:
-                reg_s = reg_s - lc_ext
-                reg_e = reg_e + lc_ext
-            if reg_e > g_len:
-                reg_e = g_len
-            if reg_s < 0:
-                reg_s = 0
-
-            if con_ext:
-                center_pos = i + 1
-                sl_node_labels = get_uc_lc_list_segment(list_node_labels,
-                                                        center_pos,
-                                                        vp_ext=extlr,
-                                                        con_ext=lc_ext)
-            else:
-                sl_node_labels = list_node_labels[reg_s:reg_e]
-
-
-
-
-
-
-
-
-
-
-    for idx, label in enumerate(label_list):
-        seq_id = seq_ids_list[idx]
-        seq = seqs_dic[seq_id]
-        l_seq = len(seq)
-        seq_lengths_list.append(l_seq)
-
-
-        # Make edge indices for backbone.
+    print("Create whole-site graphs ... ")
+    for feat_list in all_features:
+        l_feat = len(feat_list)
         edge_index_1 = []
         edge_index_2 = []
-        # Edge indices 0-based!
-        for n_idx in range(l_seq - 1):
-            edge_index_1.append(n_idx)
-            edge_index_2.append(n_idx+1)
-            # In case of undirected graphs, add backward edges too.
+        for ni in range(l_feat - 1):
+            edge_index_1.append(ni)
+            edge_index_2.append(ni+1)
             if args.undirected:
-                edge_index_1.append(n_idx+1)
-                edge_index_2.append(n_idx)
-
-
-        # Add base pair edges.
-        if bpp_dic:
-            vp_s = vp_dic[seq_id][0] # 1-based.
-            vp_e = vp_dic[seq_id][1] # 1-based.
-            # Entry e.g. 'CLIP_01': ['130-150,0.33', '160-200,0.44', '240-260,0.55']
-            for entry in bpp_dic[seq_id]:
-                m = re.search("(\d+)-(\d+),(.+)", entry)
-                p1 = int(m.group(1)) # 1-based.
-                p2 = int(m.group(2)) # 1-based.
-                bpp_value = float(m.group(3))
-                g_p1 = p1 - 1 # 0-based base pair index.
-                g_p2 = p2 - 1 # 0-based base pair index.
-                # Filter.
-                if bpp_value < args.bps_cutoff: continue
-                # Add base pair depending on set mode.
-                add_edge = False
-                if args.bps_mode == 1:
-                    if (p1 >= vp_s and p1 <= vp_e) or (p2 >= vp_s and p2 <= vp_e):
-                        add_edge = True
-                elif args.bps_mode == 2:
-                    if p1 >= vp_s and p2 <= vp_e:
-                        add_edge = True
-                if add_edge:
-                    edge_index_1.append(g_p1)
-                    edge_index_1.append(g_p2)
-                    if args.undirected:
-                        edge_index_1.append(g_p2)
-                        edge_index_2.append(g_p1)
-
-
-
+                edge_index_1.append(ni+1)
+                edge_index_2.append(ni)
         edge_index = torch.tensor([edge_index_1, edge_index_2], dtype=torch.long)
-        x = torch.tensor(feat_dic[seq_id], dtype=torch.float)
-        data = Data(x=x, edge_index=edge_index, y=label)
-        all_graphs.append(data)
+        x = torch.tensor(feat_list, dtype=torch.float)
+        data = Data(x=x, edge_index=edge_index, y=1)
+        all_win_graphs.append(data)
 
+    # Checks.
+    c_all_graphs = len(all_graphs)
+    c_all_features = len(all_features)
+    assert c_all_graphs, "no whole-site graphs constructed (# graphs == 0)"
+    assert c_all_graphs == c_all_features, "# of graphs != # of list instances (%i != %i)" %(c_all_graphs, c_all_features)
 
+    # Load dataset.
+    print("Load whole-site graphs dataset ... ")
+    predict_dataset = MyDataset(all_graphs)
+    predict_loader = DataLoader(predict_dataset, batch_size=batch_size, shuffle=False)
 
+    # Predict.
+    print("Predict whole sites ... ")
+    ws_scores = model_util.get_scores(predict_loader, device, model,
+                                      min_max_norm=True)
 
+    # Checks.
+    c_ws_scores = len(ws_scores)
+    assert c_ws_scores == c_all_graphs, "# whole-site scores != of whole-site graphs (%i != %i)" %(c_ws_scores, c_all_graphs)
 
+    # Create window graphs.
+    all_win_graphs = []
+    seq_len_list = []
+    c_all_seq_len = 0
+    extlr = int(args.win_size/2)
 
+    print("Create window graphs ... ")
+    for feat_list in all_features:
+        l_seq = len(feat_list)
+        # l_seq == window graphs for sequence.
+        seq_len_list.append(l_seq)
+        c_all_seq_len += l_seq
+        # For each position in feat_list.
+        l_feat = len(feat_list)
+        for wi in range(l_feat):
+            reg_s = wi - extlr
+            reg_e = wi + extlr + 1
+            if reg_e > l_feat:
+                reg_e = l_feat
+            if reg_s < 0:
+                reg_s = 0
+            feat_list_win = feat_list[reg_s:reg_e]
+            l_feat_win = len(feat_list_win)
+            # Construct window graph.
+            edge_index_1 = []
+            edge_index_2 = []
+            for ni in range(l_feat_win - 1):
+                edge_index_1.append(ni)
+                edge_index_2.append(ni+1)
+                if args.undirected:
+                    edge_index_1.append(ni+1)
+                    edge_index_2.append(ni)
 
+            edge_index = torch.tensor([edge_index_1, edge_index_2], dtype=torch.long)
+            x = torch.tensor(feat_list_win, dtype=torch.float)
+            data = Data(x=x, edge_index=edge_index, y=1)
+            all_win_graphs.append(data)
 
-        # Load data as graphs.
-        print("Load prediction data as graphs ... ")
-        seqs_dic, idx2id_dic, all_graphs = gp2lib.load_predict_data(args,
-                                                       return_graphs=True)
+    # Checks.
+    c_all_win_graphs = len(all_win_graphs)
+    assert c_all_win_graphs, "no window graphs constructed (# window graphs == 0)"
+    assert c_all_seq_len == c_all_win_graphs, "total sequence length != # of window graphs (%i != %i)" %(c_all_seq_len, c_all_win_graphs)
 
-        print("# dataset features:  %i" %(num_features))
-        print("Dataset size:        %i" %(len(all_graphs)))
+    # Load dataset.
+    print("Load window graphs dataset ... ")
+    predict_dataset = MyDataset(all_win_graphs)
+    predict_loader = DataLoader(predict_dataset, batch_size=batch_size, shuffle=False)
 
-        # Load model.
-        print("Load model ... ")
-        model = FunnelGNN(input_dim=num_features,
-                          node_hidden_dim=node_hidden_dim,
-                          fc_hidden_dim=fc_hidden_dim,
-                          dropout_rate=dr,
-                          out_dim=2).to(device)
-        model.load_state_dict(torch.load(model_file))
+    # Predict.
+    print("Predict windows ... ")
+    win_scores = model_util.get_scores(predict_loader, device, model,
+                                       min_max_norm=True)
 
-        # Prepare dataset.
-        predict_dataset = MyDataset(all_graphs)
-        predict_loader = DataLoader(predict_dataset, batch_size=batch_size, shuffle=False)
+    # Checks.
+    c_win_scores = len(win_scores)
+    assert c_win_scores == c_all_seq_len, "# window graph scores != total sequence length (%i != %i)" %(c_win_scores, c_all_seq_len)
 
-        # Get whole site scores.
-        print("Do the whole site predictions ... ")
-        ws_scores = model_util.get_scores(predict_loader, device, model,
-                                          min_max_norm=True)
-
-        # Checks.
-        assert len(ws_scores) == len(seqs_dic), "# test sequences != # whole site scores (%i != %i)" %(len(ws_scores), len(seqs_dic))
-        # Output whole site scores.
-        WSOUT = open(ws_scores_out, "w")
-        for i,sc in enumerate(ws_scores):
-            seq_id = idx2id_dic[i]
-            WSOUT.write("%s\t%f\n" %(seq_id, sc))
-        WSOUT.close()
-        # Output BED too with scores.
-        if not only_seq:
-            WSOUT = open(ws_scores_bed, "w")
-            for i,sc in enumerate(ws_scores):
-                seq_id = idx2id_dic[i]
-                chr_id = id2chr_dic[seq_id]
-                site_s = id2s_dic[seq_id]
-                site_e = id2e_dic[seq_id]
-                site_pol = id2pol_dic[seq_id]
-                WSOUT.write("%s\t%i\t%i\t%s\t%f\t%s\n" %(chr_id, site_s, site_e, seq_id, sc, site_pol))
-            WSOUT.close()
-
-
-
-    """
-
-
-
-    # Read in PTG raw data.
-    dataset = TUDataset(data_folder, name=data_id, use_node_attr=use_node_attr)
-    assert len(dataset), "read-in dataset empty"
-    print("# dataset features:    %i" %(dataset.num_features))
-    print("Dataset size:          %i" %(len(dataset)))
-    print("Window sizes:         ", args.list_win_sizes)
-    print("Top site numbers:     ", args.list_nr_top_sites)
-    print("Motif sizes:          ", args.list_motif_sizes)
-
-    # Sequence alphabet.
-    seq_alphabet = ["A","C","G","U"]
-    if con_ext:
-        seq_alphabet = ["A","C","G","U","a","c","g","u"]
-    print("Sequence alphabet:          ", seq_alphabet)
-    # Exon-intron annotation alphabet.
-    eia_alphabet = ["E", "I"]
-    if "eia" in feat_alphabet_dic:
-        eia_alphabet = feat_alphabet_dic["eia"]
-        print("Exon-intron alphabet:       ", eia_alphabet)
-    rra_alphabet = ["N", "R"]
-    if "rra" in feat_alphabet_dic:
-        rra_alphabet = feat_alphabet_dic["rra"]
-        print("Repeat region alphabet:     ", rra_alphabet)
-    tra_alphabet = ["C", "F", "T"]
-    if "tra" in feat_alphabet_dic:
-        tra_alphabet = feat_alphabet_dic["tra"]
-        print("Transcript region alphabet: ", tra_alphabet)
-
-    # Graphs list.
-    graphs = [dataset[idx] for idx in range(dataset.__len__())]
-    labels = [g.y for g in graphs]
-
-    # Check number of features.
-    assert dataset.num_features >= 4, "# dataset features expected to be >= 4"
-
-    # Get positive graphs.
-    print("Selecting positive sites ... ")
-    pos_graphs = []
-    for g in graphs:
-        if g.y == 1:
-            pos_graphs.append(g)
-    assert pos_graphs, "no positive sites (graph label == 1) in dataset"
-    print("# positive sites:      %i" %(len(pos_graphs)))
-
-    # Data loader object.
-    pos_set = MyDataset(pos_graphs)
-    batch_size = 1
-    pos_loader = DataLoader(pos_set, batch_size=batch_size, shuffle=False)
-
-    # CUDA device.
-    if torch.cuda.is_available():
-        print("CUDA: I'm available. Using GPU ... ")
-    else:
-        print("CUDA: I'm NOT available. Using CPU ... ")
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    #print("CALEB: sailing sailing, over the bounding main ... ")
-
-    # Define model.
-    model = FunnelGNN(input_dim=dataset.num_features,
-                      node_hidden_dim=node_hidden_dim,
-                      fc_hidden_dim=fc_hidden_dim,
-                      out_dim=2).to(device)
-
-
-    # Load model state dictionary.
-    model.load_state_dict(torch.load(model_file))
-
-    # Get site scores.
-    print("Get positive whole site scores (class 1 probabilities) ... ")
-    pos_site_probs = model_util.get_site_probs(pos_loader, device, model)
-    assert pos_site_probs, "pos_site_probs list empty"
-
-    # Normalize class 1 probabilities to -1 .. 1.
-    #for i,p in enumerate(pos_site_probs):
-    #    pos_site_probs[i] = gp2lib.min_max_normalize(p, 1, 0, borders=[-1, 1])
-
-    """
-    Method 1
-    ========
-
-    Predict subgraphs. batch_size of 1 needed to execute this code.
-
-    # Get position-wise subgraph scores (-1 .. 1) to compare with second method.
-    print("Get positive position-wise subgraph scores ... ")
-    subgraph_scores_ll = model_util.get_subgraph_scores(pos_loader, device,
-                                                        model, args.list_win_size,
-                                                        softmax=False)
-
-    Find out why this nice strategy yields different results ...
-
-    """
-
-
-    """
-    Method 2
-    ========
-
-    For each graph, split to windows, output each window in raw format,
-    predict on it, get scores and assemble for each graph all_scores list,
-    containing a list of scores for each window + at the end the mean scores.
-
-    """
-    batch_size = 50
-    # 1-hot string to nucleotide label.
-    hot2l_dic = {'1000': 1,
-                 '0100': 2,
-                 '0010': 3,
-                 '0001': 4}
-    hot2nt_dic = {'1000': "A",
-                  '0100': "C",
-                  '0010': "G",
-                  '0001': "U"}
-    # If lowercase context model.
-    if con_ext:
-        hot2l_dic = {'10000000': 1,
-                     '01000000': 2,
-                     '00100000': 3,
-                     '00010000': 4,
-                     '00001000': 5,
-                     '00000100': 6,
-                     '00000010': 7,
-                     '00000001': 8}
-        hot2nt_dic = {'10000000': "A",
-                      '01000000': "C",
-                      '00100000': "G",
-                      '00010000': "U",
-                      '00001000': "a",
-                      '00000100': "c",
-                      '00000010': "g",
-                      '00000001': "u"}
-
-    # Get character counts for sequences.
-    cc_dic = gp2lib.seqs_dic_count_chars(pos_seqs_dic)
-    # Check for invalid nucleotides characters.
-    allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1}
-    c_nts = 4
-    if con_ext:
-        allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1, 'a': 1, 'c': 1, 'g': 1, 'u': 1}
-        c_nts = 8
-    for nt in cc_dic:
-        if nt not in allowed_nt_dic:
-            assert False, "positive sequences with invalid character \"%s\" encountered (allowed characters: ACGU(acgu)" %(nt)
-    assert len(cc_dic) == c_nts, "# of nucleotide characters in positive set != expected # (%i != %i)" %(len(cc_dic), c_nts)
-
+    # Create list of profile scores.
     profile_scores_ll = []
-    seqs_ll = []
-    eia_ll = []
-    tra_ll = []
-    rra_ll = []
-    pc_ll = []
-    pp_ll = []
+    si = 0
+    for l in seq_len_list:
+        se = si + l
+        profile_scores_ll.append(win_scores[si:se])
+        si += l
+    assert profile_scores_ll, "profile_scores_ll list empty"
 
-    print("Compute profile scores ... ")
-    for g in pos_graphs:
-        x = g.x
-        x = x.tolist()
-        g_l = len(x)
-        # List of node attributes.
-        list_node_attr = []
-        # List of node labels.
-        list_node_labels = []
-        # More lists.
-        seqs_list = [] # nucleotide labels.
-        eia_list = [] # exon-intron labels.
-        rra_list = [] # repeat region labels.
-        tra_list = [] # transcript region labels.
-        pc_list = [] # phastCons scores.
-        pp_list = [] # phastCons scores.
-
-        for v in x:
-            if use_node_attr:
-                nav = v[:-c_nts]
-                # Exon-intron labels list.
-                if "eia" in featid2ch_dic:
-                    for ch in featid2ch_dic["eia"]:
-                        v_i = ch - 1
-                        if v[v_i]:
-                            eia_list.append(ch2label[ch])
-                            break
-                # Repeat region labels list.
-                if "rra" in featid2ch_dic:
-                    for ch in featid2ch_dic["rra"]:
-                        v_i = ch - 1
-                        if v[v_i]:
-                            rra_list.append(ch2label[ch])
-                            break
-                # Transcript region labels list.
-                if "tra" in featid2ch_dic:
-                    for ch in featid2ch_dic["tra"]:
-                        v_i = ch - 1
-                        if v[v_i]:
-                            tra_list.append(ch2label[ch])
-                            break
-                # Conservation scores.
-                if "pc.con" in featid2ch_dic:
-                    v_i = featid2ch_dic["pc.con"][0] - 1
-                    pc_list.append(v[v_i])
-                if "pp.con" in featid2ch_dic:
-                    v_i = featid2ch_dic["pp.con"][0] - 1
-                    pp_list.append(v[v_i])
-
-                # assert len(nav) > c_dist_nts, "invalid number of node attributes (expects > 4, got %i)" %(len(nav))
-                new_nav = [str(e) for e in v[:-c_nts]]
-                list_node_attr.append(",".join(new_nav))
-
-            seq_1h = [int(e) for e in v[-c_nts:]]
-            seq_1h_s = [str(e) for e in seq_1h]
-            seq_1h_s = "".join(seq_1h_s)
-            assert seq_1h_s in hot2l_dic, "seq_1h_s %s not in hot2l_dic" %(seq_1h_s)
-            n_i = hot2l_dic[seq_1h_s]
-            list_node_labels.append(n_i)
-            # Get sequence nucleotides list.
-            nt = hot2nt_dic[seq_1h_s]
-            seqs_list.append(nt)
-
-        # Tickets please.
-        assert list_node_labels, "list_node_labels empty"
-        if use_node_attr:
-            if "eia" in featid2ch_dic:
-                assert len(list_node_labels) == len(eia_list), "differing list lengths for list_node_labels and eia_list"
-            if "rra" in featid2ch_dic:
-                assert len(list_node_labels) == len(rra_list), "differing list lengths for list_node_labels and rra_list"
-            if "tra" in featid2ch_dic:
-                assert len(list_node_labels) == len(tra_list), "differing list lengths for list_node_labels and tra_list"
-            if "pc.con" in featid2ch_dic:
-                assert len(list_node_labels) == len(pc_list), "differing list lengths for list_node_labels and pc_list"
-            if "pp.con" in featid2ch_dic:
-                assert len(list_node_labels) == len(pp_list), "differing list lengths for list_node_labels and pp_list"
-
-        seqs_ll.append(seqs_list)
-        if eia_list:
-            eia_ll.append(eia_list)
-        if rra_list:
-            rra_ll.append(rra_list)
-        if tra_list:
-            tra_ll.append(tra_list)
-        if pc_list:
-            pc_ll.append(pc_list)
-        if pp_list:
-            pp_ll.append(pp_list)
-
-        # Skip sequences containing < 4 different nucleotides.
-        #if len(set(list_node_labels)) != 4:
-        #    profile_scores_ll.append([])
-        #    continue
-
-        # Get position-wise profile scores for graph.
-        profile_scores = model_util.get_window_scores(args.list_win_sizes,
-                                          dataset_name=data_id,
-                                          list_node_attr=list_node_attr,
-                                          list_node_labels=list_node_labels,
-                                          use_node_attr=use_node_attr,
-                                          model=model,
-                                          device=device,
-                                          lc_context=con_ext,
-                                          con_ext=False,
-                                          batch_size=batch_size,
-                                          geometric_folder=out_folder)
-
-        profile_scores_ll.append(profile_scores)
-
-
-    assert len(profile_scores_ll) == len(pos_site_probs), "differing list lengths for profile_scores_ll and pos_site_probs (%i != %i)" %(len(profile_scores_ll), len(pos_site_probs))
-
-    #print("profile_scores_ll[0]:", profile_scores_ll[0])
-    #print("seqs_ll[0]:", seqs_ll[0])
-    #print("eia_ll[0]:", eia_ll[0])
-    #print("pc_ll[0]:", pc_ll[0])
-
+    # Connect graph indices to scores.
     gi2sc_dic = {}
-    for i, pr in enumerate(pos_site_probs):
-        gi2sc_dic[i] = pr
+    for i, sc in enumerate(win_scores):
+        gi2sc_dic[i] = sc
+
 
     """
     Plot profiles and motifs
@@ -2057,23 +1734,33 @@ def main_eval(args):
     - Get profile plot for each site.
     - Get motifs inside the set by selecting positions with max score,
       and take sequence around them (defined by motif size).
+    - Also generate a bottom motif and the bottom scoring sites, if
+      --bottoms-up is set.
 
     """
-    profile_plots_folder = args.out_folder + "/" + "profile_plots_out"
-    if os.path.exists(profile_plots_folder):
-        shutil.rmtree(profile_plots_folder)
-    os.makedirs(profile_plots_folder)
-    win_info_str = ""
-    for win_size in args.list_win_sizes:
-        win_info_str += "w%i" %(win_size)
+    top_profiles_folder = args.out_folder + "/" + "top_profiles_out"
+    if os.path.exists(top_profiles_folder):
+        shutil.rmtree(top_profiles_folder)
+    os.makedirs(top_profiles_folder)
+    bottom_profiles_folder = args.out_folder + "/" + "top_profiles_out"
+    if os.path.exists(bottom_profiles_folder):
+        shutil.rmtree(bottom_profiles_folder)
+    if args.bottoms_up:
+        os.makedirs(bottom_profiles_folder)
+
+    win_info_st = "w%i" %(args.win_size)
 
     # Sort graphs by score to evaluate top sites.
     rank_scores_out = args.out_folder + "/rank_score_sites.out"
     RSOUT = open(rank_scores_out, "w")
     site_count = 0
     id_i = 10 ** len(str(args.nr_top_profiles))
-    c_thr_skipped = 0
+    # Store max score positions for each sequence.
+    id2maxpos_dic = {}
+    # Store min score positions for each sequence.
+    id2minpos_dic = {}
 
+    # Plot top --nr-top-profiles profiles and output all site scores.
     print("Plot top %i profiles ... " %(args.nr_top_profiles))
     for gi, sc in sorted(gi2sc_dic.items(), key=lambda item: item[1], reverse=True):
         # Profile scores.
@@ -2082,49 +1769,242 @@ def main_eval(args):
             continue
         site_count += 1
         id_i += 1
+        seq_id = idx2id_dic[gi]
+        seq = seqs_dic[seq_id]
 
-        # Store ranke + score info.
-        RSOUT.write("%i\t%f\n" %(site_count, sc))
+        # Get maximum score position.
+        max_pos = 0
+        max_sc = -1000000
+        min_pos = 0
+        min_sc = 1000000
+        for i,sc in enumerate(profile_scores):
+            if sc > max_sc:
+                max_sc = sc
+                max_pos = i
+            if sc < min_sc:
+                min_sc = sc
+                min_pos = i
+        id2maxpos_dic[seq_id] = max_pos
+        id2minpos_dic[seq_id] = min_pos
 
-        # Sequence nucleotides list.
-        seq_list = seqs_ll[gi]
-        # Site sequence.
-        seq = "".join(seqs_ll[gi])
-        # Label and score lists.
-        exon_intron_labels = False
-        repeat_region_labels = False
-        transcript_region_labels = False
-        phastcons_scores = False
-        phylop_scores = False
-        if use_node_attr:
-            if "eia" in featid2ch_dic:
-                exon_intron_labels = eia_ll[gi]
-            if "rra" in featid2ch_dic:
-                repeat_region_labels = rra_ll[gi]
-            if "tra" in featid2ch_dic:
-                transcript_region_labels = tra_ll[gi]
-            if "pc.con" in featid2ch_dic:
-                phastcons_scores = pc_ll[gi]
-            if "pp.con" in featid2ch_dic:
-                phylop_scores = pp_ll[gi]
+        # Store rank + site ID + score in file.
+        RSOUT.write("%i\t%s\t%f\n" %(site_count, seq_id, sc))
 
+        # Print only top --nr-top-profiles profiles.
         if site_count <= args.nr_top_profiles:
-
+            # Plot file.
             plot_file_name = str(id_i)[1:] + "_" + win_info_str + "_sc" + str(sc) + "." + plot_format
-            plot_out_file = profile_plots_folder + "/" + plot_file_name
+            plot_out_file = top_profiles_folder + "/" + plot_file_name
+            # Plot profile.
+            gp2lib.make_feature_attribution_plot(seq, profile_scores, all_features[gi],
+                                                  ch_info_dic, plot_out_file,
+                                                  seq_label_plot=False)
 
-            gp2lib.make_feature_attribution_plot(seq, profile_scores, plot_out_file,
-                                          seq_alphabet=seq_alphabet,
-                                          eia_alphabet=eia_alphabet,
-                                          tra_alphabet=tra_alphabet,
-                                          rra_alphabet=rra_alphabet,
-                                          seq_label_plot=False,
-                                          exon_intron_labels=exon_intron_labels,
-                                          transcript_region_labels=transcript_region_labels,
-                                          repeat_region_labels=repeat_region_labels,
-                                          phastcons_scores=phastcons_scores,
-                                          phylop_scores=phylop_scores)
     RSOUT.close()
+
+    # Plot bottom profiles too.
+    if args.bottoms_up:
+        print("Plot bottom %i profiles ... " %(args.nr_top_profiles))
+        site_count = 0
+        for gi, sc in sorted(gi2sc_dic.items(), key=lambda item: item[1], reverse=False):
+            # Profile scores.
+            profile_scores = profile_scores_ll[gi]
+            if not profile_scores:
+                continue
+            site_count += 1
+            id_i += 1
+            seq_id = idx2id_dic[gi]
+            seq = seqs_dic[seq_id]
+
+            # Store rank + site ID + score in file.
+            RSOUT.write("%i\t%s\t%f\n" %(site_count, seq_id, sc))
+
+            # Print only top --nr-top-profiles profiles.
+            if site_count <= args.nr_top_profiles:
+                # Plot file.
+                plot_file_name = str(id_i)[1:] + "_" + win_info_str + "_sc" + str(sc) + "." + plot_format
+                plot_out_file = bottom_profiles_folder + "/" + plot_file_name
+                # Plot profile.
+                gp2lib.make_feature_attribution_plot(seq, profile_scores, all_features[gi],
+                                                      ch_info_dic, plot_out_file,
+                                                      seq_label_plot=False)
+            else:
+                break
+
+"""
+id2maxpos_dic
+args.motif_sc_thr
+
+
+
+
+    print("Plot top motifs ... ")
+
+    motif_file_info_dic = {}
+
+    # For each motif size.
+    for motif_size in args.list_motif_sizes:
+
+        # Motif center position extension.
+        motif_extlr = int(motif_size / 2)
+
+        # For each number of top sites.
+        for nr_top_sites in args.list_nr_top_sites:
+
+            print("Create motif (size %i) from top %i sites ... " %(motif_size, nr_top_sites))
+            site_count = 0
+            c_thr_skipped = 0
+
+            for gi, sc in sorted(gi2sc_dic.items(), key=lambda item: item[1], reverse=True):
+                # Profile scores.
+                profile_scores = profile_scores_ll[gi]
+                if not profile_scores:
+                    continue
+
+                seq_id = idx2id_dic[gi]
+                seq = seqs_dic[seq_id]
+                max_pos = id2maxpos_dic[seq_id]
+                max_sc = profile_scores[max_pos]
+
+                # Minimum window score for extracting motifs.
+                if max_sc < args.motif_sc_thr:
+                    c_thr_skipped += 1
+                    continue
+
+                # Minimum sequence length for extracting motifs.
+                site_l = len(profile_scores)
+                if site_l < (motif_extlr*2 + 1):
+                    continue
+
+                s_
+    extlr = int(args.win_size/2)
+
+    print("Create window graphs ... ")
+    for feat_list in all_features:
+        l_seq = len(feat_list)
+        # l_seq == window graphs for sequence.
+        seq_len_list.append(l_seq)
+        c_all_seq_len += l_seq
+        # For each position in feat_list.
+        l_feat = len(feat_list)
+        for wi in range(l_feat):
+            reg_s = wi - extlr
+            reg_e = wi + extlr + 1
+            if reg_e > l_feat:
+                reg_e = l_feat
+            if reg_s < 0:
+                reg_s = 0
+            feat_list_win = feat_list[reg_s:reg_e]
+
+
+
+
+
+                tr_prof_sc = profile_scores[motif_extlr:-motif_extlr]
+                max_sc = -1
+                max_i = 0
+                for i,sc in enumerate(tr_prof_sc):
+                    if sc > max_sc:
+                        max_sc = sc
+                        max_i = i+motif_extlr
+                if max_sc < args.motif_sc_thr:
+                    print("max_sc < thr: %f" %(max_sc))
+                    c_thr_skipped += 1
+                    continue
+
+                site_count += 1
+
+                # Evaluate only nr_top_sites
+                if site_count > nr_top_sites:
+                    break
+
+                # Motif list start and end index.
+                motif_s = max_i - motif_extlr
+                motif_e = max_i + motif_extlr + 1
+                # Store motifs.
+                seq_motif_list = []
+                eia_motif_list = []
+                rra_motif_list = []
+                tra_motif_list = []
+                pc_motif_list = []
+                pp_motif_list = []
+                # Extract motif indices from lists.
+                for i in range(motif_s, motif_e):
+                    seq_motif_list.append(seq_list[i])
+                    if use_node_attr:
+                        if "eia" in featid2ch_dic:
+                            eia_motif_list.append(exon_intron_labels[i])
+                        if "rra" in featid2ch_dic:
+                            rra_motif_list.append(repeat_region_labels[i])
+                        if "tra" in featid2ch_dic:
+                            tra_motif_list.append(transcript_region_labels[i])
+                        if "pc.con" in featid2ch_dic:
+                            pc_motif_list.append(phastcons_scores[i])
+                        if "pp.con" in featid2ch_dic:
+                            pp_motif_list.append(phylop_scores[i])
+                assert seq_motif_list, "seq_motif_list empty"
+                motif_seqs_ll.append(seq_motif_list)
+                if use_node_attr:
+                    if "eia" in featid2ch_dic:
+                        motif_eia_ll.append(eia_motif_list)
+                    if "rra" in featid2ch_dic:
+                        motif_rra_ll.append(rra_motif_list)
+                    if "tra" in featid2ch_dic:
+                        motif_tra_ll.append(tra_motif_list)
+                    if "pc.con" in featid2ch_dic:
+                        motif_pc_ll.append(pc_motif_list)
+                    if "pp.con" in featid2ch_dic:
+                        motif_pp_ll.append(pp_motif_list)
+
+            # Plot motifs.
+            c_motifs = len(motif_seqs_ll)
+            assert c_motifs, "no motif sequences extracted"
+            print("# motif sequences extracted:  %i" %(c_motifs))
+            print("# motif sequences skipped:    %i" %(c_thr_skipped))
+
+            motif_plots_folder = args.out_folder
+            #motif_plots_folder = args.out_folder + "/" + "motif_plots_out"
+            #if os.path.exists(motif_plots_folder):
+            #    shutil.rmtree(motif_plots_folder)
+            #os.makedirs(motif_plots_folder)
+            motif_out_file = motif_plots_folder + "/" + "motif_l" + str(motif_size) + "_" + win_info_str + "_top" + str(nr_top_sites) + "." + plot_format
+
+            print("Plot motifs ... ")
+            gp2lib.make_motif_plot(motif_seqs_ll, motif_out_file,
+                                   motif_eia_ll=motif_eia_ll,
+                                   motif_rra_ll=motif_rra_ll,
+                                   motif_tra_ll=motif_tra_ll,
+                                   motif_pc_ll=motif_pc_ll,
+                                   motif_pp_ll=motif_pp_ll,
+                                   tra_alphabet=tra_alphabet,
+                                   rra_alphabet=rra_alphabet,
+                                   seq_alphabet=seq_alphabet,
+                                   eia_alphabet=eia_alphabet)
+
+            motif_file_info_dic[motif_out_file] = 1
+
+
+    print("")
+    print("EVALUATION OUTPUT FILES")
+    print("=======================")
+    for motif_out_file in motif_file_info_dic:
+        print("Motif plot:\n%s" %(motif_out_file))
+    print("Profile plots folder:\n%s" %(profile_plots_folder))
+    print("")
+
+
+"""
+
+
+
+
+
+
+
+
+
+
+"""
 
     print("Create motifs ... ")
 
@@ -2271,6 +2151,8 @@ def main_eval(args):
         print("Motif plot:\n%s" %(motif_out_file))
     print("Profile plots folder:\n%s" %(profile_plots_folder))
     print("")
+
+"""
 
 
 ################################################################################
@@ -3055,7 +2937,7 @@ def main_gt(args):
         # If structure features should be computed.
         if args.add_str:
             FEATOUT.write("bpp.str\tN\tbp_prob\tprob\n")
-            FEATOUT.write("elem_p.str\tN\tp_u,p_e,p_h,p_i,p_m,p_s\tprob\n")
+            FEATOUT.write("elem_p.str\tN\tE,H,I,M,S\tprob\n")
             # If report=True, collect statistics.
             if args.report:
                 pos_str_stats_dic = {}
@@ -3976,7 +3858,7 @@ def main_gt(args):
         FEATOUT.write("fa\tC\tA,C,G,U\t-\n")
     if args.add_str:
         FEATOUT.write("bpp.str\tN\tbp_prob\tprob\n")
-        FEATOUT.write("elem_p.str\tN\tp_e,p_h,p_i,p_m,p_s\tprob\n")
+        FEATOUT.write("elem_p.str\tN\tE,H,I,M,S\tprob\n")
     if args.pc_bw:
         FEATOUT.write("pc.con\tN\tphastcons_score\tprob\n")
     if args.pp_bw:
@@ -4680,7 +4562,7 @@ def main_gp(args):
 
         # If structure features should be computed.
         if args.add_str:
-            FEATOUT.write("elem_p.str\tN\tp_u,p_e,p_h,p_i,p_m,p_s\tprob\n")
+            FEATOUT.write("elem_p.str\tN\tE,H,I,M,S\tprob\n")
             # Calculate structure features for positives.
             print("Get secondary structure features ... ")
             gp2lib.calc_str_elem_up_bpp(test_fasta_out, test_bpp_out, test_str_elem_p_out,
@@ -5119,7 +5001,7 @@ def main_gp(args):
     else:
         FEATOUT.write("fa\tC\tA,C,G,U\t-\n")
     if args.add_str:
-        FEATOUT.write("elem_p.str\tN\tp_u,p_e,p_h,p_i,p_m,p_s\tprob\n")
+        FEATOUT.write("elem_p.str\tN\tE,H,I,M,S\tprob\n")
     if args.add_str or args.bp_in:
         FEATOUT.write("bpp.str\tN\tbp_prob\tprob\n")
     if args.pc_bw:

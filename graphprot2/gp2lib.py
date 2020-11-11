@@ -9436,10 +9436,10 @@ def load_eval_data(args):
     ch_info_dic = {}
 
     # Add sequence one-hot channels.
-    ch_info_dic["fa"] = ["C", [], []]
+    ch_info_dic["fa"] = ["C", [], [], "-"]
     for c in fid2cat_dic["fa"]:
         channel_nr += 1
-        channel_id = "fa" + "_" + c
+        channel_id = c
         channel_info = "%i\t%s\tfa\tC\tone_hot" %(channel_nr, channel_id)
         channel_info_list.append(channel_info)
         ch_info_dic["fa"][1].append(channel_nr-1)
@@ -9474,7 +9474,7 @@ def load_eval_data(args):
         assert feat_dic, "no .%s information read in (feat_dic empty)" %(fid)
         if fid == "elem_p.str" and args.str_elem_1h:
             ftype = "C"
-        ch_info_dic[fid] = [ftype, [], []]
+        ch_info_dic[fid] = [ftype, [], [], "-"]
         if ftype == "N":
             for c in feat_alphabet:
                 channel_nr += 1
@@ -9484,6 +9484,7 @@ def load_eval_data(args):
                 channel_info_list.append(channel_info)
                 ch_info_dic[fid][1].append(channel_nr-1)
                 ch_info_dic[fid][2].append(channel_id)
+                ch_info_dic[fid][3] = encoding
         elif ftype == "C":
             for c in feat_alphabet:
                 channel_nr += 1
@@ -9493,6 +9494,7 @@ def load_eval_data(args):
                 channel_info_list.append(channel_info)
                 ch_info_dic[fid][1].append(channel_nr-1)
                 ch_info_dic[fid][2].append(channel_id)
+                ch_info_dic[fid][3] = "-"
         else:
             assert False, "invalid feature type given (%s) for feature %s" %(ftype,fid)
 
@@ -9716,7 +9718,7 @@ def load_predict_data(args,
     # Add sequence one-hot channels.
     for c in fid2cat_dic["fa"]:
         channel_nr += 1
-        channel_id = "fa" + "_" + c
+        channel_id = c
         channel_info = "%i\t%s\tfa\tC\tone_hot" %(channel_nr, channel_id)
         channel_info_list.append(channel_info)
 
@@ -10436,7 +10438,7 @@ def load_training_data(args,
     # Add sequence one-hot channels.
     for c in fid2cat_dic["fa"]:
         channel_nr += 1
-        channel_id = "fa" + "_" + c
+        channel_id = c
         channel_info = "%i\t%s\tfa\tC\tone_hot" %(channel_nr, channel_id)
         channel_info_list.append(channel_info)
 
@@ -10519,7 +10521,7 @@ def load_training_data(args,
                     else:
                         FEATOUT.write("fa\tC\tA,C,G,U,a,c,g,u\t-\n")
                 elif feat_id == "elem_p.str" and args.str_elem_1h:
-                    FEATOUT.write("elem_p.str\tC\tp_e,p_h,p_i,p_m,p_s\t-\n")
+                    FEATOUT.write("elem_p.str\tC\tE,H,I,M,S\t-\n")
                 else:
                     FEATOUT.write("%s\n" %(row))
     f.closed
@@ -12042,6 +12044,7 @@ def add_motif_label_plot(df, fig, gs, i,
 def add_phastcons_scores_plot(df, fig, gs, i,
                               stdev=False,
                               y_label_size=9,
+                              disable_y_labels=False,
                               ylabel="phastCons score"):
     """
     Make phastCons conservation scores plot.
@@ -12076,9 +12079,10 @@ def add_phastcons_scores_plot(df, fig, gs, i,
     #nn_logo.ax.set_xlim([20, 115])
     #ax.set_xticks([]) # no x-ticks.
     #nn_logo.ax.set_ylim([-.6, .75])
-    ax.set_ylim([0, 1])
-    ax.set_yticks([0, 1])
-    ax.set_yticklabels(['0', '1'])
+    if disable_y_labels:
+        ax.set_ylim([0, 1])
+        ax.set_yticks([0, 1])
+        ax.set_yticklabels(['0', '1'])
     ax.set_xticks([])
     ax.set_xticklabels([])
     plt.yticks(fontsize=7)
@@ -12140,7 +12144,145 @@ def add_phylop_scores_plot(df, fig, gs, i,
 
 ################################################################################
 
-def make_feature_attribution_plot(seq, profile_scores, plot_out_file,
+def make_feature_attribution_plot(seq, profile_scores, feat_list,
+                                  ch_info_dic, plot_out_file,
+                                  seq_label_plot=False):
+    """
+    Make a feature attribution plot, showing for each sequence position
+    the importance score, as well as additional features in subplots.
+    logomaker (pip install logomaker) is used for plotting.
+
+    Dependencies:
+    import numpy as np
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    import matplotlib.gridspec as gridspec
+    import logomaker
+
+    """
+
+    # Checks.
+    assert seq, "given seq empty"
+    assert profile_scores, "given profile_scores list empty"
+    assert feat_list, "given feat_list list empty"
+    assert ch_info_dic, "given ch_info_dic list empty"
+    assert plot_out_file, "given plot_out_file empty"
+
+    # Dataframe for importance scores.
+    seq_alphabet = ch_info_dic["fa"][1]
+    is_df = seq_to_plot_df(seq, seq_alphabet, scores=profile_scores)
+    # Number of plots.
+    n_subplots = 1
+    height_ratios = [2]
+
+    # Optional sequence label plot.
+    if seq_label_plot:
+        sl_df = seq_to_plot_df(seq, seq_alphabet)
+        n_subplots += 1
+        height_ratios.append(1)
+
+    # Heights and number of additional plots.
+    for fid in ch_info_dic:
+        if fid == "fa":
+            continue
+        n_subplots += 1
+        height_ratios.append(1)
+
+    # Init plot.
+    fig_width = 8
+    fig_height = 0.8 * n_subplots
+    fig = plt.figure(figsize=(fig_width, fig_height))
+    gs = gridspec.GridSpec(nrows=n_subplots, ncols=1, height_ratios=height_ratios)
+
+    # Plot subplots.
+    i = 0
+    add_importance_scores_plot(is_df, fig, gs, i,
+                               color_dict=color_dict,
+                               y_label_size=5.5)
+
+    # Plot optional sequence label plot.
+    if seq_label_plot:
+        i += 1
+        color_dict = {'A' : '#008000', 'C': '#0000ff',  'G': '#ffa600',  'U': '#ff0000'}
+        add_label_plot(sl_df, fig, gs, i, color_dict=color_dict, y_label="sequence",
+                       y_label_size=4)
+
+    # Plot additional plots.
+    for fid, fdt in sorted(ch_info_dic.items()):
+        if fid == "fa":
+            continue
+        feat_type = fdt[0]
+        feat_idxs = fdt[1]
+        feat_alphabet = fdt[2]
+        feat_encoding = fdt[3]
+        l_idxs = len(feat_idxs)
+        # Plot index.
+        i += 1
+        if feat_type == "C":
+            # Categorical data.
+            feat_str = ""
+            for fv in feat_list:
+                for i,fi in enumerate(feat_idxs):
+                    if fv[fi] == 1:
+                        feat_str += feat_alphabet[i]
+                        break
+            c_df = seq_to_plot_df(feat_str, feat_alphabet)
+            color_dict = False
+            add_label_plot(c_df, fig, gs, i, color_dict=color_dict, y_label=fid,
+                           y_label_size=4)
+        elif feat_type == "N":
+            # Numerical data.
+            data = {}
+            color_dict = False
+            # Check.
+            for c in feat_alphabet:
+                data[c] = []
+            for fv in feat_list:
+                for i,fi in enumerate(feat_idxs):
+                    data[feat_alphabet[i]].append(fv[fi])
+            #plot_df = pd.DataFrame(data, columns = feat_alphabet)
+            #plot_df.index.name = "pos"
+            if fid == "pc.con":
+                assert l_idxs == 1, "len(feat_idxs) != 1 for pc.con feature (instead: %i)" %(l_idxs)
+                pc_con_df = scores_to_plot_df(data[0])
+                add_phastcons_scores_plot(pc_con_df, fig, gs, i,
+                                          y_label_size=4)
+            elif fid == "pp.con":
+                assert l_idxs == 1, "len(feat_idxs) != 1 for pp.con feature (instead: %i)" %(l_idxs)
+                pp_con_df = scores_to_plot_df(data[0])
+                add_phylop_scores_plot(pp_con_df, fig, gs, i,
+                                       y_label_size=4)
+            elif fid == "elem_p.str":
+                assert l_idxs == 5, "len(feat_idxs) != 5 for elem_p.str feature (instead: %i)" %(l_idxs)
+                elem_plot_df = pd.DataFrame(data, columns = feat_alphabet)
+                elem_plot_df.index.name = "pos"
+                add_label_plot(elem_plot_df, fig, gs, i, color_dict=color_dict, y_label=fid,
+                               y_label_size=4)
+            else:
+                # All other numerical values.
+                assert l_idxs == 1, "len(feat_idxs) != 1 for additional numerical %s feature (instead: %i)" %(fid, l_idxs)
+                add_n_df = scores_to_plot_df(data[0])
+                if feat_encoding == "-":
+                    add_phastcons_scores_plot(add_n_df, fig, gs, i,
+                                              disable_y_labels=True,
+                                              y_label_size=4)
+                elif feat_encoding == "prob": # 0..1
+                    add_phastcons_scores_plot(add_n_df, fig, gs, i,
+                                              y_label_size=4)
+                elif feat_encoding == "minmax_norm": # 0..1
+                    add_phastcons_scores_plot(add_n_df, fig, gs, i,
+                                              y_label_size=4)
+                else:
+                    assert False, "invalid feature normalization string given for additional numerical %s feature (got: %s)" %(fid, feat_encoding)
+
+    # Store plot.
+    fig.savefig(plot_out_file, dpi=150, transparent=False)
+    plt.close(fig)
+
+
+################################################################################
+
+def make_feature_attribution_plot_old(seq, profile_scores, plot_out_file,
                                   seq_alphabet=["A","C","G","U"],
                                   eia_alphabet=["E", "I"],
                                   rra_alphabet=["N", "R"],
