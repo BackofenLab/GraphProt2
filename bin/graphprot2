@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from torch_geometric.data import DataLoader
+from torch_geometric.data import DataLoader, Data
 from graphprot2.MyNets import FunnelGNN,MyDataset
 from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
 from graphprot2 import model_util
@@ -284,8 +284,8 @@ def setup_argument_parser():
                    dest="list_nr_top_sites",
                    type = int,
                    nargs='+',
-                   default = [500],
-                   help = "Specify number(s) of top predicted sites used for motif extraction. Provide multiple numbers (e.g. --nr-top-sites 100 500 1000) to extract one motif plot from each site set (default: 500)")
+                   default = [200],
+                   help = "Specify number(s) of top predicted sites used for motif extraction. Provide multiple numbers (e.g. --nr-top-sites 100 200 500) to extract one motif plot from each site set (default: 200)")
     p_ev.add_argument("--nr-top-profiles",
                    dest="nr_top_profiles",
                    type = int,
@@ -310,7 +310,7 @@ def setup_argument_parser():
                    default = 7,
                    metavar='int',
                    help = "Windows size for calculating position-wise scoring profiles (default: 7)")
-    p_tra.add_argument("--bottoms-up",
+    p_ev.add_argument("--bottoms-up",
                    dest = "bottoms_up",
                    default = False,
                    action = "store_true",
@@ -1341,8 +1341,6 @@ def main_train(args):
 
         # Write model params file.
         PAROUT = open(final_params_path, "w")
-        if args.undirected:
-            PAROUT.write("undirected\tTrue\n")
         PAROUT.write("num_features\t%i\n" %(num_features))
         PAROUT.write("fc_hidden_dim\t%s\n" %(str(args.fc_hidden_dim)))
         PAROUT.write("epochs\t%s\n" %(str(args.epochs)))
@@ -1417,8 +1415,6 @@ def main_train(args):
 
             # Write model params file.
             PAROUT = open(final_params_path, "w")
-            if args.undirected:
-                PAROUT.write("undirected\tTrue\n")
             PAROUT.write("num_features\t%i\n" %(num_features))
             PAROUT.write("fc_hidden_dim\t%s\n" %(str(args.fc_hidden_dim)))
             PAROUT.write("epochs\t%s\n" %(str(args.epochs)))
@@ -1497,6 +1493,8 @@ def main_eval(args):
     assert "incr_hidden_dim" in params_dic, "incr_hidden_dim info missing in model parameter file %s" %(params_file)
     assert "undirected" in params_dic, "undirected info missing in model parameter file %s" %(params_file)
     assert "nr_hidden_layers" in params_dic, "nr_hidden_layers info missing in model parameter file %s" %(params_file)
+    assert "weight_decay" in params_dic, "weight_decay info missing in model parameter file %s" %(params_file)
+
     # Set parameters.
     fc_hidden_dim = int(params_dic["fc_hidden_dim"])
     node_hidden_dim	= int(params_dic["node_hidden_dim"])
@@ -1504,6 +1502,7 @@ def main_eval(args):
     num_features = int(params_dic["num_features"])
     args.num_features = num_features
     nr_hidden_layers = int(params_dic["nr_hidden_layers"])
+    weight_decay_str = params_dic["weight_decay"]
     dr = float(params_dic["dr"])
     dr_str = params_dic["dr"]
     lr_str = params_dic["lr"]
@@ -1521,6 +1520,10 @@ def main_eval(args):
     if args.plot_format == 2:
         plot_format = "pdf"
 
+    # Output folder.
+    if not os.path.exists(args.out_folder):
+        os.makedirs(args.out_folder)
+
     # More checks.
     assert args.motif_sc_thr <= 1 and args.motif_sc_thr >= -1, "--motif-sc-thr must be within -1 and 1"
     # Window size.
@@ -1528,14 +1531,22 @@ def main_eval(args):
         assert False, "only uneven window size values supported (5,7,9, ...)"
     if args.win_size < 5:
         assert False, "window size should be >= 5"
+    win_info_str = "w%i" %(args.win_size)
+
     # Motif size.
+    max_motif_size = 0
     for motif_size in args.list_motif_sizes:
+        if motif_size > max_motif_size:
+            max_motif_size = motif_size
         if (motif_size-1) % 2:
             assert False, "only uneven motif size values supported"
         if motif_size < 5:
             assert False, "motif sizes should be >= 5"
         if motif_size > 21:
             assert False, "motif sizes should be <= 21"
+    max_motif_extlr = int(max_motif_size/2)
+    # Motif output folder.
+    motif_plots_folder = args.out_folder
 
     # Get graphprot2 train parameters.
     gp2_train_settings_file = args.in_train_folder + "/settings.graphprot2_train.out"
@@ -1573,7 +1584,7 @@ def main_eval(args):
     assert "bpp.str" not in gp2_train_feat_dic, "--train-in model was trained with base pair information, but so far graphprot2 (v%s) does not support the visualization of base pair information" %(__version__)
 
     # Some facts.
-    print("# dataset features:    %i" %(dataset.num_features))
+    print("# dataset features:    %i" %(args.num_features))
     print("Window size:          ", args.win_size)
     print("Top site numbers:     ", args.list_nr_top_sites)
     print("Motif sizes:          ", args.list_motif_sizes)
@@ -1600,7 +1611,13 @@ def main_eval(args):
     print("Load positive training set from --train-in ... ")
     seqs_dic, idx2id_dic, all_features, ch_info_dic = gp2lib.load_eval_data(args)
     l_dataset = len(all_features)
-    print("Dataset size:          %i" %(len(l_dataset)))
+    print("Dataset size:          %i" %(l_dataset))
+
+    # Check # features.
+    check_num_feat = 0
+    for fid in ch_info_dic:
+        check_num_feat += len(ch_info_dic[fid][1])
+    assert args.num_features == check_num_feat, "args.num_features != check_num_feat (%i != %i)" %(args.num_features, check_num_feat)
 
     # Load trained model.
     print("Load trained model from --train-in ... ")
@@ -1612,8 +1629,8 @@ def main_eval(args):
                       fc_hidden_dim=fc_hidden_dim,
                       out_dim=2).to(device)
 
-    model_path = args.in_train_folder + "/" + str(batch_size) + "_" + str(node_hidden_dim) + "_" + str(weight_decay) + "_" + lr_str + "_" + dr_str
-    model.load_state_dict(torch.load(model_path))
+    #model_path = args.in_train_folder + "/" + str(batch_size) + "_" + str(node_hidden_dim) + "_" + weight_decay_str + "_" + lr_str + "_" + dr_str
+    model.load_state_dict(torch.load(model_file))
 
     # Create whole site graphs.
     all_graphs = []
@@ -1632,7 +1649,7 @@ def main_eval(args):
         edge_index = torch.tensor([edge_index_1, edge_index_2], dtype=torch.long)
         x = torch.tensor(feat_list, dtype=torch.float)
         data = Data(x=x, edge_index=edge_index, y=1)
-        all_win_graphs.append(data)
+        all_graphs.append(data)
 
     # Checks.
     c_all_graphs = len(all_graphs)
@@ -1719,12 +1736,12 @@ def main_eval(args):
         profile_scores_ll.append(win_scores[si:se])
         si += l
     assert profile_scores_ll, "profile_scores_ll list empty"
+    assert len(profile_scores_ll) == c_ws_scores, "length profile scores list != # whole-site scores"
 
-    # Connect graph indices to scores.
+    # Connect whole-site graph indices to scores.
     gi2sc_dic = {}
-    for i, sc in enumerate(win_scores):
+    for i, sc in enumerate(ws_scores):
         gi2sc_dic[i] = sc
-
 
     """
     Plot profiles and motifs
@@ -1738,11 +1755,11 @@ def main_eval(args):
       --bottoms-up is set.
 
     """
-    top_profiles_folder = args.out_folder + "/" + "top_profiles_out"
+    top_profiles_folder = args.out_folder + "/" + "top_profiles_" + win_info_str + "_out"
     if os.path.exists(top_profiles_folder):
         shutil.rmtree(top_profiles_folder)
     os.makedirs(top_profiles_folder)
-    bottom_profiles_folder = args.out_folder + "/" + "top_profiles_out"
+    bottom_profiles_folder = args.out_folder + "/" + "bottom_profiles_" + win_info_str + "_out"
     if os.path.exists(bottom_profiles_folder):
         shutil.rmtree(bottom_profiles_folder)
     if args.bottoms_up:
@@ -1762,7 +1779,7 @@ def main_eval(args):
 
     # Plot top --nr-top-profiles profiles and output all site scores.
     print("Plot top %i profiles ... " %(args.nr_top_profiles))
-    for gi, sc in sorted(gi2sc_dic.items(), key=lambda item: item[1], reverse=True):
+    for gi, ws_sc in sorted(gi2sc_dic.items(), key=lambda item: item[1], reverse=True):
         # Profile scores.
         profile_scores = profile_scores_ll[gi]
         if not profile_scores:
@@ -1771,34 +1788,44 @@ def main_eval(args):
         id_i += 1
         seq_id = idx2id_dic[gi]
         seq = seqs_dic[seq_id]
+        l_sc = len(profile_scores)
 
         # Get maximum score position.
         max_pos = 0
         max_sc = -1000000
         min_pos = 0
         min_sc = 1000000
-        for i,sc in enumerate(profile_scores):
-            if sc > max_sc:
-                max_sc = sc
+
+        for i,psc in enumerate(profile_scores):
+            if i < max_motif_extlr:
+                continue
+            if i >= l_sc-max_motif_extlr:
+                break
+            if psc > max_sc:
+                max_sc = psc
                 max_pos = i
-            if sc < min_sc:
-                min_sc = sc
+            if psc < min_sc:
+                min_sc = psc
                 min_pos = i
-        id2maxpos_dic[seq_id] = max_pos
+
+        #real_max = max(profile_scores[max_motif_extlr:-max_motif_extlr])
+        #assert max_sc == real_max, "max_sc != real_max (%f != %f) for ID %s" %(max_sc, real_max, seq_id)
+
+        id2maxpos_dic[seq_id] = max_pos # 0-based.
         id2minpos_dic[seq_id] = min_pos
 
         # Store rank + site ID + score in file.
-        RSOUT.write("%i\t%s\t%f\n" %(site_count, seq_id, sc))
+        RSOUT.write("%i\t%s\t%f\n" %(site_count, seq_id, ws_sc))
 
         # Print only top --nr-top-profiles profiles.
         if site_count <= args.nr_top_profiles:
             # Plot file.
-            plot_file_name = str(id_i)[1:] + "_" + win_info_str + "_sc" + str(sc) + "." + plot_format
+            plot_file_name = str(id_i)[1:] + "_" + win_info_str + "_sc" + str(ws_sc) + "." + plot_format
             plot_out_file = top_profiles_folder + "/" + plot_file_name
             # Plot profile.
             gp2lib.make_feature_attribution_plot(seq, profile_scores, all_features[gi],
-                                                  ch_info_dic, plot_out_file,
-                                                  seq_label_plot=False)
+                                                 ch_info_dic, plot_out_file,
+                                                 seq_label_plot=False)
 
     RSOUT.close()
 
@@ -1816,9 +1843,6 @@ def main_eval(args):
             seq_id = idx2id_dic[gi]
             seq = seqs_dic[seq_id]
 
-            # Store rank + site ID + score in file.
-            RSOUT.write("%i\t%s\t%f\n" %(site_count, seq_id, sc))
-
             # Print only top --nr-top-profiles profiles.
             if site_count <= args.nr_top_profiles:
                 # Plot file.
@@ -1831,16 +1855,26 @@ def main_eval(args):
             else:
                 break
 
-"""
-id2maxpos_dic
-args.motif_sc_thr
+    # Numerical features with standard deviations.
+    stdev_fid2fidx_dic = {}
+    stdev_fidx2fid_dic = {}
+    for fid in ch_info_dic:
+        feat_type = ch_info_dic[fid][0]
+        feat_idxs = ch_info_dic[fid][1]
+        l_idxs = len(feat_idxs)
+        if feat_type == "N" and l_idxs == 1:
+            stdev_fid2fidx_dic[fid] = feat_idxs[0]
+            stdev_fidx2fid_dic[feat_idxs[0]] = fid
+    calc_stdev = True
 
+    """
+    Plot top-scoring motifs.
 
-
+    """
 
     print("Plot top motifs ... ")
 
-    motif_file_info_dic = {}
+    top_motif_file_dic = {}
 
     # For each motif size.
     for motif_size in args.list_motif_sizes:
@@ -1854,8 +1888,29 @@ args.motif_sc_thr
             print("Create motif (size %i) from top %i sites ... " %(motif_size, nr_top_sites))
             site_count = 0
             c_thr_skipped = 0
+            c_no_max_skipped = 0
 
+            # Init motif score matrix.
+            motif_matrix = []
+
+            for i in range(motif_size):
+                motif_matrix.append([0.0]*args.num_features)
+            l_mm = len(motif_matrix) # Motif length.
+            l_sv = len(motif_matrix[0]) # site vector length.
+
+            # Standard deviations for numerical features.
+            fid2sc_dic = {}
+            if calc_stdev:
+                for fid in stdev_fid2fidx_dic:
+                    fid2sc_dic[fid] = []
+                    for i in range(motif_size):
+                        fid2sc_dic[fid].append([])
+
+            # Brick by brick.
             for gi, sc in sorted(gi2sc_dic.items(), key=lambda item: item[1], reverse=True):
+
+                # Feature list.
+                feat_list = all_features[gi]
                 # Profile scores.
                 profile_scores = profile_scores_ll[gi]
                 if not profile_scores:
@@ -1863,8 +1918,13 @@ args.motif_sc_thr
 
                 seq_id = idx2id_dic[gi]
                 seq = seqs_dic[seq_id]
-                max_pos = id2maxpos_dic[seq_id]
+                l_seq = len(seq)
+                max_pos = id2maxpos_dic[seq_id]  # 0-based.
                 max_sc = profile_scores[max_pos]
+                # If max_pos == 0, no top scoring site extracted, skip this sequence.
+                if not max_pos:
+                    c_no_max_skipped += 1
+                    continue
 
                 # Minimum window score for extracting motifs.
                 if max_sc < args.motif_sc_thr:
@@ -1873,286 +1933,185 @@ args.motif_sc_thr
 
                 # Minimum sequence length for extracting motifs.
                 site_l = len(profile_scores)
+                assert site_l == l_seq, "site_l != l_seq (%i != %i)" %(site_l, l_seq)
                 if site_l < (motif_extlr*2 + 1):
-                    continue
+                    continue # should be captured by if not max_pos check already.
 
-                s_
-    extlr = int(args.win_size/2)
+                # Extract max_pos motif brick.
+                s_brick = max_pos - motif_extlr
+                e_brick = max_pos + motif_extlr + 1 # 1-based, thus + 1.
+                assert s_brick >= 0, "s_brick <= 0 (s_brick = %i) which should not happen since max_pos selection takes care of this" %(s_brick)
+                assert e_brick <= site_l, "e_brick > site length (%i > %i) which should not happen since max_pos selection takes care of this" %(e_brick, site_l)
+                # .. and add values to motif_matrix.
+                # Checks.
+                #l11 = len(motif_matrix)
+                #l12 = len(feat_list[s_brick:e_brick])
+                #assert l11 == l12, "l11 != l12 (%i != %i) for %s (l_seq: %i, max_pos: %i, s_brick: %i, e_brick: %i)" %(l11, l12, seq_id, l_seq, max_pos, s_brick, e_brick)
+                for i in range(l_mm):
+                    for j in range(l_sv):
+                        motif_matrix[i][j] += feat_list[s_brick:e_brick][i][j]
+                        # For one-channel numerical features, store scores to calculate stdev.
+                        if calc_stdev:
+                            if j in stdev_fidx2fid_dic:
+                                fid2sc_dic[stdev_fidx2fid_dic[j]][i].append(feat_list[s_brick:e_brick][i][j])
 
-    print("Create window graphs ... ")
-    for feat_list in all_features:
-        l_seq = len(feat_list)
-        # l_seq == window graphs for sequence.
-        seq_len_list.append(l_seq)
-        c_all_seq_len += l_seq
-        # For each position in feat_list.
-        l_feat = len(feat_list)
-        for wi in range(l_feat):
-            reg_s = wi - extlr
-            reg_e = wi + extlr + 1
-            if reg_e > l_feat:
-                reg_e = l_feat
-            if reg_s < 0:
-                reg_s = 0
-            feat_list_win = feat_list[reg_s:reg_e]
-
-
-
-
-
-                tr_prof_sc = profile_scores[motif_extlr:-motif_extlr]
-                max_sc = -1
-                max_i = 0
-                for i,sc in enumerate(tr_prof_sc):
-                    if sc > max_sc:
-                        max_sc = sc
-                        max_i = i+motif_extlr
-                if max_sc < args.motif_sc_thr:
-                    print("max_sc < thr: %f" %(max_sc))
-                    c_thr_skipped += 1
-                    continue
-
+                # Increment site count.
                 site_count += 1
-
-                # Evaluate only nr_top_sites
-                if site_count > nr_top_sites:
+                if site_count >= nr_top_sites:
                     break
 
-                # Motif list start and end index.
-                motif_s = max_i - motif_extlr
-                motif_e = max_i + motif_extlr + 1
-                # Store motifs.
-                seq_motif_list = []
-                eia_motif_list = []
-                rra_motif_list = []
-                tra_motif_list = []
-                pc_motif_list = []
-                pp_motif_list = []
-                # Extract motif indices from lists.
-                for i in range(motif_s, motif_e):
-                    seq_motif_list.append(seq_list[i])
-                    if use_node_attr:
-                        if "eia" in featid2ch_dic:
-                            eia_motif_list.append(exon_intron_labels[i])
-                        if "rra" in featid2ch_dic:
-                            rra_motif_list.append(repeat_region_labels[i])
-                        if "tra" in featid2ch_dic:
-                            tra_motif_list.append(transcript_region_labels[i])
-                        if "pc.con" in featid2ch_dic:
-                            pc_motif_list.append(phastcons_scores[i])
-                        if "pp.con" in featid2ch_dic:
-                            pp_motif_list.append(phylop_scores[i])
-                assert seq_motif_list, "seq_motif_list empty"
-                motif_seqs_ll.append(seq_motif_list)
-                if use_node_attr:
-                    if "eia" in featid2ch_dic:
-                        motif_eia_ll.append(eia_motif_list)
-                    if "rra" in featid2ch_dic:
-                        motif_rra_ll.append(rra_motif_list)
-                    if "tra" in featid2ch_dic:
-                        motif_tra_ll.append(tra_motif_list)
-                    if "pc.con" in featid2ch_dic:
-                        motif_pc_ll.append(pc_motif_list)
-                    if "pp.con" in featid2ch_dic:
-                        motif_pp_ll.append(pp_motif_list)
+            # Checks.
+            assert site_count, "no top motif information extracted for motif_size %i and nr_top_sites %i (site_count = 0)" %(motif_size, nr_top_sites)
 
-            # Plot motifs.
-            c_motifs = len(motif_seqs_ll)
-            assert c_motifs, "no motif sequences extracted"
-            print("# motif sequences extracted:  %i" %(c_motifs))
-            print("# motif sequences skipped:    %i" %(c_thr_skipped))
+            print("# motif sites extracted:           %i" %(site_count))
+            if c_thr_skipped:
+                print("# sites skipped (--motif-sc-thr):  %i" %(c_thr_skipped))
+            if c_no_max_skipped:
+                print("# sites skipped (no max_pos):      %i" %(c_no_max_skipped))
 
-            motif_plots_folder = args.out_folder
-            #motif_plots_folder = args.out_folder + "/" + "motif_plots_out"
-            #if os.path.exists(motif_plots_folder):
-            #    shutil.rmtree(motif_plots_folder)
-            #os.makedirs(motif_plots_folder)
-            motif_out_file = motif_plots_folder + "/" + "motif_l" + str(motif_size) + "_" + win_info_str + "_top" + str(nr_top_sites) + "." + plot_format
+            # Average motif matrix values.
+            for i in range(l_mm):
+                for j in range(l_sv):
+                    motif_matrix[i][j] = motif_matrix[i][j] / site_count
 
-            print("Plot motifs ... ")
-            gp2lib.make_motif_plot(motif_seqs_ll, motif_out_file,
-                                   motif_eia_ll=motif_eia_ll,
-                                   motif_rra_ll=motif_rra_ll,
-                                   motif_tra_ll=motif_tra_ll,
-                                   motif_pc_ll=motif_pc_ll,
-                                   motif_pp_ll=motif_pp_ll,
-                                   tra_alphabet=tra_alphabet,
-                                   rra_alphabet=rra_alphabet,
-                                   seq_alphabet=seq_alphabet,
-                                   eia_alphabet=eia_alphabet)
+            # Calculate tandard deviations for one-channel numerical features at each motif position.
+            fid2stdev_dic = {}
+            if calc_stdev:
+                for fid in fid2sc_dic:
+                    fid2stdev_dic[fid] = []
+                    for i in range(l_mm):
+                        fid2stdev_dic[fid].append(statistics.stdev(fid2sc_dic[fid][i]))
 
-            motif_file_info_dic[motif_out_file] = 1
+            # Plot motif.
+            motif_out_file = motif_plots_folder + "/" + "top_motif_l" + str(motif_size) + "_" + win_info_str + "_top" + str(nr_top_sites) + "." + plot_format
+            gp2lib.make_motif_plot(motif_matrix, ch_info_dic, motif_out_file,
+                                   fid2stdev_dic=fid2stdev_dic)
 
+            top_motif_file_dic[motif_out_file] = 1
+
+
+    """
+    Optionally plot lowest-scoring (bottom) motifs.
+
+    """
+
+    if args.bottoms_up:
+
+        print("Plot bottom motifs ... ")
+
+        bottom_motif_file_dic = {}
+
+        # For each motif size.
+        for motif_size in args.list_motif_sizes:
+
+            # Motif center position extension.
+            motif_extlr = int(motif_size / 2)
+
+            # For each number of top sites.
+            for nr_top_sites in args.list_nr_top_sites:
+
+                print("Create motif (size %i) from bottom %i sites ... " %(motif_size, nr_top_sites))
+                site_count = 0
+                c_thr_skipped = 0
+                c_no_min_skipped = 0
+
+                # Init motif score matrix.
+                motif_matrix = []
+
+                for i in range(motif_size):
+                    motif_matrix.append([0.0]*args.num_features)
+                l_mm = len(motif_matrix) # Motif length.
+                l_sv = len(motif_matrix[0]) # site vector length.
+
+                # Standard deviations for numerical features.
+                fid2sc_dic = {}
+                if calc_stdev:
+                    for fid in stdev_fid2fidx_dic:
+                        fid2sc_dic[fid] = []
+                        for i in range(motif_size):
+                            fid2sc_dic[fid].append([])
+
+                # Brick by brick.
+                for gi, sc in sorted(gi2sc_dic.items(), key=lambda item: item[1], reverse=False):
+
+                    # Feature list.
+                    feat_list = all_features[gi]
+                    # Profile scores.
+                    profile_scores = profile_scores_ll[gi]
+                    if not profile_scores:
+                        continue
+
+                    seq_id = idx2id_dic[gi]
+                    seq = seqs_dic[seq_id]
+                    min_pos = id2minpos_dic[seq_id]  # 0-based.
+                    min_sc = profile_scores[min_pos]
+                    # If min_pos == 0, no top scoring site extracted, skip this sequence.
+                    if not min_pos:
+                        c_no_min_skipped += 1
+                        continue
+
+                    # Minimum sequence length for extracting motifs.
+                    site_l = len(profile_scores)
+                    if site_l < (motif_extlr*2 + 1):
+                        continue # should be captured by if not min_pos check already.
+
+                    # Extract min_pos motif brick.
+                    s_brick = min_pos - motif_extlr
+                    e_brick = min_pos + motif_extlr + 1
+                    assert s_brick >= 0, "s_brick <= 0 (s_brick = %i) which should not happen since min_pos selection takes care of this" %(s_brick)
+                    assert e_brick <= site_l, "e_brick > site length (%i > %i) which should not happen since min_pos selection takes care of this" %(e_brick, site_l)
+                    # .. and add values to motif_matrix.
+                    for i in range(l_mm):
+                        for j in range(l_sv):
+                            motif_matrix[i][j] += feat_list[s_brick:e_brick][i][j]
+                            # For one-channel numerical features, store scores to calculate stdev.
+                            if calc_stdev:
+                                if j in stdev_fidx2fid_dic:
+                                    fid2sc_dic[stdev_fidx2fid_dic[j]][i].append(feat_list[s_brick:e_brick][i][j])
+
+                    # Increment site count.
+                    site_count += 1
+                    if site_count >= nr_top_sites:
+                        break
+
+                # Checks.
+                assert site_count, "no bottom motif information extracted for motif_size %i and nr_top_sites %i (site_count = 0)" %(motif_size, nr_top_sites)
+
+                print("# motif sites extracted:           %i" %(site_count))
+                if c_no_min_skipped:
+                    print("# sites skipped (no min_pos):  %i" %(c_no_min_skipped))
+
+                # Average motif matrix values.
+                for i in range(l_mm):
+                    for j in range(l_sv):
+                        motif_matrix[i][j] = motif_matrix[i][j] / site_count
+
+                # Calculate tandard deviations for one-channel numerical features at each motif position.
+                fid2stdev_dic = {}
+                if calc_stdev:
+                    for fid in fid2sc_dic:
+                        fid2stdev_dic[fid] = []
+                        for i in range(l_mm):
+                            fid2stdev_dic[fid].append(statistics.stdev(fid2sc_dic[fid][i]))
+
+                # Plot motif.
+                motif_out_file = motif_plots_folder + "/" + "bottom_motif_l" + str(motif_size) + "_" + win_info_str + "_top" + str(nr_top_sites) + "." + plot_format
+                gp2lib.make_motif_plot(motif_matrix, ch_info_dic, motif_out_file,
+                                       fid2stdev_dic=fid2stdev_dic)
+
+                bottom_motif_file_dic[motif_out_file] = 1
 
     print("")
     print("EVALUATION OUTPUT FILES")
     print("=======================")
-    for motif_out_file in motif_file_info_dic:
-        print("Motif plot:\n%s" %(motif_out_file))
-    print("Profile plots folder:\n%s" %(profile_plots_folder))
+    for motif_out_file in top_motif_file_dic:
+        print("Top motif plot:\n%s" %(motif_out_file))
+    print("Top profile plots folder:\n%s" %(top_profiles_folder))
+    if args.bottoms_up:
+        for motif_out_file in bottom_motif_file_dic:
+            print("Bottom motif plot:\n%s" %(motif_out_file))
+            print("Bottom profile plots folder:\n%s" %(bottom_profiles_folder))
     print("")
-
-
-"""
-
-
-
-
-
-
-
-
-
-
-"""
-
-    print("Create motifs ... ")
-
-    motif_file_info_dic = {}
-
-    # For each motif size.
-    for motif_size in args.list_motif_sizes:
-
-        # Motif center position extension.
-        motif_extlr = int(motif_size / 2)
-
-        # For each number of top sites.
-        for nr_top_sites in args.list_nr_top_sites:
-
-            print("Create motif (size %i) from top %i sites ... " %(motif_size, nr_top_sites))
-
-            motif_seqs_ll = []
-            motif_eia_ll = []
-            motif_rra_ll = []
-            motif_tra_ll = []
-            motif_pc_ll = []
-            motif_pp_ll = []
-            site_count = 0
-
-            for gi, sc in sorted(gi2sc_dic.items(), key=lambda item: item[1], reverse=True):
-                # Profile scores.
-                profile_scores = profile_scores_ll[gi]
-                if not profile_scores:
-                    continue
-
-                # Sequence nucleotides list.
-                seq_list = seqs_ll[gi]
-                # Label and score lists.
-                exon_intron_labels = False
-                repeat_region_labels = False
-                transcript_region_labels = False
-                phastcons_scores = False
-                phylop_scores = False
-                if use_node_attr:
-                    if "eia" in featid2ch_dic:
-                        exon_intron_labels = eia_ll[gi]
-                    if "rra" in featid2ch_dic:
-                        repeat_region_labels = rra_ll[gi]
-                    if "tra" in featid2ch_dic:
-                        transcript_region_labels = tra_ll[gi]
-                    if "pc.con" in featid2ch_dic:
-                        phastcons_scores = pc_ll[gi]
-                    if "pp.con" in featid2ch_dic:
-                        phylop_scores = pp_ll[gi]
-
-                # Extract motifs.
-                site_l = len(profile_scores)
-                # Minimum sequence length for extracting motifs.
-                if site_l < (motif_extlr*2 + 1):
-                    continue
-
-                tr_prof_sc = profile_scores[motif_extlr:-motif_extlr]
-                max_sc = -1
-                max_i = 0
-                for i,sc in enumerate(tr_prof_sc):
-                    if sc > max_sc:
-                        max_sc = sc
-                        max_i = i+motif_extlr
-                if max_sc < args.motif_sc_thr:
-                    print("max_sc < thr: %f" %(max_sc))
-                    c_thr_skipped += 1
-                    continue
-
-                site_count += 1
-
-                # Evaluate only nr_top_sites
-                if site_count > nr_top_sites:
-                    break
-
-                # Motif list start and end index.
-                motif_s = max_i - motif_extlr
-                motif_e = max_i + motif_extlr + 1
-                # Store motifs.
-                seq_motif_list = []
-                eia_motif_list = []
-                rra_motif_list = []
-                tra_motif_list = []
-                pc_motif_list = []
-                pp_motif_list = []
-                # Extract motif indices from lists.
-                for i in range(motif_s, motif_e):
-                    seq_motif_list.append(seq_list[i])
-                    if use_node_attr:
-                        if "eia" in featid2ch_dic:
-                            eia_motif_list.append(exon_intron_labels[i])
-                        if "rra" in featid2ch_dic:
-                            rra_motif_list.append(repeat_region_labels[i])
-                        if "tra" in featid2ch_dic:
-                            tra_motif_list.append(transcript_region_labels[i])
-                        if "pc.con" in featid2ch_dic:
-                            pc_motif_list.append(phastcons_scores[i])
-                        if "pp.con" in featid2ch_dic:
-                            pp_motif_list.append(phylop_scores[i])
-                assert seq_motif_list, "seq_motif_list empty"
-                motif_seqs_ll.append(seq_motif_list)
-                if use_node_attr:
-                    if "eia" in featid2ch_dic:
-                        motif_eia_ll.append(eia_motif_list)
-                    if "rra" in featid2ch_dic:
-                        motif_rra_ll.append(rra_motif_list)
-                    if "tra" in featid2ch_dic:
-                        motif_tra_ll.append(tra_motif_list)
-                    if "pc.con" in featid2ch_dic:
-                        motif_pc_ll.append(pc_motif_list)
-                    if "pp.con" in featid2ch_dic:
-                        motif_pp_ll.append(pp_motif_list)
-
-            # Plot motifs.
-            c_motifs = len(motif_seqs_ll)
-            assert c_motifs, "no motif sequences extracted"
-            print("# motif sequences extracted:  %i" %(c_motifs))
-            print("# motif sequences skipped:    %i" %(c_thr_skipped))
-
-            motif_plots_folder = args.out_folder
-            #motif_plots_folder = args.out_folder + "/" + "motif_plots_out"
-            #if os.path.exists(motif_plots_folder):
-            #    shutil.rmtree(motif_plots_folder)
-            #os.makedirs(motif_plots_folder)
-            motif_out_file = motif_plots_folder + "/" + "motif_l" + str(motif_size) + "_" + win_info_str + "_top" + str(nr_top_sites) + "." + plot_format
-
-            print("Plot motifs ... ")
-            gp2lib.make_motif_plot(motif_seqs_ll, motif_out_file,
-                                   motif_eia_ll=motif_eia_ll,
-                                   motif_rra_ll=motif_rra_ll,
-                                   motif_tra_ll=motif_tra_ll,
-                                   motif_pc_ll=motif_pc_ll,
-                                   motif_pp_ll=motif_pp_ll,
-                                   tra_alphabet=tra_alphabet,
-                                   rra_alphabet=rra_alphabet,
-                                   seq_alphabet=seq_alphabet,
-                                   eia_alphabet=eia_alphabet)
-
-            motif_file_info_dic[motif_out_file] = 1
-
-    print("")
-    print("EVALUATION OUTPUT FILES")
-    print("=======================")
-    for motif_out_file in motif_file_info_dic:
-        print("Motif plot:\n%s" %(motif_out_file))
-    print("Profile plots folder:\n%s" %(profile_plots_folder))
-    print("")
-
-"""
 
 
 ################################################################################
@@ -2404,7 +2363,7 @@ def main_predict(args):
         for idx,feat_list in all_features:
             seq_id = idx2id_dic[idx]
             seq = seqs_dic[seq_id]
-            for idx in range(len(feat_list)):
+            for idx in range(len(feat_list)): # range(len ...) not pythonic, just for i in list ..
                 reg_s = idx - extlr
                 reg_e = idx + extlr + 1
 

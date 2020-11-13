@@ -9389,10 +9389,10 @@ def load_eval_data(args):
 
     # Read in features.out from graphprot2 gt and check.
     gt_feat_file = args.in_gt_folder + "/" + "features.out"
-    assert os.path.exists(gp_feat_file), "%s features file expected but not does not exist" %(gp_feat_file)
+    assert os.path.exists(gt_feat_file), "%s features file expected but not does not exist" %(gt_feat_file)
     gt_fid2row_dic = {}
     print("Read in feature infos from %s ... " %(gt_feat_file))
-    with open(gp_feat_file) as f:
+    with open(gt_feat_file) as f:
         for line in f:
             row = line.strip()
             cols = line.strip().split("\t")
@@ -9402,7 +9402,7 @@ def load_eval_data(args):
     assert gt_fid2row_dic, "no feature infos found in --gt-in feature file %s" %(gt_feat_file)
     # Compare gt+train features.
     for fid in fid2row_dic:
-        assert fid in gp_fid2row_dic, "graphprot2 train feature ID \"%s\" not found in %s" %(fid, gp_feat_file)
+        assert fid in gt_fid2row_dic, "graphprot2 train feature ID \"%s\" not found in %s" %(fid, gt_feat_file)
 
     # Context + bp settings.
     seqs_all_uc = True
@@ -9460,7 +9460,7 @@ def load_eval_data(args):
 
         # All features (additional to .fa) like .elem_p.str, .con, .eia, .tra, .rra, or user defined.
         feat_alphabet = fid2cat_dic[fid]
-        pos_feat_in = args.in_folder + "/positives." + fid
+        pos_feat_in = args.in_gt_folder + "/positives." + fid
         assert os.path.exists(pos_feat_in), "--in folder does not contain %s"  %(pos_feat_in)
         print("Read in .%s annotations ... " %(fid))
         n_to_1h = False
@@ -11861,7 +11861,8 @@ def process_in_sites(in_bed, out_bed, chr_len_dic, args,
 
 ################################################################################
 
-def scores_to_plot_df(scores):
+def scores_to_plot_df(scores,
+                      stdev=False):
     """
     Given a list of scores, generate a dataframe with positions from 1 to
     length(scores_list) and scores list.
@@ -11871,13 +11872,25 @@ def scores_to_plot_df(scores):
     Then create dataframe with
     pd.DataFrame (data, columns = ['pos', 'scores'])
 
+    stdev:
+        Vector of standard deviations belonging to scores.
+
     """
     assert scores, "given scores list empty"
-    data = {'pos': [], 'score': []}
+    if stdev:
+        assert len(scores) == len(stdev), "len(scores) != len(stdev)"
+        data = {'pos': [], 'score': [], 'stdev': []}
+    else:
+        data = {'pos': [], 'score': []}
     for i,s in enumerate(scores):
         data['pos'].append(i+1)
         data['score'].append(s)
-    plot_df = pd.DataFrame(data, columns = ['pos', 'score'])
+        if stdev:
+            data['stdev'].append(stdev[i])
+    if stdev:
+        plot_df = pd.DataFrame(data, columns = ['pos', 'score', 'stdev'])
+    else:
+        plot_df = pd.DataFrame(data, columns = ['pos', 'score'])
     return plot_df
 
 
@@ -12010,6 +12023,69 @@ def add_label_plot(df, fig, gs, i,
     #logo.ax.set_yticklabels(['0', '1'])
     plt.yticks(fontsize=7)
     logo.ax.set_ylabel(y_label, labelpad=24, fontsize=y_label_size)
+
+
+################################################################################
+
+def make_motif_label_plot_df(feat_id, ch_info_dic, motif_matrix):
+    """
+    Make a feature dataframe for label data motif plotting.
+    Label data: sequence, eia, tra, rra, elem_p.str,
+                and additional categorical features
+
+    """
+    data = {}
+    assert feat_id in ch_info_dic, "feat_id %s not in ch_info_dic" %(feat_id)
+    feat_data = ch_info_dic[feat_id]
+    feat_idxs = feat_data[1]
+    feat_alphabet = feat_data[2]
+    for c in feat_alphabet:
+        data[c] = []
+    for fv in motif_matrix:
+        for i,fi in enumerate(feat_idxs):
+            data[feat_alphabet[i]].append(fv[fi])
+
+    feat_plot_df = pd.DataFrame(data, columns = feat_alphabet)
+    feat_plot_df.index.name = "pos"
+    return feat_plot_df
+
+
+################################################################################
+
+def make_motif_scores_plot_df(feat_id, ch_info_dic, motif_matrix,
+                              stdev=False):
+    """
+    Make a feature dataframe for scores data motif plotting.
+    Scores data: pc.con, pp.con, additional numerical features
+
+    """
+    assert feat_id in ch_info_dic, "feat_id %s not in ch_info_dic" %(feat_id)
+    assert motif_matrix, "motif_matrix empty"
+    scores = []
+    feat_data = ch_info_dic[feat_id]
+    feat_idxs = feat_data[1]
+    assert len(feat_idxs) == 1, "len(feat_idxs) != 1 for feature %s" %(feat_id)
+    feat_idx = feat_idxs[0]
+    # Get scores list.
+    for fv in motif_matrix:
+        scores.append(fv[feat_idx])
+    # Make dataframe.
+    data = {}
+    if stdev:
+        assert len(scores) == len(stdev), "len(scores) != len(stdev) for feature ID %s" %(feat_id)
+        data = {'pos': [], 'score': [], 'stdev': []}
+    else:
+        data = {'pos': [], 'score': []}
+    for i,s in enumerate(scores):
+        data['pos'].append(i+1)
+        data['score'].append(s)
+        if stdev:
+            data['stdev'].append(stdev[i])
+    if stdev:
+        plot_df = pd.DataFrame(data, columns = ['pos', 'score', 'stdev'])
+    else:
+        plot_df = pd.DataFrame(data, columns = ['pos', 'score'])
+    return plot_df
 
 
 ################################################################################
@@ -12169,7 +12245,7 @@ def make_feature_attribution_plot(seq, profile_scores, feat_list,
     assert plot_out_file, "given plot_out_file empty"
 
     # Dataframe for importance scores.
-    seq_alphabet = ch_info_dic["fa"][1]
+    seq_alphabet = ch_info_dic["fa"][2]
     is_df = seq_to_plot_df(seq, seq_alphabet, scores=profile_scores)
     # Number of plots.
     n_subplots = 1
@@ -12195,16 +12271,17 @@ def make_feature_attribution_plot(seq, profile_scores, feat_list,
     gs = gridspec.GridSpec(nrows=n_subplots, ncols=1, height_ratios=height_ratios)
 
     # Plot subplots.
-    i = 0
-    add_importance_scores_plot(is_df, fig, gs, i,
+    i_plot = 0
+    color_dict = {'A' : '#008000', 'C': '#0000ff',  'G': '#ffa600',  'U': '#ff0000'}
+    add_importance_scores_plot(is_df, fig, gs, i_plot,
                                color_dict=color_dict,
                                y_label_size=5.5)
 
     # Plot optional sequence label plot.
     if seq_label_plot:
-        i += 1
+        i_plot += 1
         color_dict = {'A' : '#008000', 'C': '#0000ff',  'G': '#ffa600',  'U': '#ff0000'}
-        add_label_plot(sl_df, fig, gs, i, color_dict=color_dict, y_label="sequence",
+        add_label_plot(sl_df, fig, gs, i_plot, color_dict=color_dict, y_label="sequence",
                        y_label_size=4)
 
     # Plot additional plots.
@@ -12217,7 +12294,7 @@ def make_feature_attribution_plot(seq, profile_scores, feat_list,
         feat_encoding = fdt[3]
         l_idxs = len(feat_idxs)
         # Plot index.
-        i += 1
+        i_plot += 1
         if feat_type == "C":
             # Categorical data.
             feat_str = ""
@@ -12228,7 +12305,7 @@ def make_feature_attribution_plot(seq, profile_scores, feat_list,
                         break
             c_df = seq_to_plot_df(feat_str, feat_alphabet)
             color_dict = False
-            add_label_plot(c_df, fig, gs, i, color_dict=color_dict, y_label=fid,
+            add_label_plot(c_df, fig, gs, i_plot, color_dict=color_dict, y_label=fid,
                            y_label_size=4)
         elif feat_type == "N":
             # Numerical data.
@@ -12244,33 +12321,38 @@ def make_feature_attribution_plot(seq, profile_scores, feat_list,
             #plot_df.index.name = "pos"
             if fid == "pc.con":
                 assert l_idxs == 1, "len(feat_idxs) != 1 for pc.con feature (instead: %i)" %(l_idxs)
-                pc_con_df = scores_to_plot_df(data[0])
-                add_phastcons_scores_plot(pc_con_df, fig, gs, i,
+                pc_con_df = scores_to_plot_df(data[feat_alphabet[0]])
+                add_phastcons_scores_plot(pc_con_df, fig, gs, i_plot,
                                           y_label_size=4)
             elif fid == "pp.con":
                 assert l_idxs == 1, "len(feat_idxs) != 1 for pp.con feature (instead: %i)" %(l_idxs)
-                pp_con_df = scores_to_plot_df(data[0])
-                add_phylop_scores_plot(pp_con_df, fig, gs, i,
+                pp_con_df = scores_to_plot_df(data[feat_alphabet[0]])
+                add_phylop_scores_plot(pp_con_df, fig, gs, i_plot,
                                        y_label_size=4)
             elif fid == "elem_p.str":
                 assert l_idxs == 5, "len(feat_idxs) != 5 for elem_p.str feature (instead: %i)" %(l_idxs)
                 elem_plot_df = pd.DataFrame(data, columns = feat_alphabet)
                 elem_plot_df.index.name = "pos"
-                add_label_plot(elem_plot_df, fig, gs, i, color_dict=color_dict, y_label=fid,
+                add_label_plot(elem_plot_df, fig, gs, i_plot,
+                               color_dict=color_dict,
+                               y_label=fid,
                                y_label_size=4)
             else:
                 # All other numerical values.
                 assert l_idxs == 1, "len(feat_idxs) != 1 for additional numerical %s feature (instead: %i)" %(fid, l_idxs)
-                add_n_df = scores_to_plot_df(data[0])
+                add_n_df = scores_to_plot_df(data[feat_alphabet[0]])
                 if feat_encoding == "-":
-                    add_phastcons_scores_plot(add_n_df, fig, gs, i,
+                    add_phastcons_scores_plot(add_n_df, fig, gs, i_plot,
                                               disable_y_labels=True,
+                                              ylabel=fid,
                                               y_label_size=4)
                 elif feat_encoding == "prob": # 0..1
-                    add_phastcons_scores_plot(add_n_df, fig, gs, i,
+                    add_phastcons_scores_plot(add_n_df, fig, gs, i_plot,
+                                              ylabel=fid,
                                               y_label_size=4)
                 elif feat_encoding == "minmax_norm": # 0..1
-                    add_phastcons_scores_plot(add_n_df, fig, gs, i,
+                    add_phastcons_scores_plot(add_n_df, fig, gs, i_plot,
+                                              ylabel=fid,
                                               y_label_size=4)
                 else:
                     assert False, "invalid feature normalization string given for additional numerical %s feature (got: %s)" %(fid, feat_encoding)
@@ -12535,10 +12617,129 @@ def motif_scores_to_plot_df(motif_sc_ll):
     plot_df = pd.DataFrame(data, columns = ['pos', 'score', 'stdev'])
     return plot_df
 
+################################################################################
+
+def make_motif_plot(motif_matrix, ch_info_dic, motif_out_file,
+                    fid2stdev_dic=False):
+    """
+    Plot motif using a 2D list with size motif_size*num_features, which
+    stores the average values for all feature channels.
+
+    fid2stdev_dic:
+        Feature ID to list of standard deviations (list length == motif size).
+        Store score stdev at each motif position. For one-channel numerical
+        features (pc.con, pp.con, additional numerical features).
+
+    """
+
+    # First make sequence plot, then alphabetically rest of features.
+    seq_df = make_motif_label_plot_df("fa", ch_info_dic, motif_matrix)
+
+    # Number of plots.
+    n_subplots = 1
+    height_ratios = [2.5]
+
+    # Heights and number of additional plots.
+    for fid in ch_info_dic:
+        if fid == "fa":
+            continue
+        n_subplots += 1
+        height_ratios.append(1)
+
+    # Init plot.
+    fig_width = 4.5
+    fig_height = 1.5 * n_subplots
+    if n_subplots == 1:
+        fig_height = 2.5
+    fig = plt.figure(figsize=(fig_width, fig_height))
+    gs = gridspec.GridSpec(nrows=n_subplots, ncols=1, height_ratios=height_ratios)
+
+    # Plot subplots.
+    i_plot = 0
+    # Sequence motif plot.
+    color_dict = {'A' : '#008000', 'C': '#0000ff',  'G': '#ffa600',  'U': '#ff0000'}
+    add_motif_label_plot(seq_df, fig, gs, i_plot, color_dict=color_dict, y_label="sequence")
+
+    # Plot additional plots.
+    for fid, fdt in sorted(ch_info_dic.items()):
+        if fid == "fa":
+            continue
+        feat_type = fdt[0]
+        feat_idxs = fdt[1]
+        feat_alphabet = fdt[2]
+        feat_encoding = fdt[3]
+        l_idxs = len(feat_idxs)
+        color_dict = False
+        stdev = False
+        # Plot index.
+        i_plot += 1
+        # Categorical data.
+        if feat_type == "C":
+            c_df = make_motif_label_plot_df(fid, ch_info_dic, motif_matrix)
+            add_motif_label_plot(c_df, fig, gs, i_plot,
+                                 color_dict=color_dict,
+                                 y_label_size=7,
+                                 y_label=fid)
+        elif feat_type == "N":
+            if fid == "pc.con":
+                if fid2stdev_dic:
+                    assert fid in fid2stdev_dic, "fid2stdev_dic given but missing feature ID %s" %(fid)
+                    stdev = fid2stdev_dic[fid]
+                pc_df = make_motif_scores_plot_df(fid, ch_info_dic, motif_matrix,
+                                                  stdev=stdev)
+                add_phastcons_scores_plot(pc_df, fig, gs, i_plot,
+                                          stdev=stdev,
+                                          y_label_size=4)
+            elif fid == "pp.con":
+                if fid2stdev_dic:
+                    assert fid in fid2stdev_dic, "fid2stdev_dic given but missing feature ID %s" %(fid)
+                    stdev = fid2stdev_dic[fid]
+                pp_df = make_motif_scores_plot_df(fid, ch_info_dic, motif_matrix,
+                                                  stdev=stdev)
+                add_phylop_scores_plot(pp_df, fig, gs, i_plot,
+                                       stdev=stdev,
+                                       y_label_size=4)
+            elif fid == "elem_p.str":
+                elem_df = make_motif_label_plot_df(fid, ch_info_dic, motif_matrix)
+                add_motif_label_plot(elem_df, fig, gs, i_plot,
+                                     color_dict=color_dict,
+                                     y_label_size=7,
+                                     y_label=fid)
+            else:
+                # Additional numerical features, treat like pc.con, pp.con.
+                assert l_idxs == 1, "len(feat_idxs) != 1 for additional numerical %s feature (instead: %i)" %(fid, l_idxs)
+                if fid2stdev_dic:
+                    assert fid in fid2stdev_dic, "fid2stdev_dic given but missing feature ID %s" %(fid)
+                    stdev = fid2stdev_dic[fid]
+                add_n_df = make_motif_scores_plot_df(fid, ch_info_dic, motif_matrix,
+                                                  stdev=stdev)
+                if feat_encoding == "-":
+                    add_phastcons_scores_plot(add_n_df, fig, gs, i_plot,
+                                              stdev=stdev,
+                                              disable_y_labels=True,
+                                              ylabel=fid,
+                                              y_label_size=4)
+                elif feat_encoding == "prob": # 0..1
+                    add_phastcons_scores_plot(add_n_df, fig, gs, i_plot,
+                                              stdev=stdev,
+                                              ylabel=fid,
+                                              y_label_size=4)
+                elif feat_encoding == "minmax_norm": # 0..1
+                    add_phastcons_scores_plot(add_n_df, fig, gs, i_plot,
+                                              stdev=stdev,
+                                              ylabel=fid,
+                                              y_label_size=4)
+                else:
+                    assert False, "invalid feature normalization string given for additional numerical %s feature (got: %s)" %(fid, feat_encoding)
+
+    # Store plot.
+    fig.savefig(motif_out_file, dpi=150, transparent=False)
+    plt.close(fig)
+
 
 ################################################################################
 
-def make_motif_plot(motif_seqs_ll, motif_out_file,
+def make_motif_plot_old(motif_seqs_ll, motif_out_file,
                     motif_eia_ll=False,
                     motif_rra_ll=False,
                     motif_tra_ll=False,
