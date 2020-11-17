@@ -2420,7 +2420,7 @@ def main_eval(args):
             kmer_count = kmerc_dic[lookup_kmer]
             kmer_crank = kmer2crank_dic[lookup_kmer]
             print("Look-up k-mer: %s, average score: %s, # k-mer hits: %i" %(lookup_kmer, str(sc), kmer_count))
-            KSOUT.write("%i\t%s\t%i\t%s\n" %(kmer_crank, kmer, kmer_count, str(sc)))
+            KSOUT.write("%i\t%s\t%i\t%s\n" %(kmer_crank, lookup_kmer, kmer_count, str(sc)))
             if not args.num_features == 4:
                 lookup_plot_file = motif_plots_folder + "/" "lookup_" + lookup_kmer + "." + plot_format
                 print("Plot %s ... " %(lookup_plot_file))
