@@ -246,6 +246,11 @@ def setup_argument_parser():
                    nargs='+',
                    default=[0.2],
                    help="List of dropout rates for hyperparameter optimization (default: 0.2 (for --undirected 0.3))")
+    p_tra.add_argument("--gadd-pool",
+                   dest = "gadd_pool",
+                   default = False,
+                   action = "store_true",
+                   help = "Use global add pool (default: False)")
     p_tra.add_argument("--nr-hidden-layers",
                    dest = "nr_hidden_layers",
                    type = int,
@@ -315,6 +320,22 @@ def setup_argument_parser():
                    default = False,
                    action = "store_true",
                    help = "Plot bottom profiles and motifs as well (default: False)")
+    p_ev.add_argument("--kmer-analysis",
+                   dest = "kmer_analysis",
+                   default = False,
+                   action = "store_true",
+                   help = "Get top 20 k-mers and for each plot feature motif (no plots if --only-seq) (default: False)")
+    p_ev.add_argument("--kmer-size",
+                   dest="kmer_size",
+                   type = int,
+                   default = 5,
+                   metavar='int',
+                   help = "Size (length) of k-mers to extract in --kmer-analysis (default: 5)")
+    p_ev.add_argument("--lookup-kmer",
+                   dest="lookup_kmer",
+                   type=str,
+                   metavar='str',
+                   help = "Provide RNA k-mer of size --kmer-size to look up and return score and motif (if found in sequences, no plots if --only-seq)")
     p_ev.add_argument("--plot-format",
                    dest="plot_format",
                    type = int,
@@ -829,9 +850,6 @@ def main_train(args):
     random.shuffle(all_graphs)
     labels = [g.y for g in all_graphs]
 
-    # gadd pooling.
-    args.gadd = False
-
     # Hyperparameters.
     #args.list_lr = [0.001, 0.0001]
     #args.list_node_hidden_dim = [96, 128]
@@ -871,8 +889,9 @@ def main_train(args):
         print("# HP combinations to test == 1. No HP optimization needed ...")
         # In case of one combination, set list_dr to 0.3.
         if args.undirected:
-            print("Set default --undirected dropout rate to 0.3 ... ")
-            args.list_dr[0] = 0.3
+            if args.list_dr[0] == 0.2:
+                print("Set default --undirected dropout rate to 0.3 ... ")
+                args.list_dr[0] = 0.3
 
     """
     Run cross validation (--gen-cv, --gen-cv-k) to estimate generalization
@@ -961,7 +980,7 @@ def main_train(args):
                                   node_hidden_dim=opt_node_hidden_dim,
                                   dropout_rate=opt_dr,
                                   nr_hidden_layers=args.nr_hidden_layers,
-                                  add_gadd=args.gadd,
+                                  add_gadd=args.gadd_pool,
                                   incr_hidden_dim=args.incr_hidden_dim,
                                   fc_hidden_dim=args.fc_hidden_dim,
                                   out_dim=2).to(device)
@@ -999,7 +1018,7 @@ def main_train(args):
                                   node_hidden_dim=opt_node_hidden_dim,
                                   dropout_rate=opt_dr,
                                   nr_hidden_layers=args.nr_hidden_layers,
-                                  add_gadd=args.gadd,
+                                  add_gadd=args.gadd_pool,
                                   incr_hidden_dim=args.incr_hidden_dim,
                                   fc_hidden_dim=args.fc_hidden_dim,
                                   out_dim=2).to(device)
@@ -1150,7 +1169,7 @@ def main_train(args):
                               node_hidden_dim=opt_node_hidden_dim,
                               dropout_rate=opt_dr,
                               nr_hidden_layers=args.nr_hidden_layers,
-                              add_gadd=args.gadd,
+                              add_gadd=args.gadd_pool,
                               incr_hidden_dim=args.incr_hidden_dim,
                               fc_hidden_dim=args.fc_hidden_dim,
                               out_dim=2).to(device)
@@ -1354,6 +1373,7 @@ def main_train(args):
         PAROUT.write("node_hidden_dim\t%s\n" %(str(best_node_hidden_dim)))
         PAROUT.write("weight_decay\t%s\n" %(str(best_weight_decay)))
         PAROUT.write("incr_hidden_dim\t%s\n" %(str(args.incr_hidden_dim)))
+        PAROUT.write("gadd_pool\t%s\n" %(str(args.gadd_pool)))
         PAROUT.write("undirected\t%s\n" %(str(args.undirected)))
         PAROUT.write("nr_hidden_layers\t%s\n" %(str(args.nr_hidden_layers)))
         PAROUT.close()
@@ -1369,7 +1389,7 @@ def main_train(args):
         if run_hpo:
             print("Train final model (HPO enabled, 1 split only) ... ")
         else:
-            print("Train final model (1 split only)... ")
+            print("Train final model (1 split only) ... ")
 
         val_set_perc = args.train_vs * 100
         print("Using %.1f" %(val_set_perc) + '% ' + "of training instances for validation ... ")
@@ -1429,6 +1449,7 @@ def main_train(args):
             PAROUT.write("node_hidden_dim\t%s\n" %(str(opt_node_hidden_dim)))
             PAROUT.write("weight_decay\t%s\n" %(str(opt_weight_decay)))
             PAROUT.write("incr_hidden_dim\t%s\n" %(str(args.incr_hidden_dim)))
+            PAROUT.write("gadd_pool\t%s\n" %(str(args.gadd_pool)))
             PAROUT.write("undirected\t%s\n" %(str(args.undirected)))
             PAROUT.write("nr_hidden_layers\t%s\n" %(str(args.nr_hidden_layers)))
             PAROUT.close()
@@ -1494,6 +1515,7 @@ def main_eval(args):
     assert "undirected" in params_dic, "undirected info missing in model parameter file %s" %(params_file)
     assert "nr_hidden_layers" in params_dic, "nr_hidden_layers info missing in model parameter file %s" %(params_file)
     assert "weight_decay" in params_dic, "weight_decay info missing in model parameter file %s" %(params_file)
+    assert "gadd_pool" in params_dic, "gadd_pool info missing in model parameter file %s" %(params_file)
 
     # Set parameters.
     fc_hidden_dim = int(params_dic["fc_hidden_dim"])
@@ -1509,6 +1531,9 @@ def main_eval(args):
     incr_hidden_dim = False
     if params_dic["incr_hidden_dim"] == "True":
         incr_hidden_dim = True
+    args.gadd_pool = False
+    if params_dic["gadd_pool"] == "True":
+        args.gadd_pool = True
     undirected = False
     args.undirected = False
     if params_dic["undirected"] == "True":
@@ -1528,10 +1553,19 @@ def main_eval(args):
     assert args.motif_sc_thr <= 1 and args.motif_sc_thr >= -1, "--motif-sc-thr must be within -1 and 1"
     # Window size.
     if (args.win_size-1) % 2:
-        assert False, "only uneven window size values supported (5,7,9, ...)"
+        assert False, "only uneven window size values (--win-size) supported (5,7,9, ...)"
     if args.win_size < 5:
         assert False, "window size should be >= 5"
     win_info_str = "w%i" %(args.win_size)
+    # k-mer size.
+    if (args.kmer_size-1) % 2:
+        assert False, "only uneven k-mer size values (--kmer-size) supported (5,7,9, ...)"
+    assert args.kmer_size >= 3 and args.kmer_size <= 21, "set a reasonable k-mer size (--kmer-size) (>= 3 and <= 21)"
+    if args.lookup_kmer:
+        assert len(args.lookup_kmer) == args.kmer_size, "--lookup-kmer length needs to be == --kmer-size"
+
+    # Window extension from center left and right.
+    win_extlr = int(args.win_size/2)
 
     # Motif size.
     max_motif_size = 0
@@ -1547,6 +1581,13 @@ def main_eval(args):
     max_motif_extlr = int(max_motif_size/2)
     # Motif output folder.
     motif_plots_folder = args.out_folder
+    # k-mer analysis.
+    kmer_plots_folder = args.out_folder + "/" + "kmer_plots"
+    if args.kmer_analysis:
+        if os.path.exists(kmer_plots_folder):
+            shutil.rmtree(kmer_plots_folder)
+        if args.num_features != 4:
+            os.makedirs(kmer_plots_folder)
 
     # Get graphprot2 train parameters.
     gp2_train_settings_file = args.in_train_folder + "/settings.graphprot2_train.out"
@@ -1613,6 +1654,16 @@ def main_eval(args):
     l_dataset = len(all_features)
     print("Dataset size:          %i" %(l_dataset))
 
+    # Check sequence size vs set window size.
+    min_seq_len = 66666666
+    all_seq_len = 0
+    for seq_id in seqs_dic:
+        seq_l = len(seqs_dic[seq_id])
+        all_seq_len += seq_l
+        if seq_l < min_seq_len:
+            min_seq_len = seq_l
+    assert win_extlr <= min_seq_len+1, "--win-size needs to be < 2*min_seq_len+1. Please lower --win-size"
+
     # Check # features.
     check_num_feat = 0
     for fid in ch_info_dic:
@@ -1625,6 +1676,7 @@ def main_eval(args):
                       node_hidden_dim=node_hidden_dim,
                       dropout_rate=dr,
                       nr_hidden_layers=nr_hidden_layers,
+                      add_gadd=args.gadd_pool,
                       incr_hidden_dim=incr_hidden_dim,
                       fc_hidden_dim=fc_hidden_dim,
                       out_dim=2).to(device)
@@ -1675,7 +1727,6 @@ def main_eval(args):
     all_win_graphs = []
     seq_len_list = []
     c_all_seq_len = 0
-    extlr = int(args.win_size/2)
 
     print("Create window graphs ... ")
     for feat_list in all_features:
@@ -1686,8 +1737,8 @@ def main_eval(args):
         # For each position in feat_list.
         l_feat = len(feat_list)
         for wi in range(l_feat):
-            reg_s = wi - extlr
-            reg_e = wi + extlr + 1
+            reg_s = wi - win_extlr
+            reg_e = wi + win_extlr + 1
             if reg_e > l_feat:
                 reg_e = l_feat
             if reg_s < 0:
@@ -1742,6 +1793,20 @@ def main_eval(args):
     gi2sc_dic = {}
     for i, sc in enumerate(ws_scores):
         gi2sc_dic[i] = sc
+    assert len(gi2sc_dic) == len(seqs_dic), "length gi2sc_dic != length seqs_dic"
+
+    # For directed graphs, shift profiles to left.
+    shift_profiles = False
+    if shift_profiles:
+        shift_pos = win_extlr # number of positions to shift scores left.
+        if win_extlr > nr_hidden_layers:
+            shift_pos = nr_hidden_layers
+        if not args.undirected:
+            for i in range(len(profile_scores_ll)):
+                site_l = len(profile_scores_ll[i])
+                for j in range(site_l):
+                    if j+shift_pos < site_l:
+                        profile_scores_ll[i][j] = profile_scores_ll[i][j+shift_pos]
 
     """
     Plot profiles and motifs
@@ -1820,7 +1885,7 @@ def main_eval(args):
         # Print only top --nr-top-profiles profiles.
         if site_count <= args.nr_top_profiles:
             # Plot file.
-            plot_file_name = str(id_i)[1:] + "_" + win_info_str + "_sc" + str(ws_sc) + "." + plot_format
+            plot_file_name = str(id_i)[1:] + "_" + seq_id + "_" + win_info_str + "_sc" + str(ws_sc) + "." + plot_format
             plot_out_file = top_profiles_folder + "/" + plot_file_name
             # Plot profile.
             gp2lib.make_feature_attribution_plot(seq, profile_scores, all_features[gi],
@@ -2086,7 +2151,7 @@ def main_eval(args):
                     for j in range(l_sv):
                         motif_matrix[i][j] = motif_matrix[i][j] / site_count
 
-                # Calculate tandard deviations for one-channel numerical features at each motif position.
+                # Calculate standard deviations for one-channel numerical features at each motif position.
                 fid2stdev_dic = {}
                 if calc_stdev:
                     for fid in fid2sc_dic:
@@ -2101,6 +2166,269 @@ def main_eval(args):
 
                 bottom_motif_file_dic[motif_out_file] = 1
 
+
+    """
+    Run k-mer analysis.
+
+    """
+    lookup_kmer = False
+    lookup_plot_file = False
+    c_top_kmers = 20
+
+    if args.kmer_analysis:
+
+        print("Start k-mer analysis ... ")
+        print("--kmer-size:  %i" %(args.kmer_size))
+        kmer_extlr = int(args.kmer_size/2)
+
+        # Do window graph predictions again.
+        if args.kmer_size != args.win_size:
+
+            # Create window graphs.
+            all_win_graphs = []
+            seq_len_list = []
+            c_all_seq_len = 0
+            print("--win-size != --kmer-size")
+            print("Create window graphs again for k-mer analysis ... ")
+            for feat_list in all_features:
+                l_seq = len(feat_list)
+                # l_seq == window graphs for sequence.
+                seq_len_list.append(l_seq)
+                c_all_seq_len += l_seq
+                # For each position in feat_list.
+                l_feat = len(feat_list)
+                for wi in range(l_feat):
+                    reg_s = wi - kmer_extlr
+                    reg_e = wi + kmer_extlr + 1
+                    if reg_e > l_feat:
+                        reg_e = l_feat
+                    if reg_s < 0:
+                        reg_s = 0
+                    feat_list_win = feat_list[reg_s:reg_e]
+                    l_feat_win = len(feat_list_win)
+                    # Construct window graph.
+                    edge_index_1 = []
+                    edge_index_2 = []
+                    for ni in range(l_feat_win - 1):
+                        edge_index_1.append(ni)
+                        edge_index_2.append(ni+1)
+                        if args.undirected:
+                            edge_index_1.append(ni+1)
+                            edge_index_2.append(ni)
+
+                    edge_index = torch.tensor([edge_index_1, edge_index_2], dtype=torch.long)
+                    x = torch.tensor(feat_list_win, dtype=torch.float)
+                    data = Data(x=x, edge_index=edge_index, y=1)
+                    all_win_graphs.append(data)
+
+            # Checks.
+            c_all_win_graphs = len(all_win_graphs)
+            assert c_all_win_graphs, "no window graphs constructed (# window graphs == 0)"
+            assert c_all_seq_len == c_all_win_graphs, "total sequence length != # of window graphs (%i != %i)" %(c_all_seq_len, c_all_win_graphs)
+
+            # Load dataset.
+            print("Load window graphs dataset ... ")
+            predict_dataset = MyDataset(all_win_graphs)
+            predict_loader = DataLoader(predict_dataset, batch_size=batch_size, shuffle=False)
+
+            # Predict.
+            print("Predict windows for k-mer analysis ... ")
+            win_scores = model_util.get_scores(predict_loader, device, model,
+                                               min_max_norm=True)
+
+            # Checks.
+            c_win_scores = len(win_scores)
+            assert c_win_scores == c_all_seq_len, "# window graph scores != total sequence length (%i != %i)" %(c_win_scores, c_all_seq_len)
+
+            # Create list of profile scores.
+            profile_scores_ll = []
+            si = 0
+            for l in seq_len_list:
+                se = si + l
+                profile_scores_ll.append(win_scores[si:se])
+                si += l
+            assert profile_scores_ll, "profile_scores_ll list empty"
+            assert len(profile_scores_ll) == c_ws_scores, "length profile scores list != # whole-site scores"
+            assert len(profile_scores_ll) == len(seqs_dic), "length profile_scores_ll != length seqs_dic"
+
+        else:
+            print("--win-size == --kmer-size")
+            print("Use existing window graph predictions for k-mer analysis ... ")
+
+        # Get top k-mers.
+        print("Get top %i-mers from sequences ... " %(args.kmer_size))
+        kmerc_dic = gp2lib.seqs_dic_count_kmer_freqs(seqs_dic, args.kmer_size,
+                                                     rna=True,
+                                                     convert_to_uc=True,
+                                                     report_key_error=True)
+        assert kmerc_dic, "kmerc_dic k-mer counts dictionary empty"
+
+        # Sort by decending count.
+        c_kmers = 0
+        # List og top k-mers in count order.
+        process_kmers_list = []
+        top_kmers_dic = {}
+        # k-mer to score dictionary (to calculate average k-mer scores).
+        kmer2sc_dic = {}
+        for kmer, kmerc in sorted(kmerc_dic.items(), key=lambda item: item[1], reverse=True):
+            c_kmers += 1
+            process_kmers_list.append(kmer)
+            top_kmers_dic[kmer] = 1
+            kmer2sc_dic[kmer] = 0
+            if c_kmers >= c_top_kmers:
+                break
+        # Store all ranks.
+        kmer2crank_dic = {}
+        kmer_crank = 0
+        for kmer, kmerc in sorted(kmerc_dic.items(), key=lambda item: item[1], reverse=True):
+            kmer_crank += 1
+            kmer2crank_dic[kmer] = kmer_crank
+
+        if args.lookup_kmer:
+            # Check given k-mer.
+            rna_alphabet = ["A", "C", "G", "U"]
+            lookup_kmer = args.lookup_kmer.upper()
+            for c in args.lookup_kmer:
+                if c not in rna_alphabet:
+                    assert False, "non-RNA character %s encountered in --lookup-kmer" %(c)
+            if lookup_kmer in kmerc_dic:
+                print("--lookup-kmer %s present in sequences (count: %i) ... " %(lookup_kmer, kmerc_dic[lookup_kmer]))
+                if lookup_kmer not in kmer2sc_dic:
+                    process_kmers_list.append(lookup_kmer)
+                    kmer2sc_dic[lookup_kmer] = 0
+            else:
+                print("--lookup-kmer %s not found in training sequences!" %(lookup_kmer))
+
+
+        # Dictionary of motif matrices (2d lists) for kmers.
+        motif_matrix_dic = {}
+        # Standard deviation infos.
+        mm_stdev_dic = {}
+
+        # Motif matrix sizes.
+        l_mm = args.kmer_size
+        l_sv = args.num_features
+
+        # For every top k-mer.
+        for kmer in process_kmers_list:
+            kmer_count = kmerc_dic[kmer]
+            # kmer hit count on all sequences.
+            c_kmer_hits = 0
+            # Init motif matrix for kmer.
+            motif_matrix = []
+            for i in range(args.kmer_size):
+                motif_matrix.append([0.0]*args.num_features)
+
+            # Standard deviations for numerical features.
+            fid2sc_dic = {}
+            if calc_stdev:
+                for fid in stdev_fid2fidx_dic:
+                    fid2sc_dic[fid] = []
+                    for i in range(motif_size):
+                        fid2sc_dic[fid].append([])
+
+            # Go over whole sequence set, extract kmer hits, sum up scores and fill motif matrix.
+            for gi in gi2sc_dic:
+                seq_id = idx2id_dic[gi]
+                seq = seqs_dic[seq_id]
+                profile_scores = profile_scores_ll[gi]
+                if not profile_scores:
+                    continue
+                feat_list = all_features[gi]
+                site_l = len(profile_scores)
+
+                # Minimum sequence length for extracting k-mer blocks.
+                if site_l < (kmer_extlr*2 + 1):
+                    continue
+
+                for si in range(len(seq)-args.kmer_size+1):
+                    smer = seq[si:si+args.kmer_size]
+                    s_brick = si # 0-based.
+                    e_brick = si+args.kmer_size # 1-based.
+                    if kmer != smer:
+                        continue
+
+                    c_kmer_hits += 1
+
+                    # Sum up k-mer score.
+                    center_pos = s_brick + kmer_extlr # 0-based.
+                    kmer2sc_dic[kmer] += profile_scores[center_pos]
+
+                    # Add hit brick values to motif_matrix.
+                    for i in range(l_mm):
+                        for j in range(l_sv):
+                            motif_matrix[i][j] += feat_list[s_brick:e_brick][i][j]
+                            # For one-channel numerical features, store scores to calculate stdev.
+                            if calc_stdev:
+                                if j in stdev_fidx2fid_dic:
+                                    fid2sc_dic[stdev_fidx2fid_dic[j]][i].append(feat_list[s_brick:e_brick][i][j])
+
+            # Checks.
+            assert c_kmer_hits, "no k-mer hits for top k-mer %s" %(kmer)
+            assert kmer_count == c_kmer_hits, "differing k-mer hit counts for k-mer %s (%i != %i)" %(kmer, kmer_count, c_kmer_hits)
+
+            # Average motif matrix values.
+            for i in range(l_mm):
+                for j in range(l_sv):
+                    motif_matrix[i][j] = motif_matrix[i][j] / c_kmer_hits
+
+            # Average score.
+            kmer2sc_dic[kmer] = kmer2sc_dic[kmer] / c_kmer_hits
+
+            # Calculate standard deviations for one-channel numerical features at each motif position.
+            fid2stdev_dic = {}
+            if calc_stdev:
+                for fid in fid2sc_dic:
+                    fid2stdev_dic[fid] = []
+                    for i in range(l_mm):
+                        fid2stdev_dic[fid].append(statistics.stdev(fid2sc_dic[fid][i]))
+
+            # Store motif_matrix + fid2stdev_dic.
+            motif_matrix_dic[kmer] = motif_matrix
+            mm_stdev_dic[kmer] = fid2stdev_dic
+
+        print("Generate top %i k-mer plots ... " %(c_top_kmers))
+        # Sort by average block score and output k-mer motif.
+        kmer_i = 10 ** len(str(c_top_kmers))
+        kmer_rank = 0
+        kmer_stats_out = motif_plots_folder + "/kmer_stats.out"
+        KSOUT = open(kmer_stats_out, "w")
+        print("Ranking of k-mers based on average site score:")
+        for kmer, sc in sorted(kmer2sc_dic.items(), key=lambda item: item[1], reverse=True):
+            if kmer not in top_kmers_dic: # lookup-kmer skip.
+                continue
+            kmer_i += 1
+            kmer_rank += 1
+            kmer_count = kmerc_dic[kmer]
+            print("k-mer: %s, average score: %s, # k-mer hits: %i" %(kmer, str(sc), kmer_count))
+            # Print out stats.
+            KSOUT.write("%i\t%s\t%i\t%s\n" %(kmer_rank, kmer, kmer_count, str(sc)))
+            # Plot motif.
+            if not args.num_features == 4:
+                kmer_plot_file = kmer_plots_folder + "/" + str(kmer_i)[1:] + "_" + kmer + "_c" + str(kmer_count) + "_sc" + str(sc) + "." + plot_format
+                print("Plot %s ... " %(kmer_plot_file))
+                gp2lib.make_motif_plot(motif_matrix_dic[kmer], ch_info_dic, kmer_plot_file,
+                                       fid2stdev_dic=mm_stdev_dic[kmer])
+        KSOUT.close()
+        print("Output k-mer stats file:\n%s" %(kmer_stats_out))
+
+        # Plot / report lookup k-mer stats.
+        if lookup_kmer:
+            lookup_kmer_stats_out = motif_plots_folder + "/lookup_kmer_stats.out"
+            KSOUT = open(lookup_kmer_stats_out, "w")
+            sc = kmer2sc_dic[lookup_kmer]
+            kmer_count = kmerc_dic[lookup_kmer]
+            kmer_crank = kmer2crank_dic[lookup_kmer]
+            print("Look-up k-mer: %s, average score: %s, # k-mer hits: %i" %(lookup_kmer, str(sc), kmer_count))
+            KSOUT.write("%i\t%s\t%i\t%s\n" %(kmer_crank, kmer, kmer_count, str(sc)))
+            if not args.num_features == 4:
+                lookup_plot_file = motif_plots_folder + "/" "lookup_" + lookup_kmer + "." + plot_format
+                print("Plot %s ... " %(lookup_plot_file))
+                gp2lib.make_motif_plot(motif_matrix_dic[lookup_kmer], ch_info_dic, lookup_plot_file,
+                                       fid2stdev_dic=mm_stdev_dic[lookup_kmer])
+            print("Output lookup k-mer stats file:\n%s" %(lookup_kmer_stats_out))
+            KSOUT.close()
+
     print("")
     print("EVALUATION OUTPUT FILES")
     print("=======================")
@@ -2111,6 +2439,10 @@ def main_eval(args):
         for motif_out_file in bottom_motif_file_dic:
             print("Bottom motif plot:\n%s" %(motif_out_file))
             print("Bottom profile plots folder:\n%s" %(bottom_profiles_folder))
+    if args.kmer_analysis and args.num_features != 4:
+        print("Top %i k-mer plots folder:\n%s" %(c_top_kmers, kmer_plots_folder))
+    if args.lookup_kmer and args.num_features != 4:
+        print("Look-up k-mer %s plot:\n%s" %(lookup_kmer, lookup_plot_file))
     print("")
 
 

@@ -8787,7 +8787,7 @@ def seqs_dic_count_kmer_freqs(seqs_dic, k,
             if kmer in count_dic:
                 count_dic[kmer] += 1
                 total_c += 1
-    assert total_c, "no k-mers counted for given seqs_dic"
+    assert total_c, "no k-mers counted for given seqs_dic (sequence lengths < set k ?)"
 
     # Calculate ratios.
     if return_ratios:

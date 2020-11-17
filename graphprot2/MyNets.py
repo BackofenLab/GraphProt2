@@ -36,7 +36,7 @@ class FunnelGNN_old(torch.nn.Module):
                  fc_hidden_dim=128,
                  dropout_rate=0.5,
                  out_dim=2):
-        super(FunnelGNN, self).__init__()
+        super(FunnelGNN_old, self).__init__()
         self.bn0 = torch.nn.BatchNorm1d(input_dim)
         self.conv1 = GraphConv(input_dim, node_hidden_dim)
         self.conv2 = GraphConv(node_hidden_dim, 2*node_hidden_dim)
