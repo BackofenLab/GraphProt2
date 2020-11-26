@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 
 from distutils.spawn import find_executable
+from torch_geometric.data import Data
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-from torch_geometric.data import Data
 import seaborn as sns
 from math import log
 import pandas as pd
@@ -9336,7 +9336,13 @@ def get_valid_file_ending(s):
 
 ################################################################################
 
-def load_eval_data(args):
+def load_eval_data(args,
+                   load_negatives=False,
+                   return_graphs=False,
+                   train_folder=False,
+                   num_features=4,
+                   undirected=True,
+                   str_elem_1h=False):
 
     """
     Load training data for graphprot2 eval, to generate motifs and profiles.
@@ -9344,11 +9350,14 @@ def load_eval_data(args):
     """
 
     # Checks.
-    assert os.path.isdir(args.in_train_folder), "--train-in folder does not exist"
     assert os.path.isdir(args.in_gt_folder), "--gt-in folder does not exist"
-
     # Feature file containing info for features used for model training.
-    feat_file = args.in_train_folder + "/" + "features.out"
+    if train_folder:
+        assert os.path.isdir(train_folder), "model training folder %s does not exist" %(train_folder)
+        feat_file = train_folder + "/" + "features.out"
+    else:
+        assert os.path.isdir(args.in_train_folder), "--train-in folder does not exist"
+        feat_file = args.in_train_folder + "/" + "features.out"
     assert os.path.exists(feat_file), "%s features file expected but not does not exist" %(feat_file)
 
     # graphprot2 predict output folder.
@@ -9383,7 +9392,6 @@ def load_eval_data(args):
             fid2norm_dic[feat_id] = feat_norm
     f.closed
     assert fid2type_dic, "no feature infos read in from graphprot2 train feature file %s" %(feat_file)
-
     # Check for base pair model.
     assert "bpp.str" not in fid2type_dic, "--train-in model was trained with base pair information, but graphprot2 eval so far does not support the visualization of base pair information"
 
@@ -9414,6 +9422,8 @@ def load_eval_data(args):
 
     # Read in FASTA sequences.
     pos_fa_in = args.in_gt_folder + "/" + "positives.fa"
+    if load_negatives:
+        pos_fa_in = args.in_gt_folder + "/" + "negatives.fa"
     assert os.path.exists(pos_fa_in), "--gt-in folder does not contain %s"  %(pos_fa_in)
     seqs_dic = read_fasta_into_dic(pos_fa_in, all_uc=seqs_all_uc)
     assert seqs_dic, "no sequences read in from FASTA file \"%s\"" %(pos_fa_in)
@@ -9461,18 +9471,20 @@ def load_eval_data(args):
         # All features (additional to .fa) like .elem_p.str, .con, .eia, .tra, .rra, or user defined.
         feat_alphabet = fid2cat_dic[fid]
         pos_feat_in = args.in_gt_folder + "/positives." + fid
+        if load_negatives:
+            pos_feat_in = args.in_gt_folder + "/negatives." + fid
         assert os.path.exists(pos_feat_in), "--in folder does not contain %s"  %(pos_feat_in)
         print("Read in .%s annotations ... " %(fid))
         n_to_1h = False
         # Special case: convert elem_p.str probabilities to 1-hot encoding.
-        if fid == "elem_p.str" and args.str_elem_1h:
+        if fid == "elem_p.str" and str_elem_1h:
             n_to_1h = True
         feat_dic = read_feat_into_dic(pos_feat_in, ftype,
                                       feat_dic=feat_dic,
                                       n_to_1h=n_to_1h,
                                       label_list=feat_alphabet)
         assert feat_dic, "no .%s information read in (feat_dic empty)" %(fid)
-        if fid == "elem_p.str" and args.str_elem_1h:
+        if fid == "elem_p.str" and str_elem_1h:
             ftype = "C"
         ch_info_dic[fid] = [ftype, [], [], "-"]
         if ftype == "N":
@@ -9525,6 +9537,8 @@ def load_eval_data(args):
 
     # Store node data in list of 2d lists.
     all_features = []
+    # if return_graphs=True.
+    all_graphs = []
 
     for idx, label in enumerate(label_list):
         seq_id = seq_ids_list[idx]
@@ -9533,13 +9547,32 @@ def load_eval_data(args):
 
         # Checks.
         check_num_feat = len(feat_dic[seq_id][0])
-        assert args.num_features == check_num_feat, "# features (num_features) from model parameter file != loaded number of node features (%i != %i)" %(model_num_feat, check_num_feat)
-        # Appendo.
-        all_features.append(feat_dic[seq_id])
+        assert num_features == check_num_feat, "# features (num_features) from model parameter file != loaded number of node features (%i != %i)" %(model_num_feat, check_num_feat)
+
+        if return_graphs:
+            edge_index_1 = []
+            edge_index_2 = []
+            for ni in range(l_seq - 1):
+                edge_index_1.append(ni)
+                edge_index_2.append(ni+1)
+                if undirected:
+                    edge_index_1.append(ni+1)
+                    edge_index_2.append(ni)
+            edge_index = torch.tensor([edge_index_1, edge_index_2], dtype=torch.long)
+            x = torch.tensor(feat_dic[seq_id], dtype=torch.float)
+            data = Data(x=x, edge_index=edge_index, y=label)
+            all_graphs.append(data)
+        else:
+            # Appendo.
+            all_features.append(feat_dic[seq_id])
 
     # Return some double talking jive data.
-    assert all_features, "all_features empty"
-    return seqs_dic, idx2id_dic, all_features, ch_info_dic
+    if return_graphs:
+        assert all_features, "all_features empty"
+        return seqs_dic, idx2id_dic, all_features, ch_info_dic
+    else:
+        assert all_graphs, "all_graphs empty"
+        return seqs_dic, idx2id_dic, all_graphs, ch_info_dic
 
 
 ################################################################################

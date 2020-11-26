@@ -246,11 +246,11 @@ def setup_argument_parser():
                    nargs='+',
                    default=[0.2],
                    help="List of dropout rates for hyperparameter optimization (default: 0.2 (for --undirected 0.3))")
-    p_tra.add_argument("--gadd-pool",
-                   dest = "gadd_pool",
+    p_tra.add_argument("--disable-gap",
+                   dest = "disable_gap",
                    default = False,
                    action = "store_true",
-                   help = "Use global add pool (default: False)")
+                   help = "Disable global add pool (default: False)")
     p_tra.add_argument("--nr-hidden-layers",
                    dest = "nr_hidden_layers",
                    type = int,
@@ -285,6 +285,12 @@ def setup_argument_parser():
                    help = "Evaluation results output folder")
 
     # Optional arguments for eval.
+    p_evm.add_argument("--add-train-in",
+                   dest="add_train_folder",
+                   type=str,
+                   default = False,
+                   required = True,
+                   help = "Second model training folder (output of graphprot2 train) for plotting prediction scores of both models on --gt-in positive dataset. Note that if dataset features of the two models are not identical, comparison might be less informative")
     p_ev.add_argument("--nr-top-sites",
                    dest="list_nr_top_sites",
                    type = int,
@@ -320,28 +326,34 @@ def setup_argument_parser():
                    default = False,
                    action = "store_true",
                    help = "Plot bottom profiles and motifs as well (default: False)")
-    p_ev.add_argument("--kmer-analysis",
-                   dest = "kmer_analysis",
+    p_ev.add_argument("--report",
+                   dest="report",
                    default = False,
                    action = "store_true",
-                   help = "Get top 20 k-mers and for each plot feature motif (no plots if --only-seq) (default: False)")
+                   help = "Generate additional statistics and plots regarding k-mer content and scores and also output an .html report containing various statistics and plots (default: False)")
     p_ev.add_argument("--kmer-size",
                    dest="kmer_size",
                    type = int,
                    default = 5,
                    metavar='int',
-                   help = "Size (length) of k-mers to extract in --kmer-analysis (default: 5)")
+                   help = "Size (length) of k-mers to extract for --report (default: 5)")
     p_ev.add_argument("--lookup-kmer",
                    dest="lookup_kmer",
                    type=str,
                    metavar='str',
-                   help = "Provide RNA k-mer of size --kmer-size to look up and return score and motif (if found in sequences, no plots if --only-seq)")
+                   help = "Provide RNA k-mer of size --kmer-size to look up and return score and motif (if found in sequences, no plot if --only-seq)")
+    p_ev.add_argument("--theme",
+                   dest="theme",
+                   type = int,
+                   default = 1,
+                   choices = [1,2],
+                   help = "Set theme for .html report (1: palm beach, 2: midnight sunset) (default: 1)")
     p_ev.add_argument("--plot-format",
                    dest="plot_format",
                    type = int,
                    default = 1,
                    choices = [1,2],
-                   help = "Plotting format. 1: png, 2: pdf (default: 1)")
+                   help = "Plotting format of motifs and profiles (does not affect plots generated for --report). 1: png, 2: pdf (default: 1)")
 
     """
     Binding site prediction mode.
@@ -803,6 +815,10 @@ def main_train(args):
     # Silence con_ext options.
     args.bps_mode = 1
     args.uc_context = False
+    # Global add pool.
+    args.gadd_pool = True
+    if args.disable_gap:
+        args.gadd_pool = False
 
     # Generate results output folder.
     out_folder = args.out_folder
@@ -1501,6 +1517,14 @@ def main_eval(args):
     model_file = args.in_train_folder + "/final.model"
     assert os.path.isfile(model_file), "--train-in folder is missing a model file. Run graphprot2 train without --gen-cv to generate and store a model" %(model_file)
     assert os.path.isfile(params_file), "--train-in folder is missing a model parameter file. Disable --gen-cv when running graphprot2 train to generate and store a model" %(params_file)
+    # Additional model checks.
+    if args.add_train_folder:
+        assert os.path.isdir(args.add_train_folder), "--add-train-in folder does not exist"
+        # Model + model parameter file.
+        params_file2 = args.add_train_folder + "/final.params"
+        model_file2 = args.add_train_folder + "/final.model"
+        assert os.path.isfile(model_file2), "--train2-in folder is missing a model file. Run graphprot2 train without --gen-cv to generate and store a model" %(model_file2)
+        assert os.path.isfile(params_file2), "--train2-in folder is missing a model parameter file. Disable --gen-cv when running graphprot2 train to generate and store a model" %(params_file2)
 
     # Read in model parameters.
     params_dic = gp2lib.read_settings_into_dic(params_file)
@@ -1531,14 +1555,33 @@ def main_eval(args):
     incr_hidden_dim = False
     if params_dic["incr_hidden_dim"] == "True":
         incr_hidden_dim = True
-    args.gadd_pool = False
-    if params_dic["gadd_pool"] == "True":
-        args.gadd_pool = True
+    args.gadd_pool = True
+    gadd_pool = True
+    if params_dic["gadd_pool"] == "False":
+        args.gadd_pool = False
+        gadd_pool = False
     undirected = False
     args.undirected = False
     if params_dic["undirected"] == "True":
         undirected = True
-        args.undirected = True
+        args.undirected = False
+
+    # Get graphprot2 train parameters for additional checks.
+    gp2_train_settings_file = args.in_train_folder + "/settings.graphprot2_train.out"
+    assert os.path.isfile(gp2_train_settings_file), "missing --train-in settings file %s" %(gp2_train_settings_file)
+    gp2_train_settings_dic = {}
+    with open(gp2_train_settings_file) as f:
+        for line in f:
+            row = line.strip()
+            cols = line.strip().split("\t")
+            gp2_train_settings_dic[cols[0]] = cols[1]
+    f.closed
+    assert "use_bps" in gp2_train_settings_dic, "use_bps info missing in --train-in settings file %s" %(gp2_train_settings_dic)
+    assert "str_elem_1h" in gp2_train_settings_dic, "str_elem_1h info missing in --train-in settings file %s" %(gp2_train_settings_dic)
+    assert gp2_train_settings_dic["use_bps"] == "False", "--train-in model was trained with base pair information, but so far graphprot2 (v%s) does not support the visualization of base pair information" %(__version__)
+    str_elem_1h = False
+    if gp2_train_settings_dic["str_elem_1h"] == "True":
+        str_elem_1h = True
 
     # Plot format.
     plot_format = "png"
@@ -1558,11 +1601,10 @@ def main_eval(args):
         assert False, "window size should be >= 5"
     win_info_str = "w%i" %(args.win_size)
     # k-mer size.
-    if (args.kmer_size-1) % 2:
-        assert False, "only uneven k-mer size values (--kmer-size) supported (5,7,9, ...)"
-    assert args.kmer_size >= 3 and args.kmer_size <= 21, "set a reasonable k-mer size (--kmer-size) (>= 3 and <= 21)"
-    if args.lookup_kmer:
-        assert len(args.lookup_kmer) == args.kmer_size, "--lookup-kmer length needs to be == --kmer-size"
+    if args.report:
+        assert args.kmer_size >= 3 and args.kmer_size <= 20, "set a reasonable k-mer size (--kmer-size) (>= 3 and <= 20)"
+        if args.lookup_kmer:
+            assert len(args.lookup_kmer) == args.kmer_size, "--lookup-kmer length needs to be == --kmer-size"
 
     # Window extension from center left and right.
     win_extlr = int(args.win_size/2)
@@ -1583,46 +1625,11 @@ def main_eval(args):
     motif_plots_folder = args.out_folder
     # k-mer analysis.
     kmer_plots_folder = args.out_folder + "/" + "kmer_plots"
-    if args.kmer_analysis:
+    if args.report:
         if os.path.exists(kmer_plots_folder):
             shutil.rmtree(kmer_plots_folder)
         if args.num_features != 4:
             os.makedirs(kmer_plots_folder)
-
-    # Get graphprot2 train parameters.
-    gp2_train_settings_file = args.in_train_folder + "/settings.graphprot2_train.out"
-    assert os.path.isfile(gp2_train_settings_file), "missing --train-in settings file %s" %(gp2_train_settings_file)
-    gp2_train_settings_dic = {}
-    with open(gp2_train_settings_file) as f:
-        for line in f:
-            row = line.strip()
-            cols = line.strip().split("\t")
-            gp2_train_settings_dic[cols[0]] = cols[1]
-    f.closed
-    assert "use_bps" in gp2_train_settings_dic, "use_bps info missing in --train-in settings file %s" %(gp2_train_settings_dic)
-    assert "str_elem_1h" in gp2_train_settings_dic, "str_elem_1h info missing in --train-in settings file %s" %(gp2_train_settings_dic)
-    assert gp2_train_settings_dic["use_bps"] == "False", "--train-in model was trained with base pair information, but so far graphprot2 (v%s) does not support the visualization of base pair information" %(__version__)
-    args.str_elem_1h = False
-    if gp2_train_settings_dic["str_elem_1h"] == "True":
-        args.str_elem_1h = True
-
-    # Get graphprot2 train features.
-    gp2_train_feat_out_file = args.in_train_folder + "/features.out"
-    assert os.path.isfile(gp2_train_feat_out_file), "missing --in feature file %s" %(gp2_train_feat_out_file)
-    gp2_train_feat_dic = {}
-    feat_alphabet_dic = {}
-    with open(gp2_train_feat_out_file) as f:
-        for line in f:
-            row = line.strip()
-            cols = line.strip().split("\t")
-            feat_id = cols[0]
-            gp2_train_feat_dic[feat_id] = 1
-            feat_cat_list = cols[2].split(",")
-            feat_cat_list.sort()
-            feat_alphabet_dic[feat_id] = feat_cat_list
-    f.closed
-    assert gp2_train_feat_dic, "no features found in %s" %(gp2_train_feat_out_file)
-    assert "bpp.str" not in gp2_train_feat_dic, "--train-in model was trained with base pair information, but so far graphprot2 (v%s) does not support the visualization of base pair information" %(__version__)
 
     # Some facts.
     print("# dataset features:    %i" %(args.num_features))
@@ -1649,8 +1656,11 @@ def main_eval(args):
     SETOUT.close()
 
     # Load data.
-    print("Load positive training set from --train-in ... ")
-    seqs_dic, idx2id_dic, all_features, ch_info_dic = gp2lib.load_eval_data(args)
+    print("Load positive training set from --gt-in ... ")
+    seqs_dic, idx2id_dic, all_features, ch_info_dic = gp2lib.load_eval_data(args,
+                                                             num_features=num_features,
+                                                             undirected=undirected,
+                                                             str_elem_1h=str_elem_1h)
     l_dataset = len(all_features)
     print("Dataset size:          %i" %(l_dataset))
 
@@ -1663,12 +1673,14 @@ def main_eval(args):
         if seq_l < min_seq_len:
             min_seq_len = seq_l
     assert win_extlr <= min_seq_len+1, "--win-size needs to be < 2*min_seq_len+1. Please lower --win-size"
+    if args.report:
+        assert args.kmer_size <= min_seq_len, "minimum sequence length < --kmer-size (%i < %i). Please lower --kmer-size" %(min_seq_len, args.kmer_size)
 
     # Check # features.
     check_num_feat = 0
     for fid in ch_info_dic:
         check_num_feat += len(ch_info_dic[fid][1])
-    assert args.num_features == check_num_feat, "args.num_features != check_num_feat (%i != %i)" %(args.num_features, check_num_feat)
+    assert args.num_features == check_num_feat, "num_features != check_num_feat (%i != %i)" %(args.num_features, check_num_feat)
 
     # Load trained model.
     print("Load trained model from --train-in ... ")
@@ -1722,6 +1734,163 @@ def main_eval(args):
     # Checks.
     c_ws_scores = len(ws_scores)
     assert c_ws_scores == c_all_graphs, "# whole-site scores != of whole-site graphs (%i != %i)" %(c_ws_scores, c_all_graphs)
+
+    """
+    If --report, predict on negative set too
+    Read in negative set as graphs
+    Predict on whole-site graphs and store predictions in neg_ws_scores
+
+    """
+    neg_ws_scores = []
+    if args.report:
+        # Load data again.
+        print("Load negative training set for --report ... ")
+        neg_seqs_dic, idx2negid_dic, all_neg_graphs, ch_info_neg_dic = gp2lib.load_eval_data(args,
+                                                                   load_negatives=True,
+                                                                   num_features=num_features,
+                                                                   return_graphs=True,
+                                                                   undirected=undirected,
+                                                                   str_elem_1h=str_elem_1h)
+        # Check # features.
+        check_num_feat = 0
+        for fid in ch_info_neg_dic:
+            check_num_feat += len(ch_info_neg_dic[fid][1])
+        assert num_features == check_num_feat, "num_features != check_num_feat (%i != %i)" %(num_features, check_num_feat)
+
+        # Load dataset.
+        predict_dataset = MyDataset(all_neg_graphs)
+        predict_loader = DataLoader(predict_dataset, batch_size=batch_size, shuffle=False)
+
+        # Predict.
+        print("Predict whole-site scores for negatives ... ")
+        neg_ws_scores = model_util.get_scores(predict_loader, device, model,
+                                              min_max_norm=True)
+        # Checks.
+        c_all_neg_graphs = len(all_neg_graphs)
+        assert c_all_graphs == c_all_neg_graphs, "c_all_graphs != c_all_neg_graphs (%i != %i)" %(c_all_graphs, c_all_neg_graphs)
+
+    # More.
+    if neg_ws_scores:
+        assert len(neg_ws_scores) == len(ws_scores), "len(neg_ws_scores) != len(ws_scores)"
+
+    """
+    Additional model given via --add-train-in
+    Check model and parameters
+    Read in positive training data as graphs
+    Predict on whole-site graphs and store predictions in add_ws_scores
+
+    """
+
+    add_ws_scores = []
+    if args.add_train_folder:
+        print("Take care of additional model from --add-train-in ... ")
+        # Model + model parameter file.
+        params_file2 = args.add_train_folder + "/final.params"
+        model_file2 = args.add_train_folder + "/final.model"
+        # Read in model parameters.
+        params_dic2 = gp2lib.read_settings_into_dic(params_file2)
+        # Check parameters.
+        assert "node_hidden_dim" in params_dic2, "node_hidden_dim info missing in model parameter file %s" %(params_dic2)
+        assert "fc_hidden_dim" in params_dic2, "fc_hidden_dim info missing in model parameter file %s" %(params_dic2)
+        assert "batch_size" in params_dic2, "batch_size info missing in model parameter file %s" %(params_dic2)
+        assert "num_features" in params_dic2, "num_features info missing in model parameter file %s" %(params_dic2)
+        assert "dr" in params_dic2, "dropout rate info missing in model parameter file %s" %(params_dic2)
+        assert "lr" in params_dic2, "learning rate info missing in model parameter file %s" %(params_dic2)
+        assert "incr_hidden_dim" in params_dic2, "incr_hidden_dim info missing in model parameter file %s" %(params_dic2)
+        assert "undirected" in params_dic2, "undirected info missing in model parameter file %s" %(params_dic2)
+        assert "nr_hidden_layers" in params_dic2, "nr_hidden_layers info missing in model parameter file %s" %(params_dic2)
+        assert "weight_decay" in params_dic2, "weight_decay info missing in model parameter file %s" %(params_dic2)
+        assert "gadd_pool" in params_dic2, "gadd_pool info missing in model parameter file %s" %(params_dic2)
+
+        # Set parameters.
+        fc_hidden_dim2 = int(params_dic2["fc_hidden_dim"])
+        node_hidden_dim2	= int(params_dic2["node_hidden_dim"])
+        batch_size2 = int(params_dic2["batch_size"])
+        num_features2 = int(params_dic2["num_features"])
+        nr_hidden_layers2 = int(params_dic2["nr_hidden_layers"])
+        weight_decay_str2 = params_dic2["weight_decay"]
+        dr2 = float(params_dic2["dr"])
+        dr_str2 = params_dic2["dr"]
+        lr_str2 = params_dic2["lr"]
+        incr_hidden_dim2 = False
+        if params_dic2["incr_hidden_dim"] == "True":
+            incr_hidden_dim2 = True
+        gadd_pool2 = True
+        if params_dic2["gadd_pool"] == "False":
+            gadd_pool2 = False
+        undirected2 = False
+        if params_dic2["undirected"] == "True":
+            undirected2 = True
+
+        # Get graphprot2 train parameters for additional checks.
+        gp2_train_settings_file = args.add_train_folder + "/settings.graphprot2_train.out"
+        assert os.path.isfile(gp2_train_settings_file), "missing --train-in settings file %s" %(gp2_train_settings_file)
+        gp2_train_settings_dic = {}
+        with open(gp2_train_settings_file) as f:
+            for line in f:
+                row = line.strip()
+                cols = line.strip().split("\t")
+                gp2_train_settings_dic[cols[0]] = cols[1]
+        f.closed
+        assert "use_bps" in gp2_train_settings_dic, "use_bps info missing in --add-train-in settings file %s" %(gp2_train_settings_dic)
+        assert "str_elem_1h" in gp2_train_settings_dic, "str_elem_1h info missing in --add-train-in settings file %s" %(gp2_train_settings_dic)
+        assert gp2_train_settings_dic["use_bps"] == "False", "--add-train-in model was trained with base pair information, but so far graphprot2 (v%s) does not support the visualization of base pair information" %(__version__)
+        str_elem_1h2 = False
+        if gp2_train_settings_dic["str_elem_1h"] == "True":
+            str_elem_1h2 = True
+
+        # Load data again.
+        print("Load positive training set from --gt-in for --add-train-in model ... ")
+        seqs_dic2, idx2id_dic2, all_graphs2, ch_info_dic2 = gp2lib.load_eval_data(args,
+                                                                   return_graphs=True,
+                                                                   train_folder=args.add_train_folder,
+                                                                   num_features=num_features2,
+                                                                   undirected=undirected2,
+                                                                   str_elem_1h=str_elem_1h2)
+
+        # Check # features.
+        check_num_feat = 0
+        for fid in ch_info_dic2:
+            check_num_feat += len(ch_info_dic2[fid][1])
+        assert num_features2 == check_num_feat, "num_features != check_num_feat (%i != %i)" %(num_features2, check_num_feat)
+
+        # Load trained model.
+        print("Load --add-train-in model ... ")
+        add_model = FunnelGNN(input_dim=num_features2,
+                              node_hidden_dim=node_hidden_dim2,
+                              dropout_rate=dr2,
+                              nr_hidden_layers=nr_hidden_layers2,
+                              add_gadd=gadd_pool2,
+                              incr_hidden_dim=incr_hidden_dim2,
+                              fc_hidden_dim=fc_hidden_dim2,
+                              out_dim=2).to(device)
+
+        add_model.load_state_dict(torch.load(model_file2))
+
+        # Load dataset.
+        print("Load whole-site graphs dataset ... ")
+        predict_dataset = MyDataset(all_graphs2)
+        predict_loader = DataLoader(predict_dataset, batch_size=batch_size2, shuffle=False)
+
+        # Predict.
+        print("Predict whole sites with --add-train-in model ... ")
+        add_ws_scores = model_util.get_scores(predict_loader, device, add_model,
+                                              min_max_norm=True)
+
+        # Checks.
+        c_add_ws_scores = len(add_ws_scores)
+        c_all_graphs2 = len(all_graphs2)
+        assert c_all_graphs == c_all_graphs2, "c_all_graphs != c_all_graphs2 (%i != %i)" %(c_all_graphs, c_all_graphs2)
+        assert c_add_ws_scores == c_all_graphs2, "# whole-site scores != of whole-site graphs (%i != %i)" %(c_add_ws_scores, c_all_graphs2)
+
+    # Just 2 B sure.
+    if add_ws_scores:
+        assert len(add_ws_scores) == len(ws_scores), "len(add_ws_scores) != len(ws_scores)"
+
+    """
+    Window predictions.
+
+    """
 
     # Create window graphs.
     all_win_graphs = []
@@ -2060,11 +2229,11 @@ def main_eval(args):
 
     """
 
+    bottom_motif_file_dic = {}
+
     if args.bottoms_up:
 
         print("Plot bottom motifs ... ")
-
-        bottom_motif_file_dic = {}
 
         # For each motif size.
         for motif_size in args.list_motif_sizes:
@@ -2168,42 +2337,106 @@ def main_eval(args):
 
 
     """
-    Run k-mer analysis.
+    Generate --report statistics and plots.
+
+
+
+        # Sort by decending count.
+        c_kmers = 0
+        # List og top k-mers in count order.
+        process_kmers_list = []
+        top_kmers_dic = {}
+        # k-mer to score dictionary (to calculate average k-mer scores).
+        kmer2sc_dic = {}
+        for kmer, kmerc in sorted(kmerc_dic.items(), key=lambda item: item[1], reverse=True):
+            c_kmers += 1
+            process_kmers_list.append(kmer)
+            top_kmers_dic[kmer] = 1
+            kmer2sc_dic[kmer] = 0
+            if c_kmers >= c_top_kmers:
+                break
+        # Store all ranks.
+        kmer2crank_dic = {}
+        kmer_crank = 0
+        for kmer, kmerc in sorted(kmerc_dic.items(), key=lambda item: item[1], reverse=True):
+            kmer_crank += 1
+            kmer2crank_dic[kmer] = kmer_crank
+
+        if args.num_features == 4:
+            for i,kmer in kmer_list:
+                kmer2sc_dic[kmer] = kmer_scores[i]
+
+
 
     """
     lookup_kmer = False
     lookup_plot_file = False
     c_top_kmers = 20
 
-    if args.kmer_analysis:
+    if args.report:
 
-        print("Start k-mer analysis ... ")
+        kmer_graphs = []
+        kmer2sc_dic = {}
+        kmer2rank_dic = {}
+        top_count_kmers_list = []
+
+        print("--report set. Gather more results ... ")
+        print("Score k-mers ... ")
         print("--kmer-size:  %i" %(args.kmer_size))
-        kmer_extlr = int(args.kmer_size/2)
+        print("Extract %i-mers from sequences ... " %(args.kmer_size))
+        kmer2c_dic = gp2lib.seqs_dic_count_kmer_freqs(seqs_dic, args.kmer_size,
+                                                      rna=True,
+                                                      convert_to_uc=True,
+                                                      report_key_error=True)
+        assert kmer2c_dic, "kmer2c_dic k-mer counts dictionary empty"
+        # Get ranks.
+        kmer_rank = 0
+        for kmer, kmerc in sorted(kmer2c_dic.items(), key=lambda item: item[1], reverse=True):
+            kmer_rank += 1
+            kmer2rank_dic[kmer] = kmer_rank
+            if kmer_rank <= c_top_kmers:
+                top_count_kmers_list.append(kmer)
 
-        # Do window graph predictions again.
-        if args.kmer_size != args.win_size:
+        kmer_list = []
+        for kmer, kmerc in sorted(kmer2c_dic.items()):
+            kmer_list.append(kmer)
 
-            # Create window graphs.
-            all_win_graphs = []
-            seq_len_list = []
-            c_all_seq_len = 0
-            print("--win-size != --kmer-size")
-            print("Create window graphs again for k-mer analysis ... ")
+        if args.num_features == 4:
+            print("--train-in model trained on sequences only. Generate k-mer graphs ... ")
+            # Construct sequence kmer graphs.
+            for kmer in kmer_list:
+                feat_list = gp2lib.string_vectorizer(kmer, custom_alphabet=['A','C','G','U'])
+                edge_index_1 = []
+                edge_index_2 = []
+                for ni in range(args.kmer_size - 1):
+                    edge_index_1.append(ni)
+                    edge_index_2.append(ni+1)
+                    if args.undirected:
+                        edge_index_1.append(ni+1)
+                        edge_index_2.append(ni)
+                edge_index = torch.tensor([edge_index_1, edge_index_2], dtype=torch.long)
+                x = torch.tensor(feat_list, dtype=torch.float)
+                data = Data(x=x, edge_index=edge_index, y=1)
+                kmer_graphs.append(data)
+            # Score kmers.
+            predict_dataset = MyDataset(kmer_graphs)
+            predict_loader = DataLoader(predict_dataset, batch_size=batch_size, shuffle=False)
+            print("Score k-mers present in sequences ... ")
+            kmer_scores = model_util.get_scores(predict_loader, device, model,
+                                                min_max_norm=True)
+            assert len(kmer_graphs) == len(kmer_scores), "len(kmer_graphs) != len(kmer_scores)"
+
+        else:
+            # More features comin at ya.
+            print("--train-in model trained on sequences+additional features. Generate k-mer graphs ... ")
             for feat_list in all_features:
-                l_seq = len(feat_list)
-                # l_seq == window graphs for sequence.
-                seq_len_list.append(l_seq)
-                c_all_seq_len += l_seq
                 # For each position in feat_list.
                 l_feat = len(feat_list)
                 for wi in range(l_feat):
-                    reg_s = wi - kmer_extlr
-                    reg_e = wi + kmer_extlr + 1
+                    reg_s = wi
+                    reg_e = wi + args.kmer_size
                     if reg_e > l_feat:
-                        reg_e = l_feat
-                    if reg_s < 0:
-                        reg_s = 0
+                        break
                     feat_list_win = feat_list[reg_s:reg_e]
                     l_feat_win = len(feat_list_win)
                     # Construct window graph.
@@ -2215,11 +2448,20 @@ def main_eval(args):
                         if args.undirected:
                             edge_index_1.append(ni+1)
                             edge_index_2.append(ni)
-
                     edge_index = torch.tensor([edge_index_1, edge_index_2], dtype=torch.long)
                     x = torch.tensor(feat_list_win, dtype=torch.float)
                     data = Data(x=x, edge_index=edge_index, y=1)
-                    all_win_graphs.append(data)
+                    kmer_graphs.append(data)
+        # Score kmers.
+        predict_dataset = MyDataset(kmer_graphs)
+        predict_loader = DataLoader(predict_dataset, batch_size=batch_size, shuffle=False)
+        print("Score k-mers ... ")
+        kmer_scores = model_util.get_scores(predict_loader, device, model,
+                                            min_max_norm=True)
+        assert len(kmer_graphs) == len(kmer_scores), "len(kmer_graphs) != len(kmer_scores)"
+
+        # For additional features, get average kmer
+
 
             # Checks.
             c_all_win_graphs = len(all_win_graphs)
@@ -2250,6 +2492,11 @@ def main_eval(args):
             assert profile_scores_ll, "profile_scores_ll list empty"
             assert len(profile_scores_ll) == c_ws_scores, "length profile scores list != # whole-site scores"
             assert len(profile_scores_ll) == len(seqs_dic), "length profile_scores_ll != length seqs_dic"
+
+
+
+
+
 
         else:
             print("--win-size == --kmer-size")
@@ -2439,7 +2686,7 @@ def main_eval(args):
         for motif_out_file in bottom_motif_file_dic:
             print("Bottom motif plot:\n%s" %(motif_out_file))
             print("Bottom profile plots folder:\n%s" %(bottom_profiles_folder))
-    if args.kmer_analysis and args.num_features != 4:
+    if args.report and args.num_features != 4:
         print("Top %i k-mer plots folder:\n%s" %(c_top_kmers, kmer_plots_folder))
     if args.lookup_kmer and args.num_features != 4:
         print("Look-up k-mer %s plot:\n%s" %(lookup_kmer, lookup_plot_file))
