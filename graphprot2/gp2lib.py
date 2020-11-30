@@ -7403,6 +7403,28 @@ def create_str_elem_grouped_bar_plot(pos_str_stats_dic, neg_str_stats_dic, out_p
 
 ################################################################################
 
+def gp2_eval_generate_html_report(ws_scores, neg_ws_scores,
+                                  args.out_folder, gp2lib_path,
+                                  kmer2rank_dic=False,
+                                  kmer2sc_dic=False,
+                                  kmerc_dic=False,
+                                  lookup_plot_file=False,
+                                  top_motif_file_dic=False,
+                                  bottom_motif_file_dic=False,
+                                  kmer_top=25,
+                                  add_ws_scores=False,
+                                  theme=args.theme,
+                                  plots_subfolder="html_plots",
+                                  kmer_plots_folder="kmer_plots"):
+
+
+    """
+
+    """
+
+
+################################################################################
+
 def gp2_gt_generate_html_report(pos_seqs_dic, neg_seqs_dic, out_folder,
                                 dataset_type, gp2lib_path,
                                 html_report_out=False,
