@@ -285,12 +285,6 @@ def setup_argument_parser():
                    help = "Evaluation results output folder")
 
     # Optional arguments for eval.
-    p_evm.add_argument("--add-train-in",
-                   dest="add_train_folder",
-                   type=str,
-                   default = False,
-                   required = True,
-                   help = "Second model training folder (output of graphprot2 train) for plotting prediction scores of both models on --gt-in positive dataset. Note that if dataset features of the two models are not identical, comparison might be less informative")
     p_ev.add_argument("--nr-top-sites",
                    dest="list_nr_top_sites",
                    type = int,
@@ -342,6 +336,11 @@ def setup_argument_parser():
                    type=str,
                    metavar='str',
                    help = "Provide RNA k-mer of size --kmer-size to look up and return score and motif (if found in sequences, no plot if --only-seq)")
+    p_ev.add_argument("--add-train-in",
+                   dest="add_train_folder",
+                   type=str,
+                   default = False,
+                   help = "Second model training folder (output of graphprot2 train) for plotting prediction scores of both models on --gt-in positive dataset. Note that if dataset features of the two models are not identical, comparison might be less informative")
     p_ev.add_argument("--theme",
                    dest="theme",
                    type = int,
@@ -1518,6 +1517,7 @@ def main_eval(args):
     assert os.path.isfile(model_file), "--train-in folder is missing a model file. Run graphprot2 train without --gen-cv to generate and store a model" %(model_file)
     assert os.path.isfile(params_file), "--train-in folder is missing a model parameter file. Disable --gen-cv when running graphprot2 train to generate and store a model" %(params_file)
     # Additional model checks.
+    model_file2 = False
     if args.add_train_folder:
         assert os.path.isdir(args.add_train_folder), "--add-train-in folder does not exist"
         # Model + model parameter file.
@@ -1605,7 +1605,7 @@ def main_eval(args):
     win_info_str = "w%i" %(args.win_size)
     # k-mer size.
     if args.report:
-        assert args.kmer_size >= 3 and args.kmer_size <= 20, "set a reasonable k-mer size (--kmer-size) (>= 3 and <= 20)"
+        assert args.kmer_size >= 3 and args.kmer_size <= 12, "set a reasonable k-mer size (--kmer-size) (>= 3 and <= 12)"
         if args.lookup_kmer:
             assert len(args.lookup_kmer) == args.kmer_size, "--lookup-kmer length needs to be == --kmer-size"
     else:
@@ -2047,9 +2047,6 @@ def main_eval(args):
                 min_sc = psc
                 min_pos = i
 
-        #real_max = max(profile_scores[max_motif_extlr:-max_motif_extlr])
-        #assert max_sc == real_max, "max_sc != real_max (%f != %f) for ID %s" %(max_sc, real_max, seq_id)
-
         id2maxpos_dic[seq_id] = max_pos # 0-based.
         id2minpos_dic[seq_id] = min_pos
 
@@ -2065,7 +2062,6 @@ def main_eval(args):
             gp2lib.make_feature_attribution_plot(seq, profile_scores, all_features[gi],
                                                  ch_info_dic, plot_out_file,
                                                  seq_label_plot=False)
-
     RSOUT.close()
 
     # Plot bottom profiles too.
@@ -2344,34 +2340,13 @@ def main_eval(args):
     """
     Generate --report statistics and plots.
 
-
-
-        # Sort by decending count.
-        c_kmers = 0
-        # List og top k-mers in count order.
-        process_kmers_list = []
-        top_kmers_dic = {}
-        # k-mer to score dictionary (to calculate average k-mer scores).
-        kmer2sc_dic = {}
-        for kmer, kmerc in sorted(kmerc_dic.items(), key=lambda item: item[1], reverse=True):
-            c_kmers += 1
-            process_kmers_list.append(kmer)
-            top_kmers_dic[kmer] = 1
-            kmer2sc_dic[kmer] = 0
-            if c_kmers >= c_top_kmers:
-                break
-        # Store all ranks.
-        kmer2crank_dic = {}
-        kmer_crank = 0
-        for kmer, kmerc in sorted(kmerc_dic.items(), key=lambda item: item[1], reverse=True):
-            kmer_crank += 1
-            kmer2crank_dic[kmer] = kmer_crank
-
-        if args.num_features == 4:
-            for i,kmer in kmer_list:
-                kmer2sc_dic[kmer] = kmer_scores[i]
-
-
+    - Get k-mer scores:
+        - If onlyseq, just score present sequence k-mers
+        - If additional features, get average brick scores (containing k-mer),
+          and bricks for plotting. Also get top scoring bricks and scores
+          for each k-mer.
+        - Jaccard index calculation to get an idea which k-mers are clustered
+        - HTML report
 
     """
     lookup_kmer = False
@@ -2382,6 +2357,19 @@ def main_eval(args):
 
         kmer_graphs = []
         kmer2sc_dic = {}
+        # Dictionaries for additional feature analysis.
+        kmer2mm_dic = {} # Dictionary of motif matrices.
+        kmer_stdev_dic = {} # Standard deviation infos.
+        # k-mer to best scoring matrix dictionary.
+        kmer2bestmm_dic = {}
+        # Store top scores for each k-mer.
+        kmer2bestsc_dic = {}
+        # k-mer to k-mer containing sequence IDs dictionary of lists.
+        kmer2seqids_dic = {}
+        # To store k-mer hit positions in sequences.
+        kmerseqid2hits_dic = {}
+        # k-mer score stdev.
+        kmer2scstdev_dic = {}
 
         print("--report set. Gather more results ... ")
         print("Score k-mers ... ")
@@ -2401,8 +2389,8 @@ def main_eval(args):
             for c in args.lookup_kmer:
                 if c not in rna_alphabet:
                     assert False, "non-RNA character %s encountered in --lookup-kmer" %(c)
-            if lookup_kmer in kmerc_dic:
-                print("--lookup-kmer %s present in sequences (count: %i) ... " %(lookup_kmer, kmerc_dic[lookup_kmer]))
+            if lookup_kmer in kmer2c_dic:
+                print("--lookup-kmer %s present in sequences (count: %i) ... " %(lookup_kmer, kmer2c_dic[lookup_kmer]))
             else:
                 print("--lookup-kmer %s not found in training sequences!" %(lookup_kmer))
 
@@ -2436,7 +2424,21 @@ def main_eval(args):
                                                 min_max_norm=True)
             assert len(kmer_graphs) == len(kmer_scores), "len(kmer_graphs) != len(kmer_scores)"
             for i,kmer in enumerate(kmer_list):
-                kmer2sc_dic[kmer] = kmer_scores[i]
+                kmer_score = kmer_scores[i]
+                kmer2sc_dic[kmer] = kmer_score
+                if kmer_score > 0:
+                    kmer2seqids_dic[kmer] = []
+                if lookup_kmer:
+                    kmer2seqids_dic[kmer] = []
+            # Fill kmer2seqids_dic and store k-mer hit positions in sequences.
+            for seq_id in seqs_dic:
+                seq = seqs_dic[seq_id]
+                for kmer in kmer2seqids_dic:
+                    if re.search(kmer, seq):
+                        kmer2seqids_dic[kmer].append(seq_id)
+                        kmerseqid = "%s,%s" %(kmer,seq_id)
+                        hit_list = gp2lib.get_kmer_hit_ends(seq,kmer)
+                        kmerseqid2hits_dic[kmerseqid] = hit_list
 
         else:
             # More features comin at ya.
@@ -2483,12 +2485,8 @@ def main_eval(args):
             mm_stdev_dic = {}
 
             """
-            # Dictionary of motif matrices.
-            kmer2mm_dic = {}
             # "k-mer,fid" to 2d scores list (each k-mer position one scores list).
             kmerfid2scl_dic = {}
-            # Standard deviation infos.
-            kmer_stdev_dic = {}
             # Check how many times k-mer seen.
             kmer2seenc_dic = {}
 
@@ -2503,6 +2501,11 @@ def main_eval(args):
                 for i in range(args.kmer_size):
                     motif_matrix.append([0.0]*args.num_features)
                 kmer2mm_dic[kmer] = motif_matrix
+                # Init best scoring brick for k-mer matrix.
+                best_motif_matrix = []
+                for i in range(args.kmer_size):
+                    best_motif_matrix.append([0.0]*args.num_features)
+                kmer2bestmm_dic[kmer] = best_motif_matrix
                 # Init dictionary to store scores for stdev calculations.
                 if calc_stdev:
                     for fid in stdev_fid2fidx_dic: # all numerical 1-channel features.
@@ -2510,9 +2513,12 @@ def main_eval(args):
                         kmerfid2scl_dic[kmer_fid] = []
                         for i in range(args.kmer_size):
                             kmerfid2scl_dic[kmer_fid].append([])
+                # Init best scores dic.
+                kmer2bestsc_dic[kmer] = -1000
 
             # Go over all sequence windows.
             sc_i = 0
+            kmer2sclist_dic = {}
             for gi,feat_list in enumerate(all_features):
                 seq_id = idx2id_dic[gi]
                 seq = seqs_dic[seq_id]
@@ -2528,10 +2534,26 @@ def main_eval(args):
                     feat_list_win = feat_list[brick_s:brick_e]
                     win_score = kmer_scores[sc_i]
                     win_kmer = seq[brick_s:brick_e]
+                    win_lookup_kmer = False
+                    if lookup_kmer:
+                        if win_kmer == lookup_kmer:
+                            win_lookup_kmer = True
+                    # Store sequence IDs for k-mers score > 0.
+                    if win_score > 0 or win_lookup_kmer:
+                        if win_kmer not in kmer2seqids_dic:
+                            kmer2seqids_dic[win_kmer] = [seq_id]
+                        else:
+                            kmer2seqids_dic[win_kmer].append(seq_id)
+                        # Get hit end positions.
+                        kmerseqid = "%s,%s" %(win_kmer,seq_id)
+                        if kmerseqid not in kmerseqid2hits_dic:
+                            hit_list = gp2lib.get_kmer_hit_ends(seq,win_kmer)
+                            kmerseqid2hits_dic[kmerseqid] = hit_list
+                    # Record score for average score calculation later.
                     if win_kmer not in kmer2sc_dic:
-                        kmer2sc_dic[win_kmer] = win_score
+                        kmer2sclist_dic[win_kmer] = [win_score]
                     else:
-                        kmer2sc_dic[win_kmer] += win_score
+                        kmer2sclist_dic[win_kmer].append(win_score)
                     if win_kmer in kmer2seenc_dic:
                         kmer2seenc_dic[win_kmer] += 1
                     else:
@@ -2546,6 +2568,12 @@ def main_eval(args):
                                 for fid in stdev_fid2fidx_dic: # all numerical 1-channel features.
                                     kmer_fid = "%s,%s" %(win_kmer, fid)
                                     kmerfid2scl_dic[kmer_fid][i].append(feat_list_win[i][j])
+                    # Store best scoring brick for k-mer.
+                    if win_score > kmer2bestsc_dic[win_kmer]:
+                        kmer2bestsc_dic[win_kmer] = win_score
+                        for i in range(l_mm):
+                            for j in range(l_sv):
+                                kmer2bestmm_dic[win_kmer][i][j] = feat_list_win[i][j]
 
             # Averaging of feature+k-mer scores and stdev calculation.
             assert sc_i == len(kmer_scores), "sc_i != len(kmer_scores) (%i != %i)" %(sc_i, len(kmer_scores))
@@ -2558,7 +2586,10 @@ def main_eval(args):
                     for j in range(l_sv):
                         kmer2mm_dic[kmer][i][j] = kmer2mm_dic[kmer][i][j] / kmer_count
                 # Average k-mer score.
-                kmer2sc_dic[kmer] = kmer2sc_dic[kmer] / kmer_count
+                kmer_sc_avg = statistics.mean(kmer2sclist_dic[kmer])
+                kmer_sc_stdev = statistics.stdev(kmer2sclist_dic[kmer])
+                kmer2sc_dic[kmer] = kmer_sc_avg
+                kmer2scstdev_dic[kmer] = kmer_sc_stdev
                 # Calculate standard deviations for one-channel numerical features at each motif position.
                 fid2stdev_dic = {}
                 if calc_stdev:
@@ -2575,6 +2606,55 @@ def main_eval(args):
             kmer_rank += 1
             kmer2rank_dic[kmer] = kmer_rank
 
+        # Jaccard index calculation.
+        for kmer in kmer2seqids_dic:
+            # Convert lists to sets.
+            ids_list = kmer2seqids_dic[kmer]
+            assert kmer2seqids_dic[kmer], "kmer2seqids_dic empty for k-mer %s" %(kmer)
+            kmer2seqids_dic[kmer] = set(ids_list)
+        kmer_pair_dic = {}
+        jacc_scores_dic = {}
+        jacc_stats_dic = {}
+        for kmer1, ids1 in sorted(kmer2seqids_dic.items()):
+            for kmer2, ids2 in sorted(kmer2seqids_dic.items()):
+                if kmer1 == kmer2:
+                    continue
+                kmer_pair1 = "%s,%s" %(kmer1,kmer2)
+                kmer_pair2 = "%s,%s" %(kmer2,kmer1)
+                if kmer_pair1 in kmer_pair_dic:
+                    continue
+                kmer_pair_dic[kmer_pair1] = 1
+                kmer_pair_dic[kmer_pair2] = 1
+                # Compare.
+                intersects = ids1.intersection(ids2)
+                if len(intersects) == 0:
+                    continue
+                # Jaccard index.
+                union = ids1.union(ids2)
+                c_intersects = len(intersects)
+                c_union = len(union)
+                jaccard_idx = float(c_intersects / c_union)
+                min_dist_list = []
+                # Go over all sequences containing both to get min distances.
+                for seq_id in intersects:
+                    kmer1sid = "%s,%s" %(kmer1,seq_id)
+                    kmer2sid = "%s,%s" %(kmer2,seq_id)
+                    min_dist = gp2lib.get_min_hit_end_distance(kmerseqid2hits_dic[kmer1sid],kmerseqid2hits_dic[kmer2sid])
+                    min_dist_list.append(min_dist)
+                # Statistics.
+                min_dist_mean = statistics.mean(min_dist_list)
+                min_dist_stdev = statistics.stdev(min_dist_list)
+                jacc_id = "%s,%s" %(kmer1,kmer2)
+                # k-mer scores.
+                kmer1_sc = kmer2sc_dic[kmer1]
+                kmer2_sc = kmer2sc_dic[kmer2]
+                if not onlyseq:
+                    kmer1_sc = kmer2bestsc_dic[kmer1]
+                    kmer2_sc = kmer2bestsc_dic[kmer2]
+                sum_sc = kmer1_sc + kmer2_sc
+                jacc_scores_dic[jacc_id] = sum_sc
+                jacc_stats_dic[jacc_id] = [kmer1, kmer2, kmer1_sc, kmer2_sc, jaccard_idx, min_dist_mean, min_dist_stdev, c_intersects, c_union]
+
         # Output k-mer stats and plots.
         top_kmer_plots = 25
         c_kmers = len(kmer2rank_dic)
@@ -2586,7 +2666,7 @@ def main_eval(args):
         KSOUT.write("score_rank\tkmer\tscore\tkmer_count\tcount_rank\n")
         for kmer, sc in sorted(kmer2sc_dic.items(), key=lambda item: item[1], reverse=True):
             kmer_count_rank = kmer2rank_dic[kmer]
-            kmer_count = kmerc_dic[kmer]
+            kmer_count = kmer2c_dic[kmer]
             kmer_i += 1
             sc_rank += 1
             kmer2scrank_dic[kmer] = sc_rank
@@ -2607,7 +2687,7 @@ def main_eval(args):
             KSOUT = open(lookup_kmer_stats_out, "w")
             KSOUT.write("score_rank\tkmer\tscore\tkmer_count\tcount_rank\n")
             sc = kmer2sc_dic[lookup_kmer]
-            kmer_count = kmerc_dic[lookup_kmer]
+            kmer_count = kmer2c_dic[lookup_kmer]
             kmer_crank = kmer2rank_dic[lookup_kmer]
             kmer_scrank = kmer2scrank_dic[lookup_kmer]
             KSOUT.write("%i\t%s\t%s\t%i\t%i\n" %(kmer_scrank, lookup_kmer, str(sc), kmer_count, kmer_crank))
@@ -2629,35 +2709,33 @@ def main_eval(args):
         # Get library and logo path.
         gp2lib_path = os.path.dirname(gp2lib.__file__)
         # Generate report.
-        gp2lib.gp2_gt_generate_html_report(pos_context_seqs_dic, neg_context_seqs_dic,
-                                           args.out_folder, dataset_type, gp2lib_path,
-                                           html_report_out=html_report_out,
-                                           id2ucr_dic=id2ucr_dic,
-                                           plots_subfolder=plots_subfolder,
-                                           pos_str_stats_dic=pos_str_stats_dic,
-                                           neg_str_stats_dic=neg_str_stats_dic,
-                                           pos_phastcons_stats_dic=pos_phastcons_stats_dic,
-                                           neg_phastcons_stats_dic=neg_phastcons_stats_dic,
-                                           pos_phylop_stats_dic=pos_phylop_stats_dic,
-                                           neg_phylop_stats_dic=neg_phylop_stats_dic,
-                                           pos_eia_stats_dic=pos_eia_stats_dic,
-                                           neg_eia_stats_dic=neg_eia_stats_dic,
-                                           pos_tra_stats_dic=pos_tra_stats_dic,
-                                           neg_tra_stats_dic=neg_tra_stats_dic,
-                                           pos_rra_stats_dic=pos_rra_stats_dic,
-                                           neg_rra_stats_dic=neg_rra_stats_dic,
-                                           add_feat_dic_list=add_feat_dic_list,
-                                           target_gbtc_dic=target_gbtc_dic,
-                                           all_gbtc_dic=all_gbtc_dic,
-                                           t2hc_dic=t2hc_dic,
-                                           t2i_dic=t2i_dic,
-                                           kmer_top=10,
-                                           target_top=20,
-                                           theme=args.theme,
-                                           rna=True,
-                                           uc_entropy=True)
-
-
+        gp2lib.gp2_eval_generate_html_report(ws_scores, neg_ws_scores,
+                                             args.out_folder, gp2lib_path,
+                                             html_report_out=html_report_out,
+                                             kmer2rank_dic=kmer2rank_dic,
+                                             kmer2sc_dic=kmer2sc_dic,
+                                             kmer2scstdev_dic=kmer2scstdev_dic,
+                                             kmer2bestsc_dic=kmer2bestsc_dic,
+                                             kmer2mm_dic=kmer2mm_dic,
+                                             kmer_stdev_dic=kmer_stdev_dic,
+                                             kmer2bestmm_dic=kmer2bestmm_dic,
+                                             kmer2c_dic=kmer2c_dic,
+                                             kmer_size=args.kmer_size,
+                                             ch_info_dic=ch_info_dic,
+                                             lookup_plot_file=lookup_plot_file,
+                                             top_motif_file_dic=top_motif_file_dic,
+                                             bottom_motif_file_dic=bottom_motif_file_dic,
+                                             kmer_top_n=top_kmer_plots,
+                                             add_ws_scores=add_ws_scores,
+                                             model_file=model_file1,
+                                             add_model_file=model_file2,
+                                             onlyseq=onlyseq,
+                                             theme=args.theme,
+                                             lookup_kmer=False,
+                                             jacc_scores_dic=jacc_scores_dic,
+                                             jacc_stats_dic=jacc_stats_dic,
+                                             plots_subfolder=plots_subfolder,
+                                             kmer_plots_folder=kmer_plots_folder)
 
 
 

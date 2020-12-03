@@ -7403,24 +7403,1479 @@ def create_str_elem_grouped_bar_plot(pos_str_stats_dic, neg_str_stats_dic, out_p
 
 ################################################################################
 
+def create_eval_model_comp_scatter_plot(model1_scores, model2_scores, out_plot,
+                                        x_label="Score model 1",
+                                        y_label="Score model 2",
+                                        theme=1):
+    """
+    Create graphprot2 eval scatter plot, to compare scores produced by
+    two models on same dataset. Also calculates and plots R2 (coefficient
+    of determination) value for two datasets.
+
+    """
+    assert model1_scores, "model1_scores empty"
+    assert model2_scores, "model2_scores empty"
+    set1_c = len(model1_scores)
+    set2_c = len(model2_scores)
+    assert set1_c == set2_c, "differing set sizes for set1_c and set2_c (%i != %i)" %(set1_c, set2_c)
+    data = {'m1_score': [], 'm2_score': []}
+    for i,sc in enumerate(model1_scores):
+        data['m1_score'].append(sc)
+        data['m2_score'].append(model2_scores[i])
+    df = pd.DataFrame (data, columns = ['m1_score','m2_score'])
+
+    # Calculate R2.
+    correlation_matrix = np.corrcoef(model1_scores, model2_scores)
+    correlation_xy = correlation_matrix[0,1]
+    r_squared = correlation_xy**2
+    r2str = "R2 = %.6f" %(r_squared)
+    # R2 text coordinates.
+    max_x = max(model1_scores)
+    min_y = min(model2_scores)
+
+    if theme == 1:
+        # Make plot.
+        sns.set(style="darkgrid")
+        fig, ax = plt.subplots()
+        sns.scatterplot(x="m1_score", y="m2_score", data=df, color='#69e9f6')
+        plt.text(max_x , min_y, r2str, color='black', horizontalalignment='right', size=10)
+        fig.set_figwidth(5)
+        fig.set_figheight(4)
+        ax.set(xlabel=x_label)
+        ax.set_ylabel(y_label)
+        #ax.tick_params(axis='x', labelsize=18)
+        #ax.tick_params(axis='y', labelsize=14)
+        fig.savefig(out_plot, dpi=150, bbox_inches='tight')
+
+    elif theme == 2:
+        text_color = "#fcc826"
+        plot_color = "#fd3b9d"
+        box_color = "#2f19f3"
+        # Make plot.
+        sns.set(style="darkgrid", rc={ "axes.labelcolor": text_color, "text.color": text_color, "xtick.color": text_color, "ytick.color": text_color, "grid.color": plot_color, "axes.edgecolor": plot_color})
+        fig, ax = plt.subplots()
+        sns.scatterplot(x="m1_score", y="m2_score", data=df, color='blue')
+        plt.text(max_x , min_y, r2str, color='blue', horizontalalignment='right', size=10)
+        fig.set_figwidth(5)
+        fig.set_figheight(4)
+        ax.set(xlabel=x_label)
+        ax.set_ylabel(y_label)
+        #ax.tick_params(axis='x', labelsize=18)
+        #ax.tick_params(axis='y', labelsize=14)
+        fig.savefig(out_plot, dpi=150, bbox_inches='tight', transparent=True)
+
+
+################################################################################
+
+def get_jaccard_index(list1, list2):
+    """
+    Given two lists of string/numbers, calculate Jaccard index (similarity)
+    between the two sets.
+    J(A,B) = intersection(A,B) / union(A,B)
+    0 <= J(A,B) <= 1
+    1 if sets are identical
+    0 if intersection = 0
+
+    >>> list1 = [1,1,2,3]
+    >>> list2 = [2,3,4]
+    >>> get_jaccard_index(list1,list2)
+    0.5
+    >>> list2 = [1,2,3]
+    >>> get_jaccard_index(list1,list2)
+    1.0
+    >>> list2 = [4]
+    >>> get_jaccard_index(list1,list2)
+    0.0
+
+    """
+    assert list1, "list1 empty"
+    assert list2, "list2 empty"
+    s1 = set(list1)
+    s2 = set(list2)
+    return float(len(s1.intersection(s2)) / len(s1.union(s2)))
+
+
+################################################################################
+
+def create_eval_kmer_score_kde_plot(set_scores, out_plot,
+                                    set_label="Positives",
+                                    x_label="k-mer score",
+                                    y_label="Density",
+                                    theme=1):
+    """
+    Create graphprot2 eval kdeplot, plotting density for set of k-mer scores.
+
+    """
+    assert set_scores, "set_scores empty"
+    data = {'score': []}
+    data['score'] += set_scores
+    df = pd.DataFrame (data, columns = ['score'])
+
+    if theme == 1:
+        # Make plot.
+        sns.set(style="darkgrid")
+        fig, ax = plt.subplots()
+        sns.kdeplot(x="score", data=df, color='#69e9f6')
+        fig.set_figwidth(5)
+        fig.set_figheight(4)
+        ax.set(xlabel=x_label)
+        ax.set_ylabel(y_label)
+        #ax.tick_params(axis='x', labelsize=18)
+        #ax.tick_params(axis='y', labelsize=14)
+        fig.savefig(out_plot, dpi=150, bbox_inches='tight')
+
+    elif theme == 2:
+        text_color = "#fcc826"
+        plot_color = "#fd3b9d"
+        box_color = "#2f19f3"
+        # Make plot.
+        sns.set(style="darkgrid", rc={ "axes.labelcolor": text_color, "text.color": text_color, "xtick.color": text_color, "ytick.color": text_color, "grid.color": plot_color, "axes.edgecolor": plot_color})
+        fig, ax = plt.subplots()
+        sns.kdeplot(x="score", data=df, color='blue')
+        fig.set_figwidth(5)
+        fig.set_figheight(4)
+        ax.set(xlabel=x_label)
+        ax.set_ylabel(y_label)
+        #ax.tick_params(axis='x', labelsize=18)
+        #ax.tick_params(axis='y', labelsize=14)
+        fig.savefig(out_plot, dpi=150, bbox_inches='tight', transparent=True)
+
+
+################################################################################
+
+def create_eval_kde_plot(set1_scores, set2_scores, out_plot,
+                         set1_label="Positives",
+                         set2_label="Negatives",
+                         x_label="Whole-site score",
+                         y_label="Density",
+                         theme=1):
+    """
+    Create graphprot2 eval kdeplot, plotting densities for two sets of
+    scores.
+
+    """
+    assert set1_scores, "set1_scores empty"
+    assert set2_scores, "set2_scores empty"
+    set1_c = len(set1_scores)
+    set2_c = len(set2_scores)
+    assert set1_c == set2_c, "differing set sizes for set1_c and set2_c (%i != %i)" %(set1_c, set2_c)
+    data = {'set': [], 'score': []}
+    data['set'] += set1_c*[set1_label] + set2_c*[set2_label]
+    data['score'] += set1_scores + set2_scores
+    df = pd.DataFrame (data, columns = ['set','score'])
+
+    if theme == 1:
+        # Make plot.
+        sns.set(style="darkgrid")
+        fig, ax = plt.subplots()
+        sns.kdeplot(x="score", data=df, hue="set", palette=["#69e9f6", "#f154b2"])
+        fig.set_figwidth(5)
+        fig.set_figheight(4)
+        ax.set(xlabel=x_label)
+        ax.set_ylabel(y_label)
+        #ax.tick_params(axis='x', labelsize=18)
+        #ax.tick_params(axis='y', labelsize=14)
+        fig.savefig(out_plot, dpi=150, bbox_inches='tight')
+
+    elif theme == 2:
+        text_color = "#fcc826"
+        plot_color = "#fd3b9d"
+        box_color = "#2f19f3"
+        # Make plot.
+        sns.set(style="darkgrid", rc={ "axes.labelcolor": text_color, "text.color": text_color, "xtick.color": text_color, "ytick.color": text_color, "grid.color": plot_color, "axes.edgecolor": plot_color})
+        fig, ax = plt.subplots()
+        sns.kdeplot(x="score", data=df, hue="set", palette=["blue", "darkblue"])
+        fig.set_figwidth(5)
+        fig.set_figheight(4)
+        ax.set(xlabel=x_label)
+        ax.set_ylabel(y_label)
+        #ax.tick_params(axis='x', labelsize=18)
+        #ax.tick_params(axis='y', labelsize=14)
+        fig.savefig(out_plot, dpi=150, bbox_inches='tight', transparent=True)
+
+
+################################################################################
+
 def gp2_eval_generate_html_report(ws_scores, neg_ws_scores,
-                                  args.out_folder, gp2lib_path,
+                                  out_folder, gp2lib_path,
+                                  html_report_out="report.graphprot2_eval.html",
                                   kmer2rank_dic=False,
                                   kmer2sc_dic=False,
-                                  kmerc_dic=False,
+                                  kmer2c_dic=False,
+                                  kmer2scstdev_dic=False,
+                                  kmer2bestsc_dic=False,
+                                  kmer2mm_dic=kmer2mm_dic,
+                                  kmer_stdev_dic=kmer_stdev_dic,
+                                  kmer2bestmm_dic=kmer2bestmm_dic,
+                                  ch_info_dic=False,
                                   lookup_plot_file=False,
+                                  kmer_size=5,
                                   top_motif_file_dic=False,
                                   bottom_motif_file_dic=False,
-                                  kmer_top=25,
+                                  kmer_top_n=25,
+                                  onlyseq=True,
                                   add_ws_scores=False,
                                   theme=args.theme,
-                                  plots_subfolder="html_plots",
-                                  kmer_plots_folder="kmer_plots"):
+                                  lookup_kmer=False,
+                                  jacc_scores_dic=False,
+                                  jacc_stats_dic=False,
+                                  plots_subfolder="html_plots"):
+    """
+    Generate HTML report for graphprot2 eval, showing stats and plots regarding
+    whole site scores and k-mers.
 
+    For onlyseq:
+        - m1m2 scores scatter plot
+        - whole site scores density plot (+ vs -)
+        - kmer scores density plot
+        - top scoring kmer stats table
+        - jaccard index analysis (co-occuring positive top scoring kmers)
+    For additional features:
+        - above and:
+        - extended stats with plots (avg scores vs top scores for each kmer)
+        - avg vs top scores correlation plot (like scatter plot)
+        - jaccard index using top scores for ranking
+
+    """
+    # Checks.
+    assert ws_scores, "ws_scores empty"
+    assert neg_ws_scores, "neg_ws_scores empty"
+    assert os.path.exists(out_folder), "out_folder does not exist"
+    assert os.path.exists(gp2lib_path), "gp2lib_path does not exist"
+    assert kmer2rank_dic, "kmer2rank_dic needed"
+    assert kmer2sc_dic, "kmer2sc_dic needed"
+    assert kmer2c_dic, "kmer2c_dic needed"
+    assert jacc_scores_dic, "jacc_scores_dic needed"
+    assert jacc_stats_dic, "jacc_stats_dic needed"
+    if not onlyseq:
+        assert kmer2bestsc_dic, "kmer2bestsc_dic needed in case of additional features"
+        assert kmer2scstdev_dic, "kmer2scstdev_dic needed in case of additional features"
+        assert kmer2mm_dic, "kmer2mm_dic needed in case of additional features"
+        assert kmer_stdev_dic, "kmer_stdev_dic needed in case of additional features"
+        assert kmer2bestmm_dic, "kmer2bestmm_dic needed in case of additional features"
+        assert ch_info_dic, "ch_info_dic needed in case of additional features"
+        assert kmer_plots_folder, "kmer_plots_folder needed in case of additional features"
+
+
+
+    # Import markdown to generate report.
+    from markdown import markdown
+
+    # Output subfolder for plots.
+    plots_folder = plots_subfolder
+    plots_out_folder = out_folder + "/" + plots_folder
+    if not os.path.exists(plots_out_folder):
+        os.makedirs(plots_out_folder)
+    # Output files.
+    html_out = out_folder + "/" + "report.graphprot2_eval.html"
+    if html_report_out:
+        html_out = html_report_out
+    # Plot files.
+    ws_sc_plot = "whole_site_scores_kde_plot.png"
+    kmer_sc_plot = "kmer_scores_kde_plot.png"
+    avg_best_kmer_kde_plot = "avg_best_kmer_scores_kde_plot.png"
+    avg_best_kmer_scatter_plot = "avg_best_kmer_scores_scatter_plot.png"
+    model_comp_plot = "model_comparison_plot.png"
+    ws_sc_plot_out = plots_out_folder + "/" + ws_sc_plot
+    kmer_sc_plot_out = plots_out_folder + "/" + kmer_sc_plot
+    model_comp_plot_out = plots_out_folder + "/" + model_comp_plot
+    avg_best_kmer_kde_plot_out = plots_out_folder + "/" + avg_best_kmer_kde_plot
+    avg_best_kmer_scatter_plot_out = plots_out_folder + "/" + avg_best_kmer_scatter_plot
+
+    # Logo paths.
+    logo1_path = gp2lib_path + "/content/logo1.png"
+    logo2_path = gp2lib_path + "/content/logo2.png"
+    logo3_path = gp2lib_path + "/content/logo3.png"
+
+    # Create theme-specific HTML header.
+    if theme == 1:
+        mdtext = """
+<head>
+<title>GraphProt2 - Model Evaluation Report</title>
+</head>
+
+<img src="%s" alt="gp2_logo"
+	title="gp2_logo" width="600" />
+
+""" %(logo1_path)
+    elif theme == 2:
+        mdtext = """
+<head>
+<title>GraphProt2 - Model Evaluation Report</title>
+<style>
+h1 {color:#fd3b9d;}
+h2 {color:#fd3b9d;}
+h3 {color:#fd3b9d;}
+</style>
+</head>
+
+<img src="%s" alt="gp2_logo"
+	title="gp2_logo" width="500" />
+
+<body style="font-family:sans-serif" bgcolor="#190250" text="#fcc826" link="#fd3b9d" vlink="#fd3b9d" alink="#fd3b9d">
+
+""" %(logo2_path)
+    elif theme == 3:
+        mdtext = """
+<head>
+<title>GraphProt2 - Model Evaluation Report</title>
+<style>
+h1 {color:#1fcc2c;}
+h2 {color:#1fcc2c;}
+h3 {color:#1fcc2c;}
+</style>
+</head>
+
+<img src="%s" alt="gp2_logo"
+	title="gp2_logo" width="400" />
+
+<body style="font-family:monospace" bgcolor="#1d271e" text="#1fcc2c" link="#1fcc2c" vlink="#1fcc2c" alink="#1fcc2c">
+
+""" %(logo3_path)
+    else:
+        assert False, "invalid theme ID given"
+
+    # Add first section markdown.
+    mdtext += """
+
+# Model Evaluation Report
+
+List of available model evaluation statistics generated
+by GraphProt2 (graphprot2 eval):
+
+- [Whole-site score distribution](#ws-scores-plot)"""
+    if onlyseq:
+        mdtext += "\n"
+        mdtext += "- [k-mer score distribution](#kmer-scores-plot)"
+    else:
+        mdtext += "\n"
+        mdtext += "- [k-mer score distributions](#kmer-scores-plots)"
+    mdtext += "\n"
+    mdtext += "- [k-mer statistics](#kmer-stats)"
+    mdtext += "\n"
+    mdtext += "- [k-mer co-occurrence statistics](#kmer-cooc-stats)"
+    if lookup_kmer:
+        mdtext += "\n"
+        mdtext += "- Lookup k-mer %s statistics](#lookup-kmer-stats)" %(lookup_kmer)
+    if add_ws_scores:
+        mdtext += "\n"
+        mdtext += "- [Model comparison](#model-comp-plot)"
+    mdtext += "\n&nbsp;\n"
+
+    """
+    Whole-site score distributions for positives and negatives.
 
     """
 
+    # Make whole-site score distributions for positives and negatives.
+    create_eval_kde_plot(ws_scores, neg_ws_scores, ws_sc_plot_out,
+                         set1_label="Positives",
+                         set2_label="Negatives",
+                         x_label="Whole-site score",
+                         y_label="Density",
+                         theme=theme)
+    plot_path = plots_folder + "/" + ws_sc_plot
+
+    mdtext += """
+## Whole-site score distribution ### {#ws-scores-plot}
+
+Whole-site score distributions for the positive and negative sequence
+set, scored by the trained model. Since the model was trained on these
+two sequence sets, we expect on average higher scores for the positive
+sequences (given a sufficient model performance).
+
+"""
+    mdtext += '<img src="' + plot_path + '" alt="Whole-site score distributions"' + "\n"
+    mdtext += 'title="Whole-site score distributions" width="500" />' + "\n"
+    mdtext += """
+
+**Figure:** Whole-site score distributions for the positive (positives) and
+negative (negatives) sequence set, scored by the trained model.
+
+&nbsp;
+
+"""
+
     """
+    k-mer score distribution(s)
+
+    - If onlyseq, one distribution plot (k-mer scores)
+    - If additional features, plot best scores + average scores,
+      first distribution plot and then scatter plot.
+
+    """
+    kmer_sc_list = []
+    for kmer in kmer2sc_dic:
+        kmer_sc_list.append(kmer2sc_dic[kmer])
+    c_kmers = len(kmer_sc_list)
+    # Get best k-mer scores list.
+    best_kmer_sc_list = []
+    if not onlyseq:
+        for kmer in kmer2bestsc_dic:
+            best_kmer_sc_list.append(kmer2bestsc_dic[kmer])
+        # Get k-mer average score ranks.
+        kmer2avgscrank_dic = {}
+        avgscrank_rank = 0
+        for kmer, sc in sorted(kmer2sc_dic.items(), key=lambda item: item[1], reverse=True):
+            avgscrank_rank += 1
+            kmer2avgscrank_dic[kmer] = avgscrank_rank
+
+    if onlyseq:
+        set_label = "Positive %i-mers" %(kmer_size)
+        x_label = "%i-mer score" %(kmer_size)
+        create_eval_kmer_score_kde_plot(kmer_sc_list, kmer_sc_plot_out,
+                                        set_label=set_label,
+                                        x_label=x_label,
+                                        y_label="Density",
+                                        theme=theme)
+        plot_path = plots_folder + "/" + kmer_sc_plot
+
+        mdtext += """
+## k-mer score distribution ### {#kmer-scores-plot}
+
+Score distribution of sequence k-mers (k = %i) found in the positive training set.
+k-mers are scored by the model, using the subgraph encompassing the k-mer.
+
+""" %(kmer_size)
+        mdtext += '<img src="' + plot_path + '" alt="k-mer score distribution"' + "\n"
+        mdtext += 'title="k-mer score distribution" width="500" />' + "\n"
+        mdtext += """
+
+**Figure:** Score distribution of k-mers found in the positive training sequence set.
+
+&nbsp;
+
+"""
+
+        # k-mer stats table for onlyseq.
+        mdtext += """
+## k-mer statistics ### {#kmer-stats}
+
+**Table:** sequence k-mer statistics (score rank, k-mer score, k-mer count,
+count rank) for the top %i scoring sequence %i-mers (ranked by k-mer score).
+
+""" %(kmer_top_n, kmer_size)
+
+        mdtext += "| score rank | &nbsp; k-mer &nbsp; | &nbsp; k-mer score &nbsp; | k-mer count | k-mer count rank | \n"
+        mdtext += "| :-: | :-: | :-: | :-: | :-: |\n"
+        sc_rank = 0
+        for kmer, sc in sorted(kmer2sc_dic.items(), key=lambda item: item[1], reverse=True):
+            sc_rank += 1
+            if sc_rank > kmer_top_n:
+                break
+            kmer_count_rank = kmer2rank_dic[kmer]
+            kmer_count = kmer2c_dic[kmer]
+            mdtext += "| %i | %s | %s | %i | %i |\n" %(sc_rank, kmer, str(sc), kmer_count, kmer_count_rank)
+        mdtext += "\n&nbsp;\n&nbsp;\n"
+
+    else:
+        set1_label = "Average %i-mer scores" %(kmer_size)
+        set2_label = "Best %i-mer scores" %(kmer_size)
+        x_label = "%i-mer score" %(kmer_size)
+        create_eval_kde_plot(kmer_sc_list, best_kmer_sc_list, avg_best_kmer_kde_plot_out,
+                             set1_label=set1_label,
+                             set2_label=set2_label,
+                             x_label=x_label,
+                             y_label="Density",
+                             theme=theme)
+        plot_path1 = plots_folder + "/" + avg_best_kmer_kde_plot
+
+        x_label = "Average %i-mer score" %(kmer_size)
+        y_label = "Best %i-mer score" %(kmer_size)
+        create_eval_model_comp_scatter_plot(kmer_sc_list, best_kmer_sc_list,
+                                            avg_best_kmer_scatter_plot_out,
+                                            x_label=x_label,
+                                            y_label=y_label,
+                                            theme=theme)
+        plot_path2 = plots_folder + "/" + avg_best_kmer_scatter_plot
+
+        mdtext += """
+## k-mer score distributions ### {#kmer-scores-plots}
+
+Average and best score distribution of all k-mers (k = %i) found in the
+positive training set (with additional features).
+As additional features vary, the same sequence k-mer can have different
+scores, depending on the underlying additional feature values at a certain
+sequence position. It is therefore possible to select the best score or
+calculate the average score for each sequence k-mer from all k-mer
+occurences in a positive set with additional features.
+
+""" %(kmer_size)
+        mdtext += '<img src="' + plot_path1 + '" alt="average vs best k-mer score distribution"' + "\n"
+        mdtext += 'title="average vs best k-mer score distribution" width="500" />' + "\n"
+        mdtext += """
+
+**Figure:** Average and best score distribution of all k-mers found in the
+positive training set (with additional features).
+&nbsp;
+
+"""
+
+        mdtext += '<img src="' + plot_path2 + '" alt="average vs best k-mer scores scatter plot"' + "\n"
+        mdtext += 'title="average vs best k-mer scores scatter plot" width="500" />' + "\n"
+        mdtext += """
+
+**Figure:** Average vs. best k-mer scores scatter plot for all k-mers found in the
+positive training set (with additional features).
+&nbsp;
+
+"""
+
+
+
+
+                                  kmer2mm_dic=kmer2mm_dic,
+                                  kmer_stdev_dic=kmer_stdev_dic,
+                                  kmer2bestmm_dic=kmer2bestmm_dic,
+                                  ch_info_dic=False,
+                                  lookup_plot_file=False,
+
+kmer_plots_folder
+
+
+        # k-mer stats table for additional features.
+        mdtext += """
+## k-mer statistics ### {#kmer-stats}
+
+**Table:** sequence k-mer statistics with additional features (best score rank,
+best k-mer score, average k-mer score + standard deviation, average k-mer rank,
+total k-mer count, and total count rank) for the top %i scoring %i-mers
+(ranked by best k-mer score). Best scoring motif + average scoring motif are
+also shown.
+
+best score rank
+k-mer
+best k-mer score
+best score motif
+average k-mer rank
+average k-mer score
+average score motif
+k-mer count
+k-mer count rank
+
+""" %(kmer_top_n, kmer_size)
+
+        # Motif plots output folders.
+        avg_motif_plots_folder = plots_out_folder + "/" + "avg_motif_plots"
+        best_motif_plots_folder = plots_out_folder + "/" + "best_motif_plots"
+        if not os.path.exists(avg_motif_plots_folder):
+            os.makedirs(avg_motif_plots_folder)
+        if not os.path.exists(best_motif_plots_folder):
+            os.makedirs(best_motif_plots_folder)
+
+        kmer_i = 10 ** len(str(c_kmers))
+        sc_rank = 0
+
+        mdtext += "| best score rank | &nbsp; k-mer &nbsp; | best k-mer score | best score motif | average k-mer rank | average k-mer score | average score motif | k-mer count | k-mer count rank |\n"
+        mdtext += "| :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |\n"
+
+        for kmer, best_sc in sorted(kmer2bestsc_dic.items(), key=lambda item: item[1], reverse=True):
+            sc_rank += 1
+            kmer_i += 1
+            if sc_rank > kmer_top_n:
+                break
+            kmer_count_rank = kmer2rank_dic[kmer]
+            kmer_count = kmer2c_dic[kmer]
+            avg_sc = kmer2sc_dic[kmer]
+            avg_sc_stdev = kmer2scstdev_dic[kmer]
+            avg_sc_rank = kmer2avgscrank_dic[kmer]
+            # Generate average score motif.
+            avg_sc_plot_file = avg_motif_plots_folder + "/" + str(kmer_i)[1:] + "_" + kmer + ".avg_sc.png"
+            make_motif_plot(kmer2mm_dic[kmer], ch_info_dic, avg_sc_plot_file,
+                            fid2stdev_dic=kmer_stdev_dic[kmer])
+            pp1 = plots_folder + "/avg_motif_plots/" + str(kmer_i)[1:] + "_" + kmer + ".avg_sc.png"
+            # Generate best score motif.
+            best_sc_plot_file = best_motif_plots_folder + "/" + str(kmer_i)[1:] + "_" + kmer + ".best_sc.png"
+            make_motif_plot(kmer2bestmm_dic[kmer], ch_info_dic, best_sc_plot_file,
+                            fid2stdev_dic=False)
+            pp2 = plots_folder + "/best_motif_plots/" + str(kmer_i)[1:] + "_" + kmer + ".best_sc.png"
+            mdtext += '| %i | %s | %s | <image src = "%s" width="300px"></image> | %i | %s (+- %s) | <image src = "%s" width="300px"></image> | %i | %i |\n' %(sc_rank, kmer, str(best_sc), pp1, avg_sc_rank, str(avg_sc), str(avg_sc_stdev), pp2, kmer_count, kmer_count_rank)
+        mdtext += "\n&nbsp;\n&nbsp;\n"
+
+
+    """
+    # Continue with
+    mdtext += "- [k-mer co-occurrence statistics](#kmer-cooc-stats)"
+    Separate for both onlyseq / no onlyseq.
+
+    """
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    print("Generate statistics for HTML report ... ")
+
+    """
+    If only uppercase part of sequences should be used for stats,
+    prune the sequence dictionaries based on uppercase region start
+    and end info stored in id2ucr_dic.
+    """
+    if id2ucr_dic:
+        for pos_id in pos_seqs_dic:
+            seq = pos_seqs_dic[pos_id]
+            uc_s = id2ucr_dic[pos_id][0]
+            uc_e = id2ucr_dic[pos_id][1]
+            pos_seqs_dic[pos_id] = seq[uc_s-1:uc_e]
+        for neg_id in neg_seqs_dic:
+            seq = neg_seqs_dic[neg_id]
+            uc_s = id2ucr_dic[neg_id][0]
+            uc_e = id2ucr_dic[neg_id][1]
+            neg_seqs_dic[neg_id] = seq[uc_s-1:uc_e]
+
+    # Site numbers.
+    c_pos_out = len(pos_seqs_dic)
+    c_neg_out = len(neg_seqs_dic)
+    # Site lengths.
+    pos_len_list = get_seq_len_list_from_dic(pos_seqs_dic)
+    neg_len_list = get_seq_len_list_from_dic(neg_seqs_dic)
+    # Get entropy scores for sequences.
+    pos_entr_list = seqs_dic_calc_entropies(pos_seqs_dic, rna=rna,
+                                            uc_part_only=uc_entropy)
+    neg_entr_list = seqs_dic_calc_entropies(neg_seqs_dic, rna=rna,
+                                            uc_part_only=uc_entropy)
+
+    # Get set nucleotide frequencies.
+    pos_ntc_dic = seqs_dic_count_nt_freqs(pos_seqs_dic, rna=rna,
+                                          convert_to_uc=True)
+    neg_ntc_dic = seqs_dic_count_nt_freqs(neg_seqs_dic, rna=rna,
+                                          convert_to_uc=True)
+    # Get nucleotide ratios.
+    pos_ntr_dic = ntc_dic_to_ratio_dic(pos_ntc_dic, perc=True)
+    neg_ntr_dic = ntc_dic_to_ratio_dic(neg_ntc_dic, perc=True)
+
+    # Get dinucleotide percentages.
+    pos_dintr_dic = seqs_dic_count_kmer_freqs(pos_seqs_dic, 2, rna=rna,
+                                              return_ratios=True,
+                                              perc=True,
+                                              report_key_error=True,
+                                              convert_to_uc=True)
+    neg_dintr_dic = seqs_dic_count_kmer_freqs(neg_seqs_dic, 2, rna=rna,
+                                              return_ratios=True,
+                                              perc=True,
+                                              report_key_error=True,
+                                              convert_to_uc=True)
+    # Get 3-mer percentages.
+    pos_3mer_dic = seqs_dic_count_kmer_freqs(pos_seqs_dic, 3, rna=rna,
+                                             return_ratios=True,
+                                             perc=True,
+                                             report_key_error=True,
+                                             convert_to_uc=True)
+    neg_3mer_dic = seqs_dic_count_kmer_freqs(neg_seqs_dic, 3, rna=rna,
+                                             return_ratios=True,
+                                             perc=True,
+                                             report_key_error=True,
+                                             convert_to_uc=True)
+    # Get 4-mer percentages.
+    pos_4mer_dic = seqs_dic_count_kmer_freqs(pos_seqs_dic, 4, rna=rna,
+                                             return_ratios=True,
+                                             perc=True,
+                                             report_key_error=True,
+                                             convert_to_uc=True)
+    neg_4mer_dic = seqs_dic_count_kmer_freqs(neg_seqs_dic, 4, rna=rna,
+                                             return_ratios=True,
+                                             perc=True,
+                                             report_key_error=True,
+                                             convert_to_uc=True)
+    # Get 5-mer percentages.
+    pos_5mer_dic = seqs_dic_count_kmer_freqs(pos_seqs_dic, 5, rna=rna,
+                                             return_ratios=True,
+                                             perc=True,
+                                             report_key_error=True,
+                                             convert_to_uc=True)
+    neg_5mer_dic = seqs_dic_count_kmer_freqs(neg_seqs_dic, 5, rna=rna,
+                                             return_ratios=True,
+                                             perc=True,
+                                             report_key_error=True,
+                                             convert_to_uc=True)
+
+    # Logo paths.
+    logo1_path = gp2lib_path + "/content/logo1.png"
+    logo2_path = gp2lib_path + "/content/logo2.png"
+    logo3_path = gp2lib_path + "/content/logo3.png"
+
+    # Create theme-specific HTML header.
+    if theme == 1:
+        mdtext = """
+<head>
+<title>GraphProt2 - Training Set Generation Report</title>
+</head>
+
+<img src="%s" alt="gp2_logo"
+	title="gp2_logo" width="600" />
+
+""" %(logo1_path)
+    elif theme == 2:
+        mdtext = """
+<head>
+<title>GraphProt2 - Training Set Generation Report</title>
+<style>
+h1 {color:#fd3b9d;}
+h2 {color:#fd3b9d;}
+h3 {color:#fd3b9d;}
+</style>
+</head>
+
+<img src="%s" alt="gp2_logo"
+	title="gp2_logo" width="500" />
+
+<body style="font-family:sans-serif" bgcolor="#190250" text="#fcc826" link="#fd3b9d" vlink="#fd3b9d" alink="#fd3b9d">
+
+""" %(logo2_path)
+    elif theme == 3:
+        mdtext = """
+<head>
+<title>GraphProt2 - Training Set Generation Report</title>
+<style>
+h1 {color:#1fcc2c;}
+h2 {color:#1fcc2c;}
+h3 {color:#1fcc2c;}
+</style>
+</head>
+
+<img src="%s" alt="gp2_logo"
+	title="gp2_logo" width="400" />
+
+<body style="font-family:monospace" bgcolor="#1d271e" text="#1fcc2c" link="#1fcc2c" vlink="#1fcc2c" alink="#1fcc2c">
+
+""" %(logo3_path)
+    else:
+        assert False, "invalid theme ID given"
+
+    # Add first section markdown.
+    mdtext += """
+
+# Training set generation report
+
+List of available statistics for the training dataset generated
+by GraphProt2 (graphprot2 gt):
+
+- [Training dataset statistics](#set-stats)
+- [Site length distribution](#len-plot)
+- [Sequence complexity distribution](#ent-plot)
+- [Di-nucleotide distribution](#dint-plot)
+- [Top k-mer statistics](#kmer-stats)"""
+
+    if pos_str_stats_dic and neg_str_stats_dic:
+        mdtext += "\n"
+        mdtext += "- [Structural elements distribution](#str-elem-plot)\n"
+        mdtext += "- [Secondary structure statistics](#bp-stats)"
+    if pos_phastcons_stats_dic or pos_phylop_stats_dic:
+        mdtext += "\n"
+        mdtext += "- [Conservation scores distribution](#con-plot)\n"
+        mdtext += "- [Conservation scores statistics](#con-stats)"
+    if pos_eia_stats_dic and neg_eia_stats_dic:
+        mdtext += "\n"
+        mdtext += "- [Exon-intron region distribution](#eia-plot)\n"
+        mdtext += "- [Exon-intron region statistics](#eia-stats)"
+    if pos_tra_stats_dic and neg_tra_stats_dic:
+        mdtext += "\n"
+        mdtext += "- [Transcript region distribution](#tra-plot)\n"
+        mdtext += "- [Transcript region statistics](#tra-stats)"
+    if pos_rra_stats_dic and neg_rra_stats_dic:
+        mdtext += "\n"
+        mdtext += "- [Repeat region distribution](#rra-plot)\n"
+        mdtext += "- [Repeat region statistics](#rra-stats)"
+    if target_gbtc_dic and all_gbtc_dic:
+        mdtext += "\n"
+        mdtext += "- [Target gene biotype statistics](#gbt-stats)"
+    if t2hc_dic and t2i_dic:
+        mdtext += "\n"
+        mdtext += "- [Target region overlap statistics](#tro-stats)"
+    if add_feat_dic_list:
+        mdtext += "\n"
+        mdtext += "- [BED feature statistics](#bed-stats)\n"
+        mdtext += "- [BED feature coverage distribution](#bed-plot)"
+    mdtext += "\n&nbsp;\n"
+
+    # Make general stats table.
+    mdtext += """
+## Training dataset statistics ### {#set-stats}
+
+**Table:** Training dataset statistics regarding sequence lengths
+(min, max, mean, and median length) in nucleotides (nt),
+sequence complexity (mean Shannon entropy over all sequences in the set)
+and nucleotide contents (A, C, G, U).
+
+"""
+    mdtext += "| Attribute | &nbsp; Positives &nbsp; | &nbsp; Negatives &nbsp; | \n"
+    mdtext += "| :-: | :-: | :-: |\n"
+    mdtext += "| # sites | %i | %i |\n" %(c_pos_out, c_neg_out)
+    mdtext += "| min site length | %i | %i |\n" %(min(pos_len_list), min(neg_len_list))
+    mdtext += "| max site length | %i | %i |\n" %(max(pos_len_list), max(neg_len_list))
+    mdtext += "| mean site length | %.1f | %.1f |\n" %(statistics.mean(pos_len_list), statistics.mean(neg_len_list))
+    mdtext += "| median site length | %i | %i |\n" %(statistics.median(pos_len_list), statistics.median(neg_len_list))
+    mdtext += "| mean complexity | %.3f | %.3f |\n" %(statistics.mean(pos_entr_list), statistics.mean(neg_entr_list))
+    mdtext += '| %A |' + " %.2f | %.2f |\n" %(pos_ntr_dic["A"], neg_ntr_dic["A"])
+    mdtext += '| %C |' + " %.2f | %.2f |\n" %(pos_ntr_dic["C"], neg_ntr_dic["C"])
+    mdtext += '| %G |' + " %.2f | %.2f |\n" %(pos_ntr_dic["G"], neg_ntr_dic["G"])
+    mdtext += '| %U |' + " %.2f | %.2f |\n" %(pos_ntr_dic["U"], neg_ntr_dic["U"])
+    mdtext += "\n&nbsp;\n&nbsp;\n"
+
+    # Make site length distribution box plot.
+    create_set_lengths_box_plot(pos_len_list, neg_len_list, lengths_plot_out,
+                                theme=theme,
+                                disable_title=True)
+    lengths_plot_path = plots_folder + "/" + lengths_plot
+
+    mdtext += """
+## Site length distribution ### {#len-plot}
+
+Lengths differences in the training dataset can arise in two cases:
+
+- FASTA sequences of various lengths are given as input (--in)
+- BED sites of various lengths are given as input (--in) and --mode 2 is set
+
+Otherwise, all sequences (positives and negatives) are expected to have
+more or less the same length. This is because --mode 1 or --mode 3 both
+reduce the sites to a length of 1 before uniform extension is applied
+(controlled by --seq-ext and --con-ext).
+Some length differences can still occur though, e.g. if transcript
+sequences are extracted close to transcript ends, or as negatives
+are sampled randomly from a larger pool of initial negatives.
+Note that the lowercase context sequence parts which can be added by
+--con-ext are excluded from the HTML report statistics. Only the
+uppercase sequence parts of each site (== whole site if --con-ext False)
+contribute to the statistics in this report.
+Lowercase context sequence parts (if --con-ext is set) are only
+used for base pair calculation as well as during model training
+(graphprot train) for profile prediction and motif generation.
+
+"""
+    mdtext += '<img src="' + lengths_plot_path + '" alt="Site length distribution"' + "\n"
+    mdtext += 'title="Site length distribution" width="500" />' + "\n"
+    mdtext += """
+
+**Figure:** Site length distributions for the positive and negative dataset.
+
+&nbsp;
+
+"""
+    # Make sequence complexity box plot.
+    create_entropy_box_plot(pos_entr_list, neg_entr_list, entropy_plot_out,
+                            theme=theme,
+                            disable_title=True)
+    entropy_plot_path = plots_folder + "/" + entropy_plot
+
+    mdtext += """
+## Sequence complexity distribution ### {#ent-plot}
+
+The Shannon entropy is calculated for each sequence to measure
+its information content (i.e., its complexity). A sequence with
+equal amounts of all four nucleotides has an entropy value of 1.0
+(highest possible). A sequence with equal amounts of two nucleotides
+has an entropy value of 0.5. Finally, the lowest possible entropy is
+achieved by a sequence which contains only one type of nucleotide.
+Find the formula used to compute Shannon's entropy
+[here](https://www.ncbi.nlm.nih.gov/pubmed/15215465) (see CE formula).
+
+
+"""
+    mdtext += '<img src="' + entropy_plot_path + '" alt="Sequence complexity distribution"' + "\n"
+    mdtext += 'title="Sequence complexity distribution" width="500" />' + "\n"
+    mdtext += """
+
+**Figure:** Sequence complexity (Shannon entropy
+computed for each sequence) distributions for the positive and
+negative dataset.
+
+&nbsp;
+
+"""
+    # Make di-nucleotide grouped bar plot.
+    create_dint_ratios_grouped_bar_plot(pos_dintr_dic, neg_dintr_dic, dint_plot_out,
+                                        theme=theme,
+                                        disable_title=True)
+    dint_plot_path = plots_folder + "/" + dint_plot
+
+    mdtext += """
+## Di-nucleotide distribution ### {#dint-plot}
+
+Di-nucleotide percentages are shown for both the positive and negative dataset.
+
+"""
+    mdtext += '<img src="' + dint_plot_path + '" alt="Di-nucleotide distribution"' + "\n"
+    mdtext += 'title="Di-nucleotide distribution" width="1000" />' + "\n"
+    mdtext += """
+
+**Figure:** Di-nucleotide percentages for the positive and negative dataset.
+
+&nbsp;
+
+"""
+    # Make the k-mer tables.
+    top3mertab = generate_top_kmer_md_table(pos_3mer_dic, neg_3mer_dic,
+                                            top=kmer_top,
+                                            val_type="p")
+    top4mertab = generate_top_kmer_md_table(pos_4mer_dic, neg_4mer_dic,
+                                            top=kmer_top,
+                                            val_type="p")
+    top5mertab = generate_top_kmer_md_table(pos_5mer_dic, neg_5mer_dic,
+                                            top=kmer_top,
+                                            val_type="p")
+    mdtext += """
+## Top k-mer statistics ### {#kmer-stats}
+
+**Table:** Top %i 3-mers for the positive and negative set and their percentages in the respective sequence set. In case of uniform distribution with all 3-mers present, each 3-mer would have a percentage = 1.5625.
+
+""" %(kmer_top)
+    mdtext += top3mertab
+    mdtext += "\n&nbsp;\n"
+
+    mdtext += """
+**Table:** Top %i 4-mers for the positive and negative set and their percentages in the respective sequence set. In case of uniform distribution with all 4-mers present, each 4-mer would have a percentage = 0.390625.
+
+""" %(kmer_top)
+    mdtext += top4mertab
+    mdtext += "\n&nbsp;\n"
+
+    mdtext += """
+**Table:** Top %i 5-mers for the positive and negative set and their percentages in the respective sequence set. In case of uniform distribution with all 5-mers present, each 5-mer would have a percentage = 0.09765625.
+
+""" %(kmer_top)
+    mdtext += top5mertab
+    mdtext += "\n&nbsp;\n&nbsp;\n"
+
+    if pos_str_stats_dic and neg_str_stats_dic:
+        # Checks.
+        assert pos_str_stats_dic['seqlen_sum'], "unexpected total sequence length of 0 encountered"
+        assert neg_str_stats_dic['seqlen_sum'], "unexpected total sequence length of 0 encountered"
+
+        # Make structural elements bar plot.
+        create_str_elem_grouped_bar_plot(pos_str_stats_dic, neg_str_stats_dic,
+                                         str_elem_plot_out,
+                                         theme=theme,
+                                         disable_title=True)
+        str_elem_plot_path = plots_folder + "/" + str_elem_plot
+
+        mdtext += """
+## Structural elements distribution ### {#str-elem-plot}
+
+Mean position-wise probabilities of the different loop context structural elements are shown
+for both the positive and negative dataset. U: unpaired, E: external loop, H: hairpin loop,
+I: internal loop, M: multi-loop, S: paired.
+
+"""
+        mdtext += '<img src="' + str_elem_plot_path + '" alt="Structural elements distribution"' + "\n"
+        mdtext += 'title="Structural elements distribution" width="650" />' + "\n"
+        mdtext += """
+
+**Figure:** Mean position-wise probabilities of different loop context structural elements for
+the positive and negative dataset. U: unpaired, E: external loop, H: hairpin loop,
+I: internal loop, M: multi-loop, S: paired.
+
+&nbsp;
+
+"""
+        # Make base pair stats table.
+        pos_bps_per_100nt = pos_str_stats_dic['bp_c'] / (pos_str_stats_dic['seqlen_sum'] / 100)
+        neg_bps_per_100nt = neg_str_stats_dic['bp_c'] / (neg_str_stats_dic['seqlen_sum'] / 100)
+        pos_mean_bp_p = pos_str_stats_dic['bp_p'][0]
+        neg_mean_bp_p = neg_str_stats_dic['bp_p'][0]
+        pos_mean_bp_stdev = pos_str_stats_dic['bp_p'][1]
+        neg_mean_bp_stdev = neg_str_stats_dic['bp_p'][1]
+
+        mdtext += """
+## Secondary structure statistics ### {#bp-stats}
+
+**Table:** Secondary structure (base pair + structural elements) statistics of
+the generated training set. Mean probabilities p() are given together with standard deviations (+- ...).
+
+"""
+        mdtext += "| &nbsp; &nbsp; &nbsp; Attribute &nbsp; &nbsp; &nbsp; | &nbsp; &nbsp; &nbsp; &nbsp; Positives &nbsp; &nbsp; &nbsp; &nbsp; | &nbsp; &nbsp; &nbsp; &nbsp; Negatives &nbsp; &nbsp; &nbsp; &nbsp; | \n"
+        mdtext += "| :-: | :-: | :-: |\n"
+        mdtext += "| total sequence length | %i | %i |\n" %(pos_str_stats_dic['seqlen_sum'], neg_str_stats_dic['seqlen_sum'])
+        mdtext += "| # base pairs | %i | %i |\n" %(pos_str_stats_dic['bp_c'], neg_str_stats_dic['bp_c'])
+        mdtext += "| base pairs per 100 nt | %.1f | %.1f |\n" %(pos_bps_per_100nt, neg_bps_per_100nt)
+        mdtext += "| # no-base-pair sites | %i | %i |\n" %(pos_str_stats_dic['nobpsites_c'], neg_str_stats_dic['nobpsites_c'])
+        mdtext += "| mean p(base pair) | %.4f (+-%.4f) | %.4f (+-%.4f) |\n" %(pos_mean_bp_p, pos_mean_bp_stdev, neg_mean_bp_p, neg_mean_bp_stdev)
+        mdtext += "| mean p(paired) | %.4f (+-%.4f) | %.4f (+-%.4f) |\n" %(pos_str_stats_dic['S'][0], pos_str_stats_dic['S'][1], neg_str_stats_dic['S'][0], neg_str_stats_dic['S'][1])
+        mdtext += "| mean p(unpaired) | %.4f (+-%.4f) | %.4f (+-%.4f) |\n" %(pos_str_stats_dic['U'][0], pos_str_stats_dic['U'][1], neg_str_stats_dic['U'][0], neg_str_stats_dic['U'][1])
+        mdtext += "| mean p(external loop) | %.4f (+-%.4f) | %.4f (+-%.4f) |\n" %(pos_str_stats_dic['E'][0], pos_str_stats_dic['E'][1], neg_str_stats_dic['E'][0], neg_str_stats_dic['E'][1])
+        mdtext += "| mean p(hairpin loop) | %.4f (+-%.4f) | %.4f (+-%.4f) |\n" %(pos_str_stats_dic['H'][0], pos_str_stats_dic['H'][1], neg_str_stats_dic['H'][0], neg_str_stats_dic['H'][1])
+        mdtext += "| mean p(internal loop) | %.4f (+-%.4f) | %.4f (+-%.4f) |\n" %(pos_str_stats_dic['I'][0], pos_str_stats_dic['I'][1], neg_str_stats_dic['I'][0], neg_str_stats_dic['I'][1])
+        mdtext += "| mean p(multi loop) | %.4f (+-%.4f) | %.4f (+-%.4f) |\n" %(pos_str_stats_dic['M'][0], pos_str_stats_dic['M'][1], neg_str_stats_dic['M'][0], neg_str_stats_dic['M'][1])
+        mdtext += "\n&nbsp;\n&nbsp;\n"
+
+    # Conservation scores plots and stats.
+    if pos_phastcons_stats_dic or pos_phylop_stats_dic:
+        mdtext += """
+## Conservation scores distribution ### {#con-plot}
+
+Mean conservation scores with standard deviations are shown for the positive
+and negative set.
+
+"""
+        # phastCons plot.
+        if pos_phastcons_stats_dic and neg_phastcons_stats_dic:
+
+            create_conservation_scores_bar_plot(pos_phastcons_stats_dic, neg_phastcons_stats_dic,
+                                                phastcons_plot_out, "phastCons",
+                                                disable_title=True,
+                                                theme=theme)
+            phastcons_plot_path = plots_folder + "/" + phastcons_plot
+            mdtext += '<img src="' + phastcons_plot_path + '" alt="phastCons scores distribution"' + "\n"
+            mdtext += 'title="phastCons scores distribution" width="400" />' + "\n"
+            mdtext += """
+
+**Figure:** Mean phastCons conservation score and standard deviation for the positive and negative dataset.
+
+&nbsp;
+
+"""
+        # phyloP plot.
+        if pos_phylop_stats_dic and neg_phylop_stats_dic:
+            create_conservation_scores_bar_plot(pos_phylop_stats_dic, neg_phylop_stats_dic,
+                                                phylop_plot_out, "phyloP",
+                                                disable_title=True,
+                                                theme=theme)
+            phylop_plot_path = plots_folder + "/" + phylop_plot
+            mdtext += '<img src="' + phylop_plot_path + '" alt="phyloP scores distribution"' + "\n"
+            mdtext += 'title="phyloP scores distribution" width="400" />' + "\n"
+            mdtext += """
+
+**Figure:** Mean phyloP conservation score and standard deviation (before -1 .. 1 normalization) for the positive and negative dataset.
+
+&nbsp;
+
+"""
+
+        mdtext += """
+## Conservation scores statistics ### {#con-stats}
+
+**Table:** Conservation scores statistics. Note that phyloP statistics are
+calculated before normalization (normalizing values to -1 .. 1).
+
+"""
+        mdtext += "| &nbsp; &nbsp; Attribute &nbsp; &nbsp; | &nbsp; &nbsp; &nbsp; Positives &nbsp; &nbsp; &nbsp; | &nbsp; &nbsp; &nbsp; Negatives &nbsp; &nbsp; &nbsp; | \n"
+        mdtext += "| :-: | :-: | :-: |\n"
+        if pos_phastcons_stats_dic and neg_phastcons_stats_dic:
+            pos_pc_zero_perc = "%.2f" % ((pos_phastcons_stats_dic["zero_pos"] / pos_phastcons_stats_dic["total_pos"]) * 100)
+            neg_pc_zero_perc = "%.2f" % ((neg_phastcons_stats_dic["zero_pos"] / neg_phastcons_stats_dic["total_pos"]) * 100)
+            mdtext += "| # phastCons scores | %i | %i |\n" %(pos_phastcons_stats_dic['total_pos'], neg_phastcons_stats_dic['total_pos'])
+            mdtext += "| # zero scores | %i | %i |\n" %(pos_phastcons_stats_dic['zero_pos'], neg_phastcons_stats_dic['zero_pos'])
+            mdtext += '| % zero scores |' + " %s | %s |\n" %(pos_pc_zero_perc, neg_pc_zero_perc)
+            mdtext += "| min score | %s | %s |\n" %(str(pos_phastcons_stats_dic['min']), str(neg_phastcons_stats_dic['min']))
+            mdtext += "| max score | %s | %s |\n" %(str(pos_phastcons_stats_dic['max']), str(neg_phastcons_stats_dic['max']))
+            mdtext += "| mean score | %.3f (+-%.3f) | %.3f (+-%.3f) |\n" %(pos_phastcons_stats_dic['mean'], pos_phastcons_stats_dic['stdev'], neg_phastcons_stats_dic['mean'], neg_phastcons_stats_dic['stdev'])
+        if pos_phylop_stats_dic and neg_phylop_stats_dic:
+            pos_pp_zero_perc = "%.2f" % ((pos_phylop_stats_dic["zero_pos"] / pos_phylop_stats_dic["total_pos"]) * 100)
+            neg_pp_zero_perc = "%.2f" % ((neg_phylop_stats_dic["zero_pos"] / neg_phylop_stats_dic["total_pos"]) * 100)
+            mdtext += "| # phyloP scores | %i | %i |\n" %(pos_phylop_stats_dic['total_pos'], neg_phylop_stats_dic['total_pos'])
+            mdtext += "| # zero scores | %i | %i |\n" %(pos_phylop_stats_dic['zero_pos'], neg_phylop_stats_dic['zero_pos'])
+            mdtext += '| % zero scores |' + " %s | %s |\n" %(pos_pp_zero_perc, neg_pp_zero_perc)
+            mdtext += "| min score | %s | %s |\n" %(str(pos_phylop_stats_dic['min']), str(neg_phylop_stats_dic['min']))
+            mdtext += "| max score | %s | %s |\n" %(str(pos_phylop_stats_dic['max']), str(neg_phylop_stats_dic['max']))
+            mdtext += "| mean score | %.3f (+-%.3f) | %.3f (+-%.3f) |\n" %(pos_phylop_stats_dic['mean'], pos_phylop_stats_dic['stdev'], neg_phylop_stats_dic['mean'], neg_phylop_stats_dic['stdev'])
+        mdtext += "\n&nbsp;\n&nbsp;\n"
+
+    # Exon-intron region plots and stats.
+    if pos_eia_stats_dic and neg_eia_stats_dic:
+        mdtext += """
+## Exon-intron region distribution ### {#eia-plot}
+
+Distribution of exon and intron regions for the positive and negative set.
+
+"""
+        # EIA plot.
+        create_reg_annot_grouped_bar_plot(pos_eia_stats_dic, neg_eia_stats_dic, eia_plot_out,
+                                          ["E", "I", "N"],
+                                          perc=True, theme=theme)
+        eia_plot_path = plots_folder + "/" + eia_plot
+        mdtext += '<img src="' + eia_plot_path + '" alt="Exon-intron region distribution"' + "\n"
+        mdtext += 'title="Exon-intron region distribution" width="550" />' + "\n"
+        mdtext += """
+**Figure:** Percentages of exon (E) and intron (I) regions for the positive and negative set.
+If --eia-n is set, also include regions not covered by introns or exons (N).
+
+&nbsp;
+
+## Exon-intron region statistics ### {#eia-stats}
+
+**Table:** Exon-intron region statistics for the positive and negative set.
+If --eia-ib is set, also include statistics for sites containing intron
+5' (F) and intron 3' (T) ends.
+
+"""
+        # EIA stats.
+        if "F" in pos_eia_stats_dic:
+            pos_perc_f_sites = "%.2f" % ((pos_eia_stats_dic['F'] / c_pos_out)*100) + " %"
+            pos_perc_t_sites = "%.2f" % ((pos_eia_stats_dic['T'] / c_pos_out)*100) + " %"
+            neg_perc_f_sites = "%.2f" % ((neg_eia_stats_dic['F'] / c_neg_out)*100) + " %"
+            neg_perc_t_sites = "%.2f" % ((neg_eia_stats_dic['T'] / c_neg_out)*100) + " %"
+        pos_perc_e = "%.2f" % ((pos_eia_stats_dic['E'] / pos_eia_stats_dic['total_pos'])*100)
+        pos_perc_i = "%.2f" % ((pos_eia_stats_dic['I'] / pos_eia_stats_dic['total_pos'])*100)
+        neg_perc_e = "%.2f" % ((neg_eia_stats_dic['E'] / neg_eia_stats_dic['total_pos'])*100)
+        neg_perc_i = "%.2f" % ((neg_eia_stats_dic['I'] / neg_eia_stats_dic['total_pos'])*100)
+        if "N" in pos_eia_stats_dic:
+            pos_perc_n = "%.2f" % ((pos_eia_stats_dic['N'] / pos_eia_stats_dic['total_pos'])*100)
+            neg_perc_n = "%.2f" % ((neg_eia_stats_dic['N'] / neg_eia_stats_dic['total_pos'])*100)
+        mdtext += "| &nbsp; Attribute &nbsp; | &nbsp; Positives &nbsp; | &nbsp; Negatives &nbsp; | \n"
+        mdtext += "| :-: | :-: | :-: |\n"
+        mdtext += '| % E |' + " %s | %s |\n" %(pos_perc_e, neg_perc_e)
+        mdtext += '| % I |' + " %s | %s |\n" %(pos_perc_i, neg_perc_i)
+        if "N" in pos_eia_stats_dic:
+            mdtext += '| % N |' + " %s | %s |\n" %(pos_perc_n, neg_perc_n)
+        if "F" in pos_eia_stats_dic:
+            mdtext += "| F sites | %i (%s) | %i (%s) |\n" %(pos_eia_stats_dic['F'], pos_perc_f_sites, neg_eia_stats_dic['F'], neg_perc_f_sites)
+            mdtext += "| T sites | %i (%s) | %i (%s) |\n" %(pos_eia_stats_dic['T'], pos_perc_t_sites, neg_eia_stats_dic['T'], neg_perc_t_sites)
+        mdtext += "\n&nbsp;\n&nbsp;\n"
+
+    # Transcript region plots and stats.
+    if pos_tra_stats_dic and neg_tra_stats_dic:
+        mdtext += """
+## Transcript region distribution ### {#tra-plot}
+
+Distribution of transcript regions for the positive and negative set.
+
+"""
+        # TRA plot.
+        create_reg_annot_grouped_bar_plot(pos_tra_stats_dic, neg_tra_stats_dic, tra_plot_out,
+                                          ["F", "C", "T", "N"],
+                                          perc=True, theme=theme)
+        tra_plot_path = plots_folder + "/" + tra_plot
+        mdtext += '<img src="' + tra_plot_path + '" alt="Transcript region distribution"' + "\n"
+        mdtext += 'title="Transcript region distribution" width="550" />' + "\n"
+        mdtext += """
+**Figure:** Percentages of 5'UTR (F), CDS (C), and 3'UTR (T) positions as well as
+positions not covered by these transcript regions (N) for the positive and negative set.
+
+&nbsp;
+
+## Transcript region statistics ### {#tra-stats}
+
+**Table:** Transcript region statistics for the positive and negative set.
+Percentages of positions covered by 5'UTR (F), CDS (C), 3'UTR (T), or non
+of these regions (N) are given.
+If --tra-codons is set, also include statistics for start codons (S) and
+stop codons (E) (sites which contain these).
+If --tra-borders is set, also include statistics for transcript starts (A),
+ transcript ends (Z), exon borders (B) (sites which contain these).
+
+"""
+        # TRA stats.
+        pos_perc_f = "%.2f" % ((pos_tra_stats_dic['F'] / pos_tra_stats_dic['total_pos'])*100)
+        pos_perc_c = "%.2f" % ((pos_tra_stats_dic['C'] / pos_tra_stats_dic['total_pos'])*100)
+        pos_perc_t = "%.2f" % ((pos_tra_stats_dic['T'] / pos_tra_stats_dic['total_pos'])*100)
+        pos_perc_n = "%.2f" % ((pos_tra_stats_dic['N'] / pos_tra_stats_dic['total_pos'])*100)
+        neg_perc_f = "%.2f" % ((neg_tra_stats_dic['F'] / neg_tra_stats_dic['total_pos'])*100)
+        neg_perc_c = "%.2f" % ((neg_tra_stats_dic['C'] / neg_tra_stats_dic['total_pos'])*100)
+        neg_perc_t = "%.2f" % ((neg_tra_stats_dic['T'] / neg_tra_stats_dic['total_pos'])*100)
+        neg_perc_n = "%.2f" % ((neg_tra_stats_dic['N'] / neg_tra_stats_dic['total_pos'])*100)
+        mdtext += "| &nbsp; Attribute &nbsp; | &nbsp; Positives &nbsp; | &nbsp; Negatives &nbsp; | \n"
+        mdtext += "| :-: | :-: | :-: |\n"
+        mdtext += '| % F |' + " %s | %s |\n" %(pos_perc_f, neg_perc_f)
+        mdtext += '| % C |' + " %s | %s |\n" %(pos_perc_c, neg_perc_c)
+        mdtext += '| % T |' + " %s | %s |\n" %(pos_perc_t, neg_perc_t)
+        mdtext += '| % N |' + " %s | %s |\n" %(pos_perc_n, neg_perc_n)
+        # Start stop codon annotations.
+        if "S" in pos_tra_stats_dic:
+            pos_perc_s_sites = "%.2f" % ((pos_tra_stats_dic['S'] / c_pos_out)*100) + " %"
+            pos_perc_e_sites = "%.2f" % ((pos_tra_stats_dic['E'] / c_pos_out)*100) + " %"
+            neg_perc_s_sites = "%.2f" % ((neg_tra_stats_dic['S'] / c_neg_out)*100) + " %"
+            neg_perc_e_sites = "%.2f" % ((neg_tra_stats_dic['E'] / c_neg_out)*100) + " %"
+            mdtext += "| S sites | %i (%s) | %i (%s) |\n" %(pos_tra_stats_dic['S'], pos_perc_s_sites, neg_tra_stats_dic['S'], neg_perc_s_sites)
+            mdtext += "| E sites | %i (%s) | %i (%s) |\n" %(pos_tra_stats_dic['E'], pos_perc_e_sites, neg_tra_stats_dic['E'], neg_perc_e_sites)
+        # Border annotations.
+        if "A" in pos_tra_stats_dic:
+            pos_perc_a_sites = "%.2f" % ((pos_tra_stats_dic['A'] / c_pos_out)*100) + " %"
+            pos_perc_b_sites = "%.2f" % ((pos_tra_stats_dic['B'] / c_pos_out)*100) + " %"
+            pos_perc_z_sites = "%.2f" % ((pos_tra_stats_dic['Z'] / c_pos_out)*100) + " %"
+            neg_perc_a_sites = "%.2f" % ((neg_tra_stats_dic['A'] / c_neg_out)*100) + " %"
+            neg_perc_b_sites = "%.2f" % ((neg_tra_stats_dic['B'] / c_neg_out)*100) + " %"
+            neg_perc_z_sites = "%.2f" % ((neg_tra_stats_dic['Z'] / c_neg_out)*100) + " %"
+            mdtext += "| A sites | %i (%s) | %i (%s) |\n" %(pos_tra_stats_dic['A'], pos_perc_a_sites, neg_tra_stats_dic['A'], neg_perc_a_sites)
+            mdtext += "| B sites | %i (%s) | %i (%s) |\n" %(pos_tra_stats_dic['B'], pos_perc_b_sites, neg_tra_stats_dic['B'], neg_perc_b_sites)
+            mdtext += "| Z sites | %i (%s) | %i (%s) |\n" %(pos_tra_stats_dic['Z'], pos_perc_z_sites, neg_tra_stats_dic['Z'], neg_perc_z_sites)
+        mdtext += "\n&nbsp;\n&nbsp;\n"
+
+    # Repeat region plots and stats.
+    if pos_rra_stats_dic and neg_rra_stats_dic:
+        mdtext += """
+## Repeat region distribution ### {#rra-plot}
+
+Distribution of repeat regions for the positive and negative set. Repeat
+regions are annotated in the .2bit genomic sequences file as lowercase
+sequences. These regions were identified by RepeatMasker and Tandem Repeats
+Finder (with period of 12 or less).
+
+"""
+        # RRA plot.
+        create_reg_annot_grouped_bar_plot(pos_rra_stats_dic, neg_rra_stats_dic, rra_plot_out,
+                                          ["R", "N"],
+                                          perc=True, theme=theme)
+        rra_plot_path = plots_folder + "/" + rra_plot
+        mdtext += '<img src="' + rra_plot_path + '" alt="Repeat region distribution"' + "\n"
+        mdtext += 'title="Repeat region distribution" width="550" />' + "\n"
+        mdtext += """
+**Figure:** Percentages of repeat (R) and no-repeat (N) regions for the
+positive and negative set.
+
+&nbsp;
+
+## Repeat region statistics ### {#rra-stats}
+
+**Table:** Repeat region statistics for the positive and negative set.
+Percentages of positive and negative regions covered by repeat (R)
+ and non-repeat (N) regions are given.
+
+"""
+        # RRA stats.
+        pos_perc_r = "%.2f" % ((pos_rra_stats_dic['R'] / pos_rra_stats_dic['total_pos'])*100)
+        pos_perc_n = "%.2f" % ((pos_rra_stats_dic['N'] / pos_rra_stats_dic['total_pos'])*100)
+        neg_perc_r = "%.2f" % ((neg_rra_stats_dic['R'] / neg_rra_stats_dic['total_pos'])*100)
+        neg_perc_n = "%.2f" % ((neg_rra_stats_dic['N'] / neg_rra_stats_dic['total_pos'])*100)
+
+        mdtext += "| &nbsp; Attribute &nbsp; | &nbsp; Positives &nbsp; | &nbsp; Negatives &nbsp; |\n"
+        mdtext += "| :-: | :-: | :-: |\n"
+        mdtext += '| % R |' + " %s | %s |\n" %(pos_perc_r, neg_perc_r)
+        mdtext += '| % N |' + " %s | %s |\n" %(pos_perc_n, neg_perc_n)
+        mdtext += "\n&nbsp;\n&nbsp;\n"
+
+    # Target gene biotype count stats.
+    if target_gbtc_dic and all_gbtc_dic:
+        mdtext += """
+## Target gene biotype statistics ### {#gbt-stats}
+
+**Table:** Target gene biotype counts for the positive set and their percentages
+(count normalized by total count for the respective gene biotype).
+
+"""
+        mdtext += "| &nbsp; Gene biotype &nbsp; | &nbsp; Target count &nbsp; | &nbsp; Total count &nbsp; | &nbsp; Percentage &nbsp; | \n"
+        mdtext += "| :-: | :-: | :-: | :-: |\n"
+        unit = " %"
+        for bt, target_c in sorted(target_gbtc_dic.items(), key=lambda item: item[1], reverse=True):
+            all_c = all_gbtc_dic[bt]
+            perc_c = "%.2f" % ((target_c / all_c) * 100)
+            mdtext += "| %s | %i | %i | %s%s |\n" %(bt, target_c, all_c, perc_c, unit)
+        mdtext += "\n&nbsp;\n&nbsp;\n"
+
+    if t2hc_dic and t2i_dic:
+        mdtext += """
+## Target region overlap statistics ### {#tro-stats}
+
+**Table:** Target region overlap statistics, showing the top %i targeted
+regions (transcript or genes), with the # overlaps == # of positive sites
+overlapping with the region.
+
+""" %(target_top)
+
+        if dataset_type == "t":
+            mdtext += "| &nbsp; # overlaps &nbsp; | &nbsp; Transcript ID &nbsp; | &nbsp; &nbsp; Transcript biotype &nbsp; &nbsp; | &nbsp; Gene ID &nbsp; | &nbsp; Gene name &nbsp; | &nbsp; &nbsp; Gene biotype &nbsp; &nbsp; | \n"
+            mdtext += "| :-: | :-: | :-: | :-: | :-: | :-: |\n"
+            i = 0
+            for tr_id, ol_c in sorted(t2hc_dic.items(), key=lambda item: item[1], reverse=True):
+                i += 1
+                if i > target_top:
+                    break
+                tr_bt = t2i_dic[tr_id][0]
+                gene_id = t2i_dic[tr_id][1]
+                gene_name = t2i_dic[tr_id][2]
+                gene_bt = t2i_dic[tr_id][3]
+                mdtext += "| %i | %s | %s |  %s | %s | %s |\n" %(ol_c, tr_id, tr_bt, gene_id, gene_name, gene_bt)
+            mdtext += "| ... | &nbsp; | &nbsp; | &nbsp; | &nbsp; | &nbsp; |\n"
+            mdtext += "\n&nbsp;\n&nbsp;\n"
+
+        elif dataset_type == "g":
+            mdtext += "| &nbsp; # overlaps &nbsp; | &nbsp; Gene ID &nbsp; | &nbsp; Gene name &nbsp; | &nbsp; &nbsp; Gene biotype &nbsp; &nbsp; | \n"
+            mdtext += "| :-: | :-: | :-: | :-: |\n"
+            i = 0
+            for gene_id, ol_c in sorted(t2hc_dic.items(), key=lambda item: item[1], reverse=True):
+                i += 1
+                if i > target_top:
+                    break
+                gene_name = t2i_dic[gene_id][0]
+                gene_bt = t2i_dic[gene_id][1]
+                mdtext += "| %i | %s | %s |  %s |\n" %(ol_c, gene_id, gene_name, gene_bt)
+            mdtext += "| ... | &nbsp; | &nbsp; |  &nbsp; |\n"
+            mdtext += "\n&nbsp;\n&nbsp;\n"
+
+    # Additional BED annotations.
+    if add_feat_dic_list:
+        mdtext += """
+## BED feature statistics ### {#bed-stats}
+
+Additional BED annotation feature statistics (from --feat-in table) for the
+positive and negative dataset.
+
+"""
+        pos_cov_dic = {}
+        neg_cov_dic = {}
+        for i in range(0, len(add_feat_dic_list) - 1, 2):
+            pos_stats_dic = add_feat_dic_list[i]
+            neg_stats_dic = add_feat_dic_list[i+1]
+            feat_id = pos_stats_dic["feat_id"]
+            feat_type = pos_stats_dic["feat_type"]
+            pos_total_pos = pos_stats_dic["total_pos"]
+            neg_total_pos = neg_stats_dic["total_pos"]
+            pos_perc_zero_sites = "%.2f" % ((pos_stats_dic['zero_sites'] / pos_stats_dic['total_sites'])*100) + " %"
+            neg_perc_zero_sites = "%.2f" % ((neg_stats_dic['zero_sites'] / neg_stats_dic['total_sites'])*100) + " %"
+            if feat_type == "C":
+                pos_c_0 = pos_stats_dic["0"]
+                pos_c_1 = pos_stats_dic["1"]
+                neg_c_0 = neg_stats_dic["0"]
+                neg_c_1 = neg_stats_dic["1"]
+                pos_perc_0 = "%.2f" % ((pos_c_0 / pos_total_pos)*100) + " %"
+                pos_perc_1 = "%.2f" % ((pos_c_1 / pos_total_pos)*100) + " %"
+                neg_perc_0 = "%.2f" % ((neg_c_0 / neg_total_pos)*100) + " %"
+                neg_perc_1 = "%.2f" % ((neg_c_1 / neg_total_pos)*100) + " %"
+            else:
+                pos_mean = pos_stats_dic["mean"]
+                pos_stdev = pos_stats_dic["stdev"]
+                neg_mean = neg_stats_dic["mean"]
+                neg_stdev = neg_stats_dic["stdev"]
+                pos_c_0 = pos_stats_dic["zero_pos"]
+                neg_c_0 = neg_stats_dic["zero_pos"]
+                pos_c_1 = pos_total_pos - pos_c_0
+                neg_c_1 = neg_total_pos - neg_c_0
+                pos_perc_0 = "%.2f" % ((pos_c_0 / pos_total_pos)*100) + " %"
+                pos_perc_1 = "%.2f" % ((pos_c_1 / pos_total_pos)*100) + " %"
+                neg_perc_0 = "%.2f" % ((neg_c_0 / neg_total_pos)*100) + " %"
+                neg_perc_1 = "%.2f" % ((neg_c_1 / neg_total_pos)*100) + " %"
+
+            # Store feature coverage (percentage of positions overlapping).
+            pos_feat_cov = (pos_c_1 / pos_total_pos) * 100
+            neg_feat_cov = (neg_c_1 / neg_total_pos) * 100
+            pos_cov_dic[feat_id] = pos_feat_cov
+            neg_cov_dic[feat_id] = neg_feat_cov
+
+            mdtext += """
+### BED annotation file feature \"%s\" statistics
+
+""" %(feat_id)
+
+            if feat_type == "C":
+                mdtext += """
+
+**Table:** BED feature region length + score statistics for the
+positive and negative set.
+Feature type is one-hot encoding, i.e., every overlapping position
+gets a 1 assigned, every not overlapping position a 0.
+
+"""
+            else:
+                mdtext += """
+
+**Table:** BED feature region length + score statistics for the
+positive and negative set.
+Feature type is numerical, i.e., every position gets the score of the
+overlapping feature region assigned. In case of no feature region overlap,
+the position gets a score of 0.
+
+"""
+            mdtext += "| &nbsp; Attribute &nbsp; | &nbsp; Positives &nbsp; | &nbsp; Negatives &nbsp; |\n"
+            mdtext += "| :-: | :-: | :-: |\n"
+            mdtext += "| mean length | %.2f (+-%.2f) | %.2f (+-%.2f) |\n" %(pos_stats_dic["mean_l"], pos_stats_dic["stdev_l"], neg_stats_dic["mean_l"], neg_stats_dic["stdev_l"])
+            mdtext += "| median length | %i | %i |\n" %(pos_stats_dic["median_l"], neg_stats_dic["median_l"])
+            mdtext += "| min length | %i | %i |\n" %(pos_stats_dic["min_l"], neg_stats_dic["min_l"])
+            mdtext += "| max length | %i | %i |\n" %(pos_stats_dic["max_l"], neg_stats_dic["max_l"])
+            if feat_type == "C":
+                mdtext += "| # total positions | %i | %i |\n" %(pos_total_pos, neg_total_pos)
+                mdtext += "| # 0 positions | %i (%s) | %i (%s) |\n" %(pos_c_0, pos_perc_0, neg_c_0, neg_perc_0)
+                mdtext += "| # 1 positions | %i (%s) | %i (%s) |\n" %(pos_c_1, pos_perc_1, neg_c_1, neg_perc_1)
+                mdtext += '| % all-zero sites |' + " %s | %s |\n" %(pos_perc_zero_sites, neg_perc_zero_sites)
+            else:
+                mdtext += "| # total positions | %i | %i |\n" %(pos_total_pos, neg_total_pos)
+                mdtext += "| # 0 positions | %i (%s) | %i (%s) |\n" %(pos_c_0, pos_perc_0, neg_c_0, neg_perc_0)
+                mdtext += "| # non-0 positions | %i (%s) | %i (%s) |\n" %(pos_c_1, pos_perc_1, neg_c_1, neg_perc_1)
+                mdtext += '| % all-zero sites |' + " %s | %s |\n" %(pos_perc_zero_sites, neg_perc_zero_sites)
+                mdtext += "| mean score | %.3f (+-%.3f) | %.3f (+-%.3f) |\n" %(pos_mean, pos_stdev, neg_mean, neg_stdev)
+            mdtext += "\n&nbsp;\n&nbsp;\n"
+
+        # Create additional BED features coverage plot.
+        mdtext += """
+## BED feature coverage distribution ### {#bed-plot}
+
+Additional BED feature coverage distributions for the
+positive and negative dataset.
+
+"""
+        create_train_set_bed_feat_cov_plot(pos_cov_dic, neg_cov_dic,
+                                           bed_cov_plot_out,
+                                           theme=args.theme)
+        bed_cov_plot_path = plots_folder + "/" + bed_cov_plot
+        mdtext += '<img src="' + bed_cov_plot_path + '" alt="BED feature coverage distribution"' + "\n"
+        mdtext += 'title="BED feature coverage distribution" width="800" />' + "\n"
+        mdtext += """
+**Figure:** Additional BED feature coverage distributions for the
+positive and negative dataset. Feature coverage means how much
+percent of the positive or negative regions are covered by the
+respective BED feature (i.e., overlap with it). The BED feature
+IDs from --feat-in are given on the y-axis, their coverage on the
+x-axis.
+
+&nbsp;
+
+"""
+
+    print("Generate HTML report ... ")
+
+    # Convert mdtext to html.
+    md2html = markdown(mdtext, extensions=['attr_list', 'tables'])
+
+    #OUTMD = open(md_out,"w")
+    #OUTMD.write("%s\n" %(mdtext))
+    #OUTMD.close()
+
+    OUTHTML = open(html_out,"w")
+    OUTHTML.write("%s\n" %(md2html))
+    OUTHTML.close()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 ################################################################################
@@ -7428,7 +8883,7 @@ def gp2_eval_generate_html_report(ws_scores, neg_ws_scores,
 def gp2_gt_generate_html_report(pos_seqs_dic, neg_seqs_dic, out_folder,
                                 dataset_type, gp2lib_path,
                                 html_report_out=False,
-                                plots_subfolder="plots_graphprot2_gt",
+                                plots_subfolder=False,
                                 id2ucr_dic=False,
                                 pos_str_stats_dic=False,
                                 neg_str_stats_dic=False,
@@ -8754,6 +10209,60 @@ def get_kmer_dic(k,
             mer2c_dic[seq] = 0
     fill(k, "", mer2c_dic)
     return mer2c_dic
+
+
+################################################################################
+
+def get_min_hit_end_distance(l1, l2):
+    """
+    Given two lists of kmer hit ends on a sequence (from get_kmer_hit_ends()),
+    return the minimum distance between two hit ends in the two lists.
+    In other words, the closest positions in both lists.
+
+    >>> l1 = [2,10,20]
+    >>> l2 = [12,15,30]
+    >>> get_min_hit_end_distance(l1,l2)
+    2
+
+    """
+    assert l1, "l1 empty"
+    assert l2, "l2 empty"
+    min_dist = 1000000
+    for e1 in l1:
+        for e2 in l2:
+            dist_e1e2 = abs(e1-e2)
+            if dist_e1e2 < min_dist:
+                min_dist = dist_e1e2
+    assert min_dist != 1000000, "no min_dist extracted"
+    return min_dist
+
+
+################################################################################
+
+def get_kmer_hit_ends(seq,kmer):
+    """
+    Given a sequence and a k-mer, return match end positions (1-based) of k-mer
+    in sequence. If not hits, return empty list.
+
+    >>> seq = "AACGAAACG"
+    >>> kmer = "ACG"
+    >>> get_kmer_hit_ends(seq, kmer)
+    [4, 9]
+    >>> kmer = "ACC"
+    >>> get_kmer_hit_ends(seq, kmer)
+    []
+
+    """
+    assert seq, "seq empty"
+    assert kmer, "kmer empty"
+    k = len(kmer)
+    hit_list = []
+    for i in range(len(seq)-k+1):
+        end = i+k
+        check_kmer = seq[i:end]
+        if check_kmer == kmer:
+            hit_list.append(end)
+    return hit_list
 
 
 ################################################################################
