@@ -2655,52 +2655,63 @@ def main_eval(args):
                 jacc_scores_dic[jacc_id] = sum_sc
                 jacc_stats_dic[jacc_id] = [kmer1, kmer2, kmer1_sc, kmer2_sc, jaccard_idx, min_dist_mean, min_dist_stdev, c_intersects, c_union]
 
-        # Output k-mer stats and plots.
-        top_kmer_plots = 25
-        c_kmers = len(kmer2rank_dic)
-        kmer_i = 10 ** len(str(c_kmers))
-        sc_rank = 0
+
+        """
+        Output k-mer stats tables.
+
+        """
         kmer2scrank_dic = {}
+        kmer2avgscrank_dic = {}
         kmer_stats_out = motif_plots_folder + "/kmer_stats.out"
+        lookup_kmer_stats_out = motif_plots_folder + "/lookup_kmer_stats.out"
         KSOUT = open(kmer_stats_out, "w")
-        KSOUT.write("score_rank\tkmer\tscore\tkmer_count\tcount_rank\n")
-        for kmer, sc in sorted(kmer2sc_dic.items(), key=lambda item: item[1], reverse=True):
-            kmer_count_rank = kmer2rank_dic[kmer]
-            kmer_count = kmer2c_dic[kmer]
-            kmer_i += 1
-            sc_rank += 1
-            kmer2scrank_dic[kmer] = sc_rank
-            KSOUT.write("%i\t%s\t%s\t%i\t%i\n" %(sc_rank, kmer, str(sc), kmer_count, kmer_count_rank))
-            # Plot top k-mers and remember them.
-            if not onlyseq and sc_rank <= top_kmer_plots:
-                kmer_plot_file = kmer_plots_folder + "/" + str(kmer_i)[1:] + "_" + kmer + "_c" + str(kmer_count) + "_sc" + str(sc) + "." + plot_format
-                print("Plot %s ... " %(kmer_plot_file))
-                gp2lib.make_motif_plot(kmer2mm_dic[kmer], ch_info_dic, kmer_plot_file,
-                                       fid2stdev_dic=kmer_stdev_dic[kmer])
+        LKSOUT = open(lookup_kmer_stats_out, "w")
+        if onlyseq:
+            sc_rank = 0
+            KSOUT.write("score_rank\tkmer\tscore\tkmer_count\tcount_rank\n")
+            for kmer, sc in sorted(kmer2sc_dic.items(), key=lambda item: item[1], reverse=True):
+                sc_rank += 1
+                kmer_count_rank = kmer2rank_dic[kmer]
+                kmer_count = kmer2c_dic[kmer]
+                kmer2scrank_dic[kmer] = sc_rank
+                if lookup_kmer and kmer == lookup_kmer:
+                    LKSOUT.write("%i\t%s\t%s\t%i\t%i\n" %(sc_rank, kmer, str(sc), kmer_count, kmer_count_rank))
+                else:
+                    KSOUT.write("%i\t%s\t%s\t%i\t%i\n" %(sc_rank, kmer, str(sc), kmer_count, kmer_count_rank))
+        else:
+            # Get k-mer average score ranks.
+            avg_sc_rank = 0
+            for kmer, sc in sorted(kmer2sc_dic.items(), key=lambda item: item[1], reverse=True):
+                avg_sc_rank += 1
+                kmer2avgscrank_dic[kmer] = avg_sc_rank
+            sc_rank = 0
+            KSOUT.write("best_score_rank\tavg_score_rank\tkmer\tbest_score\tavg_score\tavg_score_stdev\tkmer_count\tcount_rank\n")
+            for kmer, sc in sorted(kmer2bestsc_dic.items(), key=lambda item: item[1], reverse=True):
+                sc_rank += 1
+                kmer_count_rank = kmer2rank_dic[kmer]
+                kmer_count = kmer2c_dic[kmer]
+                kmer2scrank_dic[kmer] = sc_rank
+                avg_sc = kmer2sc_dic[kmer]
+                avg_sc_stdev = kmer2scstdev_dic[kmer]
+                avg_sc_rank = kmer2avgscrank_dic[kmer]
+                if lookup_kmer and kmer == lookup_kmer:
+                    LKSOUT.write("%i\t%i\t%s\t%s\t%s\t%s\t%i\t%i\n" %(sc_rank, avg_sc_rank, kmer, str(sc), str(avg_sc), str(avg_sc_stdev), kmer_count, kmer_count_rank))
+                else:
+                    KSOUT.write("%i\t%i\t%s\t%s\t%s\t%s\t%i\t%i\n" %(sc_rank, avg_sc_rank, kmer, str(sc), str(avg_sc), str(avg_sc_stdev), kmer_count, kmer_count_rank))
         KSOUT.close()
-        print("Output k-mer stats file:\n%s" %(kmer_stats_out))
+        print("Output table file with k-mer statistics:\n%s" %(kmer_stats_out))
+        if lookup_kmer:
+            print("Output table file with lookup k-mer statistics:\n%s" %(lookup_kmer_stats_out))
 
         # Plot / report lookup k-mer stats.
         lookup_plot_file = False
-        if lookup_kmer:
+
+        if lookup_kmer and not onlyseq:
             lookup_kmer_stats_out = motif_plots_folder + "/lookup_kmer_stats.out"
-            KSOUT = open(lookup_kmer_stats_out, "w")
-            KSOUT.write("score_rank\tkmer\tscore\tkmer_count\tcount_rank\n")
-            sc = kmer2sc_dic[lookup_kmer]
-            kmer_count = kmer2c_dic[lookup_kmer]
-            kmer_crank = kmer2rank_dic[lookup_kmer]
-            kmer_scrank = kmer2scrank_dic[lookup_kmer]
-            KSOUT.write("%i\t%s\t%s\t%i\t%i\n" %(kmer_scrank, lookup_kmer, str(sc), kmer_count, kmer_crank))
-            if not onlyseq:
-                print("Look-up k-mer: %s, average score: %s (rank: %i), # k-mer hits: %i (rank: %i)" %(lookup_kmer, str(sc), kmer_scrank, kmer_count, kmer_crank))
-                lookup_plot_file = motif_plots_folder + "/" "lookup_" + lookup_kmer + "." + plot_format
-                print("Plot %s ... " %(lookup_plot_file))
-                gp2lib.make_motif_plot(kmer2mm_dic[kmer], ch_info_dic, lookup_plot_file,
-                                       fid2stdev_dic=kmer_stdev_dic[kmer])
-            else:
-                print("Look-up k-mer: %s, score: %s (rank: %i), # k-mer hits: %i (rank: %i)" %(lookup_kmer, str(sc), kmer_scrank, kmer_count, kmer_crank))
-            print("Output lookup k-mer stats file:\n%s" %(lookup_kmer_stats_out))
-            KSOUT.close()
+            lookup_plot_file = motif_plots_folder + "/" "lookup_" + lookup_kmer + "." + plot_format
+            print("Plotting %s ... " %(lookup_plot_file))
+            gp2lib.make_motif_plot(kmer2mm_dic[kmer], ch_info_dic, lookup_plot_file,
+                                   fid2stdev_dic=kmer_stdev_dic[kmer])
 
         # HTML report output file.
         html_report_out = args.out_folder + "/" + "report.graphprot2_eval.html"
@@ -2708,6 +2719,8 @@ def main_eval(args):
         plots_subfolder = "html_plots"
         # Get library and logo path.
         gp2lib_path = os.path.dirname(gp2lib.__file__)
+        # Number of k-mer plots to generate.
+        top_kmer_plots = 25
         # Generate report.
         gp2lib.gp2_eval_generate_html_report(ws_scores, neg_ws_scores,
                                              args.out_folder, gp2lib_path,
@@ -2716,13 +2729,14 @@ def main_eval(args):
                                              kmer2sc_dic=kmer2sc_dic,
                                              kmer2scstdev_dic=kmer2scstdev_dic,
                                              kmer2bestsc_dic=kmer2bestsc_dic,
+                                             kmer2scrank_dic=kmer2scrank_dic,
+                                             kmer2avgscrank_dic=kmer2avgscrank_dic,
                                              kmer2mm_dic=kmer2mm_dic,
                                              kmer_stdev_dic=kmer_stdev_dic,
                                              kmer2bestmm_dic=kmer2bestmm_dic,
                                              kmer2c_dic=kmer2c_dic,
                                              kmer_size=args.kmer_size,
                                              ch_info_dic=ch_info_dic,
-                                             lookup_plot_file=lookup_plot_file,
                                              top_motif_file_dic=top_motif_file_dic,
                                              bottom_motif_file_dic=bottom_motif_file_dic,
                                              kmer_top_n=top_kmer_plots,
@@ -2738,389 +2752,6 @@ def main_eval(args):
                                              kmer_plots_folder=kmer_plots_folder)
 
 
-
-
-
-
-
-
-
-
-
-        # For every top k-mer.
-        for kmer in process_kmers_list:
-            kmer_count = kmerc_dic[kmer]
-            # kmer hit count on all sequences.
-            c_kmer_hits = 0
-            # Init motif matrix for kmer.
-            motif_matrix = []
-            for i in range(args.kmer_size):
-                motif_matrix.append([0.0]*args.num_features)
-
-            # Standard deviations for numerical features.
-            fid2sc_dic = {}
-            if calc_stdev:
-                for fid in stdev_fid2fidx_dic:
-                    fid2sc_dic[fid] = []
-                    for i in range(motif_size):
-                        fid2sc_dic[fid].append([])
-
-            kmer2mm_dic[kmer] = motif_matrix
-            kmer2mm_stdev_dic[kmer] = fid2stdev_dic
-
-
-
-            # Go over whole sequence set, extract kmer hits, sum up scores and fill motif matrix.
-            for gi in gi2sc_dic:
-                seq_id = idx2id_dic[gi]
-                seq = seqs_dic[seq_id]
-                profile_scores = profile_scores_ll[gi]
-                if not profile_scores:
-                    continue
-                feat_list = all_features[gi]
-                site_l = len(profile_scores)
-
-                # Minimum sequence length for extracting k-mer blocks.
-                if site_l < (kmer_extlr*2 + 1):
-                    continue
-
-                for si in range(len(seq)-args.kmer_size+1):
-                    smer = seq[si:si+args.kmer_size]
-                    s_brick = si # 0-based.
-                    e_brick = si+args.kmer_size # 1-based.
-                    if kmer != smer:
-                        continue
-
-                    c_kmer_hits += 1
-
-                    # Sum up k-mer score.
-                    center_pos = s_brick + kmer_extlr # 0-based.
-                    kmer2sc_dic[kmer] += profile_scores[center_pos]
-
-                    # Add hit brick values to motif_matrix.
-                    for i in range(l_mm):
-                        for j in range(l_sv):
-                            motif_matrix[i][j] += feat_list[s_brick:e_brick][i][j]
-                            # For one-channel numerical features, store scores to calculate stdev.
-                            if calc_stdev:
-                                if j in stdev_fidx2fid_dic:
-                                    fid2sc_dic[stdev_fidx2fid_dic[j]][i].append(feat_list[s_brick:e_brick][i][j])
-
-            # Checks.
-            assert c_kmer_hits, "no k-mer hits for top k-mer %s" %(kmer)
-            assert kmer_count == c_kmer_hits, "differing k-mer hit counts for k-mer %s (%i != %i)" %(kmer, kmer_count, c_kmer_hits)
-
-            # Average motif matrix values.
-            for i in range(l_mm):
-                for j in range(l_sv):
-                    motif_matrix[i][j] = motif_matrix[i][j] / c_kmer_hits
-
-            # Average score.
-            kmer2sc_dic[kmer] = kmer2sc_dic[kmer] / c_kmer_hits
-
-            # Calculate standard deviations for one-channel numerical features at each motif position.
-            fid2stdev_dic = {}
-            if calc_stdev:
-                for fid in fid2sc_dic:
-                    fid2stdev_dic[fid] = []
-                    for i in range(l_mm):
-                        fid2stdev_dic[fid].append(statistics.stdev(fid2sc_dic[fid][i]))
-
-            # Store motif_matrix + fid2stdev_dic.
-            motif_matrix_dic[kmer] = motif_matrix
-            mm_stdev_dic[kmer] = fid2stdev_dic
-
-        print("Generate top %i k-mer plots ... " %(c_top_kmers))
-        # Sort by average block score and output k-mer motif.
-        kmer_i = 10 ** len(str(c_top_kmers))
-        kmer_rank = 0
-        kmer_stats_out = motif_plots_folder + "/kmer_stats.out"
-        KSOUT = open(kmer_stats_out, "w")
-        print("Ranking of k-mers based on average site score:")
-        for kmer, sc in sorted(kmer2sc_dic.items(), key=lambda item: item[1], reverse=True):
-            if kmer not in top_kmers_dic: # lookup-kmer skip.
-                continue
-            kmer_i += 1
-            kmer_rank += 1
-            kmer_count = kmerc_dic[kmer]
-            print("k-mer: %s, average score: %s, # k-mer hits: %i" %(kmer, str(sc), kmer_count))
-            # Print out stats.
-            KSOUT.write("%i\t%s\t%i\t%s\n" %(kmer_rank, kmer, kmer_count, str(sc)))
-            # Plot motif.
-            if not args.num_features == 4:
-                kmer_plot_file = kmer_plots_folder + "/" + str(kmer_i)[1:] + "_" + kmer + "_c" + str(kmer_count) + "_sc" + str(sc) + "." + plot_format
-                print("Plot %s ... " %(kmer_plot_file))
-                gp2lib.make_motif_plot(motif_matrix_dic[kmer], ch_info_dic, kmer_plot_file,
-                                       fid2stdev_dic=mm_stdev_dic[kmer])
-        KSOUT.close()
-        print("Output k-mer stats file:\n%s" %(kmer_stats_out))
-
-        # Plot / report lookup k-mer stats.
-        if lookup_kmer:
-            lookup_kmer_stats_out = motif_plots_folder + "/lookup_kmer_stats.out"
-            KSOUT = open(lookup_kmer_stats_out, "w")
-            sc = kmer2sc_dic[lookup_kmer]
-            kmer_count = kmerc_dic[lookup_kmer]
-            kmer_crank = kmer2crank_dic[lookup_kmer]
-            print("Look-up k-mer: %s, average score: %s, # k-mer hits: %i" %(lookup_kmer, str(sc), kmer_count))
-            KSOUT.write("%i\t%s\t%i\t%s\n" %(kmer_crank, lookup_kmer, kmer_count, str(sc)))
-            if not args.num_features == 4:
-                lookup_plot_file = motif_plots_folder + "/" "lookup_" + lookup_kmer + "." + plot_format
-                print("Plot %s ... " %(lookup_plot_file))
-                gp2lib.make_motif_plot(motif_matrix_dic[lookup_kmer], ch_info_dic, lookup_plot_file,
-                                       fid2stdev_dic=mm_stdev_dic[lookup_kmer])
-            print("Output lookup k-mer stats file:\n%s" %(lookup_kmer_stats_out))
-            KSOUT.close()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-            # Checks.
-            c_all_win_graphs = len(all_win_graphs)
-            assert c_all_win_graphs, "no window graphs constructed (# window graphs == 0)"
-            assert c_all_seq_len == c_all_win_graphs, "total sequence length != # of window graphs (%i != %i)" %(c_all_seq_len, c_all_win_graphs)
-
-            # Load dataset.
-            print("Load window graphs dataset ... ")
-            predict_dataset = MyDataset(all_win_graphs)
-            predict_loader = DataLoader(predict_dataset, batch_size=batch_size, shuffle=False)
-
-            # Predict.
-            print("Predict windows for k-mer analysis ... ")
-            win_scores = model_util.get_scores(predict_loader, device, model,
-                                               min_max_norm=True)
-
-            # Checks.
-            c_win_scores = len(win_scores)
-            assert c_win_scores == c_all_seq_len, "# window graph scores != total sequence length (%i != %i)" %(c_win_scores, c_all_seq_len)
-
-            # Create list of profile scores.
-            profile_scores_ll = []
-            si = 0
-            for l in seq_len_list:
-                se = si + l
-                profile_scores_ll.append(win_scores[si:se])
-                si += l
-            assert profile_scores_ll, "profile_scores_ll list empty"
-            assert len(profile_scores_ll) == c_ws_scores, "length profile scores list != # whole-site scores"
-            assert len(profile_scores_ll) == len(seqs_dic), "length profile_scores_ll != length seqs_dic"
-
-
-
-
-
-
-        else:
-            print("--win-size == --kmer-size")
-            print("Use existing window graph predictions for k-mer analysis ... ")
-
-        # Get top k-mers.
-        print("Get top %i-mers from sequences ... " %(args.kmer_size))
-        kmerc_dic = gp2lib.seqs_dic_count_kmer_freqs(seqs_dic, args.kmer_size,
-                                                     rna=True,
-                                                     convert_to_uc=True,
-                                                     report_key_error=True)
-        assert kmerc_dic, "kmerc_dic k-mer counts dictionary empty"
-
-        # Sort by decending count.
-        c_kmers = 0
-        # List og top k-mers in count order.
-        process_kmers_list = []
-        top_kmers_dic = {}
-        # k-mer to score dictionary (to calculate average k-mer scores).
-        kmer2sc_dic = {}
-        for kmer, kmerc in sorted(kmerc_dic.items(), key=lambda item: item[1], reverse=True):
-            c_kmers += 1
-            process_kmers_list.append(kmer)
-            top_kmers_dic[kmer] = 1
-            kmer2sc_dic[kmer] = 0
-            if c_kmers >= c_top_kmers:
-                break
-        # Store all ranks.
-        kmer2crank_dic = {}
-        kmer_crank = 0
-        for kmer, kmerc in sorted(kmerc_dic.items(), key=lambda item: item[1], reverse=True):
-            kmer_crank += 1
-            kmer2crank_dic[kmer] = kmer_crank
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-        # Dictionary of motif matrices (2d lists) for kmers.
-        motif_matrix_dic = {}
-        # Standard deviation infos.
-        mm_stdev_dic = {}
-
-        # Motif matrix sizes.
-        l_mm = args.kmer_size
-        l_sv = args.num_features
-
-        # For every top k-mer.
-        for kmer in process_kmers_list:
-            kmer_count = kmerc_dic[kmer]
-            # kmer hit count on all sequences.
-            c_kmer_hits = 0
-            # Init motif matrix for kmer.
-            motif_matrix = []
-            for i in range(args.kmer_size):
-                motif_matrix.append([0.0]*args.num_features)
-
-            # Standard deviations for numerical features.
-            fid2sc_dic = {}
-            if calc_stdev:
-                for fid in stdev_fid2fidx_dic:
-                    fid2sc_dic[fid] = []
-                    for i in range(motif_size):
-                        fid2sc_dic[fid].append([])
-
-            # Go over whole sequence set, extract kmer hits, sum up scores and fill motif matrix.
-            for gi in gi2sc_dic:
-                seq_id = idx2id_dic[gi]
-                seq = seqs_dic[seq_id]
-                profile_scores = profile_scores_ll[gi]
-                if not profile_scores:
-                    continue
-                feat_list = all_features[gi]
-                site_l = len(profile_scores)
-
-                # Minimum sequence length for extracting k-mer blocks.
-                if site_l < (kmer_extlr*2 + 1):
-                    continue
-
-                for si in range(len(seq)-args.kmer_size+1):
-                    smer = seq[si:si+args.kmer_size]
-                    s_brick = si # 0-based.
-                    e_brick = si+args.kmer_size # 1-based.
-                    if kmer != smer:
-                        continue
-
-                    c_kmer_hits += 1
-
-                    # Sum up k-mer score.
-                    center_pos = s_brick + kmer_extlr # 0-based.
-                    kmer2sc_dic[kmer] += profile_scores[center_pos]
-
-                    # Add hit brick values to motif_matrix.
-                    for i in range(l_mm):
-                        for j in range(l_sv):
-                            motif_matrix[i][j] += feat_list[s_brick:e_brick][i][j]
-                            # For one-channel numerical features, store scores to calculate stdev.
-                            if calc_stdev:
-                                if j in stdev_fidx2fid_dic:
-                                    fid2sc_dic[stdev_fidx2fid_dic[j]][i].append(feat_list[s_brick:e_brick][i][j])
-
-            # Checks.
-            assert c_kmer_hits, "no k-mer hits for top k-mer %s" %(kmer)
-            assert kmer_count == c_kmer_hits, "differing k-mer hit counts for k-mer %s (%i != %i)" %(kmer, kmer_count, c_kmer_hits)
-
-            # Average motif matrix values.
-            for i in range(l_mm):
-                for j in range(l_sv):
-                    motif_matrix[i][j] = motif_matrix[i][j] / c_kmer_hits
-
-            # Average score.
-            kmer2sc_dic[kmer] = kmer2sc_dic[kmer] / c_kmer_hits
-
-            # Calculate standard deviations for one-channel numerical features at each motif position.
-            fid2stdev_dic = {}
-            if calc_stdev:
-                for fid in fid2sc_dic:
-                    fid2stdev_dic[fid] = []
-                    for i in range(l_mm):
-                        fid2stdev_dic[fid].append(statistics.stdev(fid2sc_dic[fid][i]))
-
-            # Store motif_matrix + fid2stdev_dic.
-            motif_matrix_dic[kmer] = motif_matrix
-            mm_stdev_dic[kmer] = fid2stdev_dic
-
-        print("Generate top %i k-mer plots ... " %(c_top_kmers))
-        # Sort by average block score and output k-mer motif.
-        kmer_i = 10 ** len(str(c_top_kmers))
-        kmer_rank = 0
-        kmer_stats_out = motif_plots_folder + "/kmer_stats.out"
-        KSOUT = open(kmer_stats_out, "w")
-        print("Ranking of k-mers based on average site score:")
-        for kmer, sc in sorted(kmer2sc_dic.items(), key=lambda item: item[1], reverse=True):
-            if kmer not in top_kmers_dic: # lookup-kmer skip.
-                continue
-            kmer_i += 1
-            kmer_rank += 1
-            kmer_count = kmerc_dic[kmer]
-            print("k-mer: %s, average score: %s, # k-mer hits: %i" %(kmer, str(sc), kmer_count))
-            # Print out stats.
-            KSOUT.write("%i\t%s\t%i\t%s\n" %(kmer_rank, kmer, kmer_count, str(sc)))
-            # Plot motif.
-            if not args.num_features == 4:
-                kmer_plot_file = kmer_plots_folder + "/" + str(kmer_i)[1:] + "_" + kmer + "_c" + str(kmer_count) + "_sc" + str(sc) + "." + plot_format
-                print("Plot %s ... " %(kmer_plot_file))
-                gp2lib.make_motif_plot(motif_matrix_dic[kmer], ch_info_dic, kmer_plot_file,
-                                       fid2stdev_dic=mm_stdev_dic[kmer])
-        KSOUT.close()
-        print("Output k-mer stats file:\n%s" %(kmer_stats_out))
-
-        # Plot / report lookup k-mer stats.
-        if lookup_kmer:
-            lookup_kmer_stats_out = motif_plots_folder + "/lookup_kmer_stats.out"
-            KSOUT = open(lookup_kmer_stats_out, "w")
-            sc = kmer2sc_dic[lookup_kmer]
-            kmer_count = kmerc_dic[lookup_kmer]
-            kmer_crank = kmer2crank_dic[lookup_kmer]
-            print("Look-up k-mer: %s, average score: %s, # k-mer hits: %i" %(lookup_kmer, str(sc), kmer_count))
-            KSOUT.write("%i\t%s\t%i\t%s\n" %(kmer_crank, lookup_kmer, kmer_count, str(sc)))
-            if not args.num_features == 4:
-                lookup_plot_file = motif_plots_folder + "/" "lookup_" + lookup_kmer + "." + plot_format
-                print("Plot %s ... " %(lookup_plot_file))
-                gp2lib.make_motif_plot(motif_matrix_dic[lookup_kmer], ch_info_dic, lookup_plot_file,
-                                       fid2stdev_dic=mm_stdev_dic[lookup_kmer])
-            print("Output lookup k-mer stats file:\n%s" %(lookup_kmer_stats_out))
-            KSOUT.close()
-
     print("")
     print("EVALUATION OUTPUT FILES")
     print("=======================")
@@ -3131,9 +2762,9 @@ def main_eval(args):
         for motif_out_file in bottom_motif_file_dic:
             print("Bottom motif plot:\n%s" %(motif_out_file))
             print("Bottom profile plots folder:\n%s" %(bottom_profiles_folder))
-    if args.report and args.num_features != 4:
-        print("Top %i k-mer plots folder:\n%s" %(c_top_kmers, kmer_plots_folder))
-    if args.lookup_kmer and args.num_features != 4:
+    if args.report:
+        print("Model evaluation report .html:\n%s" %(html_report_out))
+    if lookup_plot_file:
         print("Look-up k-mer %s plot:\n%s" %(lookup_kmer, lookup_plot_file))
     print("")
 
