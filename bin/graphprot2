@@ -660,6 +660,12 @@ def setup_argument_parser():
                    metavar='str',
                    required = True,
                    help = "Genomic or transcript RBP binding sites file in BED (6-column format) or FASTA format. If --in FASTA, only --str is supported as additional feature. If --in BED, --gtf and --gen become mandatory")
+    p_gpm.add_argument("--train-in",
+                   dest="train_in_folder",
+                   type=str,
+                   metavar='str',
+                   required = True,
+                   help = "Training input folder (output folder of graphprot2 train) to extract the same features for --in sites which were used to train the model (info stored in --train-in folder)")
     p_gpm.add_argument("--out",
                    dest="out_folder",
                    type=str,
@@ -678,6 +684,18 @@ def setup_argument_parser():
                    type=str,
                    metavar='str',
                    help = "Genomic sequences .2bit file")
+    p_gp.add_argument("--mode",
+                   dest="mode",
+                   type = int,
+                   default = 2,
+                   choices = [1,2,3],
+                   help = "Define mode for --in BED site extraction. (1) Take the center of each site, (2) Take the complete site, (3) Take the upstream end for each site. Use --seq-ext to extend center sites again (default: 2)")
+    p_gp.add_argument("--seq-ext",
+                   dest = "seq_ext",
+                   type = int,
+                   metavar='int',
+                   default = False,
+                   help = "Up- and downstream sequence extension length of --in sites (if --in BED, site definition by --mode) (default: False)")
     p_gp.add_argument("--keep-ids",
                    dest="keep_ids",
                    default = False,
@@ -688,12 +706,6 @@ def setup_argument_parser():
                    default = False,
                    action = "store_true",
                    help = "Filter --in sites based on gene coverage (gene annotations from --gtf) (default: False)")
-    p_gp.add_argument("--con-ext",
-                   dest = "con_ext",
-                   type = int,
-                   metavar='int',
-                   default = False,
-                   help = "Up- and downstream context sequence extension of --in sites with lowercase characters for whole site prediction (graphprot predict --mode 1). Best use same --con-ext values in gp+gt+train modes. Note that statistics (--report) are produced only for uppercase sequence parts (default: False)")
     p_gp.add_argument("--report",
                    dest="report",
                    default = False,
@@ -705,88 +717,24 @@ def setup_argument_parser():
                    default = 1,
                    choices = [1,2],
                    help = "Set theme for .html report (1: palm beach, 2: midnight sunset) (default: 1)")
-
     # Add additional feature arguments group.
     p_gpa = p_gp.add_argument_group("additional annotation arguments")
-    p_gpa.add_argument("--eia",
-                   dest="exon_intron_annot",
-                   default = False,
-                   action = "store_true",
-                   help = "Add exon-intron annotations to genomic regions (default: False)")
-    p_gpa.add_argument("--eia-ib",
-                   dest="intron_border_annot",
-                   default = False,
-                   action = "store_true",
-                   help = "Add intron border annotations to genomic regions (in combination with --exon-intron) (default: False)")
-    p_gpa.add_argument("--eia-n",
-                   dest="exon_intron_n",
-                   default = False,
-                   action = "store_true",
-                   help = "Label regions not covered by intron or exon regions as N instead of labelling them as introns (I) (in combination with --exon-intron) (default: False)")
     p_gpa.add_argument("--tr-list",
                    dest="tr_list",
                    type=str,
                    metavar='str',
                    help = "Supply file with transcript IDs (one ID per row) for exon-intron labeling (using the corresponding exon regions from --gtf). By default, exon regions of the most prominent transcripts (automatically selected from --gtf) are used (default: False)")
-    p_gpa.add_argument("--phastcons",
-                   dest="pc_bw",
+    p_gpa.add_argument("--feat-in",
+                   dest="feat_in",
                    type=str,
                    metavar='str',
-                   help = "Genomic .bigWig file with phastCons conservation scores to add as annotations")
-    p_gpa.add_argument("--phylop",
-                   dest="pp_bw",
-                   type=str,
-                   metavar='str',
-                   help = "Genomic .bigWig file with phyloP conservation scores to add as annotations")
-    p_gpa.add_argument("--tra",
-                   dest="tr_reg_annot",
-                   default = False,
-                   action = "store_true",
-                   help = "Add transcript region annotations (5'UTR, CDS, 3'UTR, None) to genomic and transcript regions (default: False)")
-    p_gpa.add_argument("--tra-codons",
-                   dest="tr_reg_codon_annot",
-                   default = False,
-                   action = "store_true",
-                   help = "Add start and stop codon annotations to genomic or transcript regions (in combination with --tra) (default: False)")
-    p_gpa.add_argument("--tra-borders",
-                   dest="tr_reg_border_annot",
-                   default = False,
-                   action = "store_true",
-                   help = "Add transcript and exon border annotations to transcript regions (in combination with --tra) (default: False)")
-    p_gpa.add_argument("--rra",
-                   dest="rep_reg_annot",
-                   default = False,
-                   action = "store_true",
-                   help = "Add repeat region annotations for genomic or transcript regions retrieved from --gen .2bit (default: False)")
-    p_gpa.add_argument("--str",
-                   dest="add_str",
-                   default = False,
-                   action = "store_true",
-                   help = "Add base pairs and position-wise structural elements probabilities features (calculate with RNAplfold) (default: False)")
-    p_gpa.add_argument("--bp-in",
-                   dest="bp_in",
-                   type=str,
-                   metavar='str',
-                   help = "Supply a custom base pair annotation file for all --in sites, disabling base pair calculation with RNAplfold (default: False)")
-    p_gpa.add_argument("--plfold-u",
-                   dest="plfold_u",
-                   type = int,
-                   metavar='int',
-                   default = 3,
-                   help = "RNAplfold -u parameter value (default: 3)")
-    p_gpa.add_argument("--plfold-l",
-                   dest="plfold_l",
-                   type = int,
-                   metavar='int',
-                   default = 100,
-                   help = "RNAplfold -L parameter value (default: 100)")
-    p_gpa.add_argument("--plfold-w",
-                   dest="plfold_w",
-                   type = int,
-                   metavar='int',
-                   default = 150,
-                   help = "RNAplfold -W parameter value (default: 150)")
-    return p
+                   help = "Provide tabular file with additional position-wise genomic region features (infos and paths to BED files) to add")
+    p_gpa.add_argument("--bps-prob-cutoff",
+                   dest = "bps_cutoff",
+                   type = float,
+                   metavar='float',
+                   default = 0.5,
+                   help = "Base pair probability cutoff for filtering base pairs added to the test graphs (default: use cutoff info from --train-in)")
 
 
 ################################################################################
@@ -811,6 +759,55 @@ def main_train(args):
     assert args.patience > 0 and args.patience <= 100, "use reasonable number for --patience (> 0 and <= 100)"
     if args.str_elem_1h:
         assert args.use_str_elem_p, "--str-elem-1h requires --use-str-elem-p to be set"
+
+    # Get additional infos from graphprot2 gt settings.
+    gt_settings_file = args.in_folder + "/settings.graphprot2_gt.out"
+    assert os.path.exists(gt_settings_file), "graphprot2 gt settings file %s not found" %(gt_settings_file)
+    gt_settings_dic = {}
+    with open(gt_settings_file) as f:
+        for line in f:
+            cols = line.strip().split("\t")
+            gt_settings_dic[cols[0]] = cols[1]
+    f.closed
+    # Settings to port from gt to train settings file.
+    assert "in_gtf" in gt_settings_dic, "in_gtf info missing in --in settings file %s" %(gt_settings_dic)
+    assert "in_2bit" in gt_settings_dic, "in_2bit info missing in --in settings file %s" %(gt_settings_dic)
+    assert "tr_list" in gt_settings_dic, "tr_list info missing in --in settings file %s" %(gt_settings_dic)
+    assert "pc_bw" in gt_settings_dic, "pc_bw info missing in --in settings file %s" %(gt_settings_dic)
+    assert "pp_bw" in gt_settings_dic, "pp_bw info missing in --in settings file %s" %(gt_settings_dic)
+    assert "bp_in" in gt_settings_dic, "bp_in info missing in --in settings file %s" %(gt_settings_dic)
+    assert "feat_in" in gt_settings_dic, "feat_in info missing in --in settings file %s" %(gt_settings_dic)
+    assert "feat_in_1h" in gt_settings_dic, "feat_in_1h info missing in --in settings file %s" %(gt_settings_dic)
+    assert "feat_in_norm" in gt_settings_dic, "feat_in_norm info missing in --in settings file %s" %(gt_settings_dic)
+    assert "plfold_u" in gt_settings_dic, "plfold_u info missing in --in settings file %s" %(gt_settings_dic)
+    assert "plfold_l" in gt_settings_dic, "plfold_l info missing in --in settings file %s" %(gt_settings_dic)
+    assert "plfold_w" in gt_settings_dic, "plfold_w info missing in --in settings file %s" %(gt_settings_dic)
+    assert "exon_intron_annot" in gt_settings_dic, "exon_intron_annot info missing in --in settings file %s" %(gt_settings_dic)
+    assert "intron_border_annot" in gt_settings_dic, "intron_border_annot info missing in --in settings file %s" %(gt_settings_dic)
+    assert "exon_intron_n" in gt_settings_dic, "exon_intron_n info missing in --in settings file %s" %(gt_settings_dic)
+    assert "eia_all_ex" in gt_settings_dic, "eia_all_ex info missing in --in settings file %s" %(gt_settings_dic)
+    assert "tr_reg_annot" in gt_settings_dic, "tr_reg_annot info missing in --in settings file %s" %(gt_settings_dic)
+    assert "tr_reg_codon_annot" in gt_settings_dic, "tr_reg_codon_annot info missing in --in settings file %s" %(gt_settings_dic)
+    assert "tr_reg_border_annot" in gt_settings_dic, "tr_reg_border_annot info missing in --in settings file %s" %(gt_settings_dic)
+    args.in_gtf = gt_settings_dic["in_gtf"]
+    args.in_2bit = gt_settings_dic["in_2bit"]
+    args.tr_list = gt_settings_dic["tr_list"]
+    args.pc_bw = gt_settings_dic["pc_bw"]
+    args.pp_bw = gt_settings_dic["pp_bw"]
+    args.bp_in = gt_settings_dic["bp_in"]
+    args.feat_in = gt_settings_dic["feat_in"]
+    args.feat_in_1h = gt_settings_dic["feat_in_1h"]
+    args.feat_in_norm = gt_settings_dic["feat_in_norm"]
+    args.plfold_u = gt_settings_dic["plfold_u"]
+    args.plfold_l = gt_settings_dic["plfold_l"]
+    args.plfold_w = gt_settings_dic["plfold_w"]
+    args.exon_intron_annot = gt_settings_dic["exon_intron_annot"]
+    args.intron_border_annot = gt_settings_dic["intron_border_annot"]
+    args.exon_intron_n = gt_settings_dic["exon_intron_n"]
+    args.eia_all_ex = gt_settings_dic["eia_all_ex"]
+    args.tr_reg_annot = gt_settings_dic["tr_reg_annot"]
+    args.tr_reg_codon_annot = gt_settings_dic["tr_reg_codon_annot"]
+    args.tr_reg_border_annot = gt_settings_dic["tr_reg_border_annot"]
 
     # Silence con_ext options.
     args.bps_mode = 1
@@ -5172,6 +5169,110 @@ def main_gp(args):
     feat_table_out = args.out_folder + "/" + "features.out"
     # Transcript sites mapped to genome.
     test_transcript_to_genome_bed = args.out_folder + "/" + "test_transcript_to_genome.bed"
+
+    # Checks.
+    assert os.path.exists(args.train_in_folder), "--train in folder not found"
+
+    # Get infos from graphprot2 train settings (partly ported over from gt).
+    gp2_train_settings_file = args.in_folder + "/settings.graphprot2_train.out"
+    assert os.path.exists(gp2_train_settings_file), "graphprot2 train settings file %s not found" %(gp2_train_settings_file)
+    train_settings_dic = {}
+    with open(gp2_train_settings_file) as f:
+        for line in f:
+            cols = line.strip().split("\t")
+            train_settings_dic[cols[0]] = cols[1]
+    f.closed
+
+    # Check for important settings.
+    assert "only_seq" in train_settings_dic, "only_seq info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "use_pc_con" in train_settings_dic, "use_pc_con info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "use_pp_con" in train_settings_dic, "use_pp_con info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "use_eia" in train_settings_dic, "use_eia info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "use_tra" in train_settings_dic, "use_tra info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "use_rra" in train_settings_dic, "use_rra info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "use_str_elem_p" in train_settings_dic, "use_str_elem_p info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "use_bps" in train_settings_dic, "use_bps info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "use_add_feat" in train_settings_dic, "use_add_feat info missing in --train-in settings file %s" %(train_settings_dic)
+    # Settings ported over from gp2 gt.
+    assert "in_gtf" in train_settings_dic, "in_gtf info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "in_2bit" in train_settings_dic, "in_2bit info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "tr_list" in train_settings_dic, "tr_list info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "pc_bw" in train_settings_dic, "pc_bw info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "pp_bw" in train_settings_dic, "pp_bw info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "bp_in" in train_settings_dic, "bp_in info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "feat_in" in train_settings_dic, "feat_in info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "feat_in_1h" in train_settings_dic, "feat_in_1h info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "feat_in_norm" in train_settings_dic, "feat_in_norm info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "plfold_u" in train_settings_dic, "plfold_u info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "plfold_l" in train_settings_dic, "plfold_l info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "plfold_w" in train_settings_dic, "plfold_w info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "exon_intron_annot" in train_settings_dic, "exon_intron_annot info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "intron_border_annot" in train_settings_dic, "intron_border_annot info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "exon_intron_n" in train_settings_dic, "exon_intron_n info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "eia_all_ex" in train_settings_dic, "eia_all_ex info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "tr_reg_annot" in train_settings_dic, "tr_reg_annot info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "tr_reg_codon_annot" in train_settings_dic, "tr_reg_codon_annot info missing in --train-in settings file %s" %(train_settings_dic)
+    assert "tr_reg_border_annot" in train_settings_dic, "tr_reg_border_annot info missing in --train-in settings file %s" %(train_settings_dic)
+
+    # Select features with which --train-in model was trained.
+    args.add_str = False
+    if train_settings_dic["use_bps"] == "True" or train_settings_dic["use_str_elem_p"] == "True":
+        args.add_str = True
+
+
+"""
+gp settings:
+in_gtf
+in_2bit
+mode
+seq_ext
+keep_ids
+gene_filter
+report
+theme
+tr_list
+feat_in
+bps_cutoff
+
+"""
+
+
+
+    onlyseq = False
+    args.only_seq = False
+    if train_settings_dic["only_seq"] == "True":
+        args.only_seq = True
+        onlyseq = True
+
+
+    if os.path.exists(train_settings_dic["in_gtf"]):
+        print("Using --gtf ")
+
+    args.in_gtf = gt_settings_dic["in_gtf"]
+    args.in_2bit = gt_settings_dic["in_2bit"]
+    args.tr_list = gt_settings_dic["tr_list"]
+    args.pc_bw = gt_settings_dic["pc_bw"]
+    args.pp_bw = gt_settings_dic["pp_bw"]
+    args.bp_in = gt_settings_dic["bp_in"]
+    args.feat_in = gt_settings_dic["feat_in"]
+    args.feat_in_1h = gt_settings_dic["feat_in_1h"]
+    args.feat_in_norm = gt_settings_dic["feat_in_norm"]
+    args.plfold_u = gt_settings_dic["plfold_u"]
+    args.plfold_l = gt_settings_dic["plfold_l"]
+    args.plfold_w = gt_settings_dic["plfold_w"]
+    args.exon_intron_annot = gt_settings_dic["exon_intron_annot"]
+    args.intron_border_annot = gt_settings_dic["intron_border_annot"]
+    args.exon_intron_n = gt_settings_dic["exon_intron_n"]
+    args.eia_all_ex = gt_settings_dic["eia_all_ex"]
+    args.tr_reg_annot = gt_settings_dic["tr_reg_annot"]
+    args.tr_reg_codon_annot = gt_settings_dic["tr_reg_codon_annot"]
+    args.tr_reg_border_annot = gt_settings_dic["tr_reg_border_annot"]
+
+
+
+
+
+
 
 
     """
