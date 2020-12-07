@@ -5178,7 +5178,7 @@ def shuffle_difreq(seq):
 
     while len(shuff_seq) < len(seq):
         # each following base is based of the frequency of the previous base
-        # and their co-occurence in the original sequence.
+        # and their co-occurrence in the original sequence.
         try:
             shuff_seq.append(weighted_choice(freqs[shuff_seq[-1]].items()))
         except KeyError:
@@ -7437,7 +7437,7 @@ def create_eval_model_comp_scatter_plot(model1_scores, model2_scores, out_plot,
         # Make plot.
         sns.set(style="darkgrid")
         fig, ax = plt.subplots()
-        sns.scatterplot(x="m1_score", y="m2_score", data=df, color='#69e9f6')
+        sns.scatterplot(x="m1_score", y="m2_score", data=df, color='#69e9f6', s=3)
         plt.text(max_x , min_y, r2str, color='black', horizontalalignment='right', size=10)
         fig.set_figwidth(5)
         fig.set_figheight(4)
@@ -7558,7 +7558,7 @@ def create_eval_kde_plot(set1_scores, set2_scores, out_plot,
     assert set2_scores, "set2_scores empty"
     set1_c = len(set1_scores)
     set2_c = len(set2_scores)
-    assert set1_c == set2_c, "differing set sizes for set1_c and set2_c (%i != %i)" %(set1_c, set2_c)
+    # assert set1_c == set2_c, "differing set sizes for set1_c and set2_c (%i != %i)" %(set1_c, set2_c)
     data = {'set': [], 'score': []}
     data['set'] += set1_c*[set1_label] + set2_c*[set2_label]
     data['score'] += set1_scores + set2_scores
@@ -7606,17 +7606,19 @@ def gp2_eval_generate_html_report(ws_scores, neg_ws_scores,
                                   kmer2bestsc_dic=False,
                                   kmer2scrank_dic=False,
                                   kmer2avgscrank_dic=False,
-                                  kmer2mm_dic=kmer2mm_dic,
-                                  kmer_stdev_dic=kmer_stdev_dic,
-                                  kmer2bestmm_dic=kmer2bestmm_dic,
+                                  kmer2mm_dic=False,
+                                  kmer_stdev_dic=False,
+                                  kmer2bestmm_dic=False,
                                   ch_info_dic=False,
                                   kmer_size=5,
+                                  min_kmer_score=0.1,
+                                  min_jacc_sc=0.1,
                                   top_motif_file_dic=False,
                                   bottom_motif_file_dic=False,
                                   kmer_top_n=25,
                                   onlyseq=True,
                                   add_ws_scores=False,
-                                  theme=args.theme,
+                                  theme=1,
                                   lookup_kmer=False,
                                   jacc_scores_dic=False,
                                   jacc_stats_dic=False,
@@ -7757,8 +7759,8 @@ by GraphProt2 (graphprot2 eval):
     mdtext += "- [k-mer co-occurrence statistics](#kmer-cooc-stats)"
     if lookup_kmer:
         mdtext += "\n"
-        mdtext += "- Lookup k-mer statistics](#lookup-kmer-stats)\n"
-        mdtext += "- Lookup k-mer co-occurrence statistics](#lookup-kmer-cooc-stats)"
+        mdtext += "- [Lookup k-mer statistics](#lookup-kmer-stats)\n"
+        mdtext += "- [Lookup k-mer co-occurrence statistics](#lookup-kmer-cooc-stats)"
     if add_ws_scores:
         mdtext += "\n"
         mdtext += "- [Model comparison](#model-comp-plot)"
@@ -7864,23 +7866,24 @@ count rank) for the top %i scoring sequence %i-mers (ranked by k-mer score).
                 break
             kmer_count_rank = kmer2rank_dic[kmer]
             kmer_count = kmer2c_dic[kmer]
-            mdtext += "| %i | %s | %s | %i | %i |\n" %(sc_rank, kmer, str(sc), kmer_count, kmer_count_rank)
+            mdtext += "| %i | %s | %.6f | %i | %i |\n" %(sc_rank, kmer, sc, kmer_count, kmer_count_rank)
         mdtext += "\n&nbsp;\n&nbsp;\n"
 
         # k-mer co-occurrence statistics table for onlyseq.
         mdtext += """
 ## k-mer co-occurrence statistics ### {#kmer-cooc-stats}
 
-**Table:** sequence k-mer co-occurence statistics (Jaccard index rank, k-mer 1,
+**Table:** sequence k-mer co-occurrence statistics (Jaccard index rank, k-mer 1,
 k-mer 2, Jaccard index score, k-mer 1 score, k-mer 2 score, mean minimum distance
 of k-mers on sequences containing both k-mers with standard deviation, number
 of intersections (sequences containing both k-mers), size of union of sequences
 containing the two k-mers).
 Entries are sorted by the Jaccard index of the two k-mers (where set is defined
-as the set of sequences containing the k-mer). Only k-mers with scores > 0
-are shown in the table.
+as the set of sequences containing the k-mer). Only the top %i k-mer pairs
+are shown, with a minimum Jaccard index of %s and a minimum k-mer score of
+%s.
 
-"""
+""" %(kmer_top_n, str(min_jacc_sc), str(min_kmer_score))
 
         mdtext += "| Jaccard rank | &nbsp; k-mer 1 &nbsp; |  &nbsp; k-mer 2 &nbsp; | Jaccard index score | k-mer 1 score | k-mer 2 score | mean minimum distance (+- stdev) | # intersections | # union | \n"
         mdtext += "| :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | \n"
@@ -7888,6 +7891,8 @@ are shown in the table.
         kmers2sumsc_dic = {}
         for kmers, jacc_idx in sorted(jacc_scores_dic.items(), key=lambda item: item[1], reverse=True):
             jacc_rank += 1
+            if jacc_rank > kmer_top_n:
+                break
             kmer1 = jacc_stats_dic[kmers][0]
             kmer2 = jacc_stats_dic[kmers][1]
             kmer1_sc = jacc_stats_dic[kmers][2]
@@ -7898,30 +7903,7 @@ are shown in the table.
             min_dist_stdev = jacc_stats_dic[kmers][6]
             c_intersects = jacc_stats_dic[kmers][7]
             c_union = jacc_stats_dic[kmers][8]
-            mdtext += "| %i | %s | %s | %s | %s | %s | %s (+- %s) | %i | %i |\n" %(jacc_rank, kmer1, kmer2, str(jacc_idx), str(kmer1_sc), str(kmer2_sc), min_dist_mean, min_dist_stdev, c_intersects, c_union)
-        mdtext += "\n&nbsp;\n&nbsp;\n"
-
-        # k-mer co-occurrence statistics table for onlyseq sorted by sum_sc.
-        mdtext += """
-**Table:** sequence k-mer co-occurence statistics sorted by sum of the two
-sequence k-mer scores (instead of sort by Jaccard index in table above).
-
-"""
-        mdtext += "| Score sum rank | &nbsp; k-mer 1 &nbsp; |  &nbsp; k-mer 2 &nbsp; | Jaccard index score | k-mer 1 score | k-mer 2 score | mean minimum distance (+- stdev) | # intersections | # union | \n"
-        mdtext += "| :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | \n"
-        sum_rank = 0
-        for kmers, sum_sc in sorted(kmers2sumsc_dic.items(), key=lambda item: item[1], reverse=True):
-            sum_rank += 1
-            jacc_idx = jacc_scores_dic[kmers]
-            kmer1 = jacc_stats_dic[kmers][0]
-            kmer2 = jacc_stats_dic[kmers][1]
-            kmer1_sc = jacc_stats_dic[kmers][2]
-            kmer2_sc = jacc_stats_dic[kmers][3]
-            min_dist_mean = jacc_stats_dic[kmers][5]
-            min_dist_stdev = jacc_stats_dic[kmers][6]
-            c_intersects = jacc_stats_dic[kmers][7]
-            c_union = jacc_stats_dic[kmers][8]
-            mdtext += "| %i | %s | %s | %s | %s | %s | %s (+- %s) | %i | %i |\n" %(sum_rank, kmer1, kmer2, str(jacc_idx), str(kmer1_sc), str(kmer2_sc), min_dist_mean, min_dist_stdev, c_intersects, c_union)
+            mdtext += "| %i | %s | %s | %.6f | %.6f | %.6f | %.6f (+- %.6f) | %i | %i |\n" %(jacc_rank, kmer1, kmer2, jacc_idx, kmer1_sc, kmer2_sc, min_dist_mean, min_dist_stdev, c_intersects, c_union)
         mdtext += "\n&nbsp;\n&nbsp;\n"
 
         if lookup_kmer:
@@ -7941,17 +7923,20 @@ count rank) for lookup k-mer %s.
             lk_sc = kmer2sc_dic[lookup_kmer]
             lk_count_rank = kmer2rank_dic[lookup_kmer]
             lk_count = kmer2c_dic[lookup_kmer]
-            mdtext += "| %i | %s | %s | %i | %i |\n" %(lk_sc_rank, lookup_kmer, str(lk_sc), lk_count, lk_count_rank)
+            mdtext += "| %i | %s | %.6f | %i | %i |\n" %(lk_sc_rank, lookup_kmer, lk_sc, lk_count, lk_count_rank)
             mdtext += "\n&nbsp;\n&nbsp;\n"
 
             # Lookup k-mer co-occurrence statistics table for onlyseq.
             mdtext += """
 ## Lookup k-mer co-occurrence statistics ### {#lookup-kmer-cooc-stats}
 
-**Table:** Lookup sequence k-mer co-occurence statistics.
+**Table:** Lookup sequence k-mer co-occurrence statistics.
 Entries are sorted by the Jaccard index of the two k-mers.
+Only the top %i k-mer pairs are shown, with a minimum Jaccard index
+of %s and a minimum k-mer score of %s.
 
-"""
+""" %(kmer_top_n, str(min_jacc_sc), str(min_kmer_score))
+
             mdtext += "| Jaccard rank | &nbsp; k-mer 1 &nbsp; |  &nbsp; k-mer 2 &nbsp; | Jaccard index score | k-mer 1 score | k-mer 2 score | mean minimum distance (+- stdev) | # intersections | # union | \n"
             mdtext += "| :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | \n"
             jacc_rank = 0
@@ -7970,32 +7955,7 @@ Entries are sorted by the Jaccard index of the two k-mers.
                 min_dist_stdev = jacc_stats_dic[kmers][6]
                 c_intersects = jacc_stats_dic[kmers][7]
                 c_union = jacc_stats_dic[kmers][8]
-                mdtext += "| %i | %s | %s | %s | %s | %s | %s (+- %s) | %i | %i |\n" %(jacc_rank, kmer1, kmer2, str(jacc_idx), str(kmer1_sc), str(kmer2_sc), min_dist_mean, min_dist_stdev, c_intersects, c_union)
-            mdtext += "\n&nbsp;\n&nbsp;\n"
-
-            # Lookup k-mer co-occurrence statistics table for onlyseq sorted by sum_sc.
-            mdtext += """
-**Table:** Lookup k-mer co-occurence statistics sorted by sum of the two
-sequence k-mer scores (instead of sort by Jaccard index in table above).
-
-"""
-            mdtext += "| Score sum rank | &nbsp; k-mer 1 &nbsp; |  &nbsp; k-mer 2 &nbsp; | Jaccard index score | k-mer 1 score | k-mer 2 score | mean minimum distance (+- stdev) | # intersections | # union | \n"
-            mdtext += "| :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | \n"
-            sum_rank = 0
-            for kmers, sum_sc in sorted(kmers2sumsc_dic.items(), key=lambda item: item[1], reverse=True):
-                sum_rank += 1
-                jacc_idx = jacc_scores_dic[kmers]
-                kmer1 = jacc_stats_dic[kmers][0]
-                kmer2 = jacc_stats_dic[kmers][1]
-                if kmer1 != lookup_kmer and kmer2 != lookup_kmer:
-                    continue
-                kmer1_sc = jacc_stats_dic[kmers][2]
-                kmer2_sc = jacc_stats_dic[kmers][3]
-                min_dist_mean = jacc_stats_dic[kmers][5]
-                min_dist_stdev = jacc_stats_dic[kmers][6]
-                c_intersects = jacc_stats_dic[kmers][7]
-                c_union = jacc_stats_dic[kmers][8]
-                mdtext += "| %i | %s | %s | %s | %s | %s | %s (+- %s) | %i | %i |\n" %(sum_rank, kmer1, kmer2, str(jacc_idx), str(kmer1_sc), str(kmer2_sc), min_dist_mean, min_dist_stdev, c_intersects, c_union)
+                mdtext += "| %i | %s | %s | %.6f | %.6f | %.6f | %.6f (+- %.6f) | %i | %i |\n" %(jacc_rank, kmer1, kmer2, jacc_idx, kmer1_sc, kmer2_sc, min_dist_mean, min_dist_stdev, c_intersects, c_union)
             mdtext += "\n&nbsp;\n&nbsp;\n"
 
     else:
@@ -8107,16 +8067,17 @@ also shown.
         mdtext += """
 ## k-mer co-occurrence statistics ### {#kmer-cooc-stats}
 
-**Table:** sequence k-mer co-occurence statistics with additional features
+**Table:** sequence k-mer co-occurrence statistics with additional features
 (Jaccard index rank, k-mer 1, k-mer 2, Jaccard index score, best k-mer 1 score,
 best k-mer 2 score, mean minimum distance of k-mers on sequences containing both
 k-mers with standard deviation, number of intersections (sequences containing
 both k-mers), size of union of sequences containing the two k-mers).
 Entries are sorted by the Jaccard index of the two k-mers (where set is defined
-as the set of sequences containing the k-mer). Only k-mers with best scores > 0
-are shown in the table.
+as the set of sequences containing the k-mer). Only the top %i k-mer pairs
+are shown, with a minimum Jaccard index of %s and a minimum k-mer score of
+%s.
 
-"""
+""" %(kmer_top_n, str(min_jacc_sc), str(min_kmer_score))
 
         mdtext += "| Jaccard rank | &nbsp; k-mer 1 &nbsp; |  &nbsp; k-mer 2 &nbsp; | Jaccard index score | k-mer 1 score | k-mer 2 score | mean minimum distance (+- stdev) | # intersections | # union | \n"
         mdtext += "| :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | \n"
@@ -8124,6 +8085,8 @@ are shown in the table.
         kmers2sumsc_dic = {}
         for kmers, jacc_idx in sorted(jacc_scores_dic.items(), key=lambda item: item[1], reverse=True):
             jacc_rank += 1
+            if jacc_rank > kmer_top_n:
+                break
             kmer1 = jacc_stats_dic[kmers][0]
             kmer2 = jacc_stats_dic[kmers][1]
             kmer1_sc = jacc_stats_dic[kmers][2]
@@ -8134,31 +8097,7 @@ are shown in the table.
             min_dist_stdev = jacc_stats_dic[kmers][6]
             c_intersects = jacc_stats_dic[kmers][7]
             c_union = jacc_stats_dic[kmers][8]
-            mdtext += "| %i | %s | %s | %s | %s | %s | %s (+- %s) | %i | %i |\n" %(jacc_rank, kmer1, kmer2, str(jacc_idx), str(kmer1_sc), str(kmer2_sc), min_dist_mean, min_dist_stdev, c_intersects, c_union)
-        mdtext += "\n&nbsp;\n&nbsp;\n"
-
-        # k-mer co-occurrence statistics table for additional features sorted by sum_sc.
-        mdtext += """
-**Table:** sequence k-mer co-occurence statistics with additional features,
-sorted by sum of the two best k-mer scores (instead of sort by Jaccard index
-in table above).
-
-"""
-        mdtext += "| Score sum rank | &nbsp; k-mer 1 &nbsp; |  &nbsp; k-mer 2 &nbsp; | Jaccard index score | k-mer 1 score | k-mer 2 score | mean minimum distance (+- stdev) | # intersections | # union | \n"
-        mdtext += "| :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | \n"
-        sum_rank = 0
-        for kmers, sum_sc in sorted(kmers2sumsc_dic.items(), key=lambda item: item[1], reverse=True):
-            sum_rank += 1
-            jacc_idx = jacc_scores_dic[kmers]
-            kmer1 = jacc_stats_dic[kmers][0]
-            kmer2 = jacc_stats_dic[kmers][1]
-            kmer1_sc = jacc_stats_dic[kmers][2]
-            kmer2_sc = jacc_stats_dic[kmers][3]
-            min_dist_mean = jacc_stats_dic[kmers][5]
-            min_dist_stdev = jacc_stats_dic[kmers][6]
-            c_intersects = jacc_stats_dic[kmers][7]
-            c_union = jacc_stats_dic[kmers][8]
-            mdtext += "| %i | %s | %s | %s | %s | %s | %s (+- %s) | %i | %i |\n" %(sum_rank, kmer1, kmer2, str(jacc_idx), str(kmer1_sc), str(kmer2_sc), min_dist_mean, min_dist_stdev, c_intersects, c_union)
+            mdtext += "| %i | %s | %s | %.6f | %.6f | %.6f | %.6f (+- %.6f) | %i | %i |\n" %(jacc_rank, kmer1, kmer2, jacc_idx, kmer1_sc, kmer2_sc, min_dist_mean, min_dist_stdev, c_intersects, c_union)
         mdtext += "\n&nbsp;\n&nbsp;\n"
 
         if lookup_kmer:
@@ -8198,13 +8137,15 @@ count rank) for lookup k-mer %s and training data with additional features.
             mdtext += """
 ## Lookup k-mer co-occurrence statistics ### {#lookup-kmer-cooc-stats}
 
-**Table:** Lookup k-mer co-occurence statistics for for lookup k-mer %s and
+**Table:** Lookup k-mer co-occurrence statistics for for lookup k-mer %s and
 training data with additional features.
 Entries are sorted by the Jaccard index of the two k-mers. The Jaccard index of
 two k-mers is calculated based on the two sequence sets that contain the
 two k-mers, with each sequence ID being a set member. Scores are best k-mer scores.
+Only the top %i k-mer pairs including %s are shown, with a minimum Jaccard index
+of %s and a minimum k-mer score of %s.
 
-""" %(lookup_kmer)
+""" %(lookup_kmer, lookup_kmer, kmer_top_n, str(min_jacc_sc), str(min_kmer_score))
 
             mdtext += "| Jaccard rank | &nbsp; k-mer 1 &nbsp; |  &nbsp; k-mer 2 &nbsp; | Jaccard index score | k-mer 1 score | k-mer 2 score | mean minimum distance (+- stdev) | # intersections | # union | \n"
             mdtext += "| :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | \n"
@@ -8212,6 +8153,8 @@ two k-mers, with each sequence ID being a set member. Scores are best k-mer scor
             kmers2sumsc_dic = {}
             for kmers, jacc_idx in sorted(jacc_scores_dic.items(), key=lambda item: item[1], reverse=True):
                 jacc_rank += 1
+                if jacc_rank > kmer_top_n:
+                    break
                 kmer1 = jacc_stats_dic[kmers][0]
                 kmer2 = jacc_stats_dic[kmers][1]
                 if kmer1 != lookup_kmer and kmer2 != lookup_kmer:
@@ -8224,33 +8167,7 @@ two k-mers, with each sequence ID being a set member. Scores are best k-mer scor
                 min_dist_stdev = jacc_stats_dic[kmers][6]
                 c_intersects = jacc_stats_dic[kmers][7]
                 c_union = jacc_stats_dic[kmers][8]
-                mdtext += "| %i | %s | %s | %s | %s | %s | %s (+- %s) | %i | %i |\n" %(jacc_rank, kmer1, kmer2, str(jacc_idx), str(kmer1_sc), str(kmer2_sc), min_dist_mean, min_dist_stdev, c_intersects, c_union)
-            mdtext += "\n&nbsp;\n&nbsp;\n"
-
-        # k-mer co-occurrence statistics table for additional features sorted by sum_sc.
-        mdtext += """
-**Table:** Lookup k-mer co-occurence statistics for for lookup k-mer %s and
-training data with additional features. The sum of the two best k-mer scores
-(instead of sort by Jaccard index in table above) is used for sorting.
-
-"""
-            mdtext += "| Score sum rank | &nbsp; k-mer 1 &nbsp; |  &nbsp; k-mer 2 &nbsp; | Jaccard index score | k-mer 1 score | k-mer 2 score | mean minimum distance (+- stdev) | # intersections | # union | \n"
-            mdtext += "| :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | \n"
-            sum_rank = 0
-            for kmers, sum_sc in sorted(kmers2sumsc_dic.items(), key=lambda item: item[1], reverse=True):
-                sum_rank += 1
-                jacc_idx = jacc_scores_dic[kmers]
-                kmer1 = jacc_stats_dic[kmers][0]
-                kmer2 = jacc_stats_dic[kmers][1]
-                if kmer1 != lookup_kmer and kmer2 != lookup_kmer:
-                    continue
-                kmer1_sc = jacc_stats_dic[kmers][2]
-                kmer2_sc = jacc_stats_dic[kmers][3]
-                min_dist_mean = jacc_stats_dic[kmers][5]
-                min_dist_stdev = jacc_stats_dic[kmers][6]
-                c_intersects = jacc_stats_dic[kmers][7]
-                c_union = jacc_stats_dic[kmers][8]
-                mdtext += "| %i | %s | %s | %s | %s | %s | %s (+- %s) | %i | %i |\n" %(sum_rank, kmer1, kmer2, str(jacc_idx), str(kmer1_sc), str(kmer2_sc), min_dist_mean, min_dist_stdev, c_intersects, c_union)
+                mdtext += "| %i | %s | %s | %.6f | %.6f | %.6f | %.6f (+- %.6f) | %i | %i |\n" %(jacc_rank, kmer1, kmer2, jacc_idx, kmer1_sc, kmer2_sc, min_dist_mean, min_dist_stdev, c_intersects, c_union)
             mdtext += "\n&nbsp;\n&nbsp;\n"
 
     """
@@ -8260,8 +8177,6 @@ training data with additional features. The sum of the two best k-mer scores
 
     if add_ws_scores:
 
-        mdtext += "\n"
-        mdtext += "- [Model comparison](#model-comp-plot)"
         x_label = "Model 1 score"
         y_label = "Model 2 score"
         print("Generate --train-in vs --add-train-in model comparison plot ... ")
@@ -8280,7 +8195,7 @@ and the two model scores are displayed as a scatter plot. More similar
 models should show higher correlation, resulting in a higher R2 score
 (coeffient of determination).
 
-""" %(kmer_size)
+"""
         mdtext += '<img src="' + plot_path + '" alt="model comparison plot"' + "\n"
         mdtext += 'title="model comparison plot" width="500" />' + "\n"
         mdtext += """
@@ -9667,7 +9582,7 @@ def get_min_hit_end_distance(l1, l2):
 
 ################################################################################
 
-def get_kmer_hit_ends(seq,kmer):
+def get_kmer_hit_ends(seq, kmer):
     """
     Given a sequence and a k-mer, return match end positions (1-based) of k-mer
     in sequence. If not hits, return empty list.
@@ -10527,11 +10442,11 @@ def load_eval_data(args,
 
     # Return some double talking jive data.
     if return_graphs:
-        assert all_features, "all_features empty"
-        return seqs_dic, idx2id_dic, all_features, ch_info_dic
-    else:
         assert all_graphs, "all_graphs empty"
         return seqs_dic, idx2id_dic, all_graphs, ch_info_dic
+    else:
+        assert all_features, "all_features empty"
+        return seqs_dic, idx2id_dic, all_features, ch_info_dic
 
 
 ################################################################################
@@ -15559,7 +15474,7 @@ def drop_a_line():
            \"There's always barber college.\"
 """
 
-    lines.append(a)
+    #lines.append(a)
     lines.append(b)
     lines.append(c)
     lines.append(d)

@@ -145,16 +145,11 @@ def setup_argument_parser():
     # Add advanced model definition arguments group.
     p_tra = p_tr.add_argument_group("model definition arguments")
     # Optional arguments for train.
-    p_tra.add_argument("--undirected",
-                   dest = "undirected",
-                   default = False,
-                   action = "store_true",
-                   help = "Use undirected graphs for model training. By default directed graphs are used (5' to 3' direction) (default: False)")
     p_tra.add_argument("--gen-cv",
                    dest = "gen_cv",
                    default = False,
                    action = "store_true",
-                   help = "Run cross validation in combination with hyperparameter optimization to evaluate generalization performance (default: False)")
+                   help = "Run cross validation in combination with hyperparameter optimization to evaluate model generalization performance (default: False)")
     p_tra.add_argument("--gen-cv-k",
                    dest="gen_cv_k",
                    type = int,
@@ -188,6 +183,22 @@ def setup_argument_parser():
                    default = False,
                    action = "store_true",
                    help = "Plot learning curves (training vs validation loss) for each tested hyperparameter combination (default: False)")
+    p_tra.add_argument("--undirected",
+                   dest = "undirected",
+                   default = False,
+                   action = "store_true",
+                   help = "Use undirected graphs for model training. By default directed graphs are used (5' to 3' direction) (default: False)")
+    p_tra.add_argument("--nr-hidden-layers",
+                   dest = "nr_hidden_layers",
+                   type = int,
+                   default = 4,
+                   choices = [3,4,5],
+                   help="Number of hidden graph convolution layers (default: 4)")
+    p_tra.add_argument("--disable-gap",
+                   dest = "disable_gap",
+                   default = False,
+                   action = "store_true",
+                   help = "Disable global add pool (default: False)")
     p_tra.add_argument("--list-batch-size",
                    dest="list_batch_size",
                    type = int,
@@ -246,17 +257,6 @@ def setup_argument_parser():
                    nargs='+',
                    default=[0.2],
                    help="List of dropout rates for hyperparameter optimization (default: 0.2 (for --undirected 0.3))")
-    p_tra.add_argument("--disable-gap",
-                   dest = "disable_gap",
-                   default = False,
-                   action = "store_true",
-                   help = "Disable global add pool (default: False)")
-    p_tra.add_argument("--nr-hidden-layers",
-                   dest = "nr_hidden_layers",
-                   type = int,
-                   default = 4,
-                   choices = [3,4,5],
-                   help="Number of hidden graph convolution layers (default: 4)")
 
     """
     Model evaluation mode.
@@ -328,17 +328,18 @@ def setup_argument_parser():
     p_ev.add_argument("--kmer-size",
                    dest="kmer_size",
                    type = int,
-                   default = 5,
+                   default = 6,
                    metavar='int',
                    help = "Size (length) of k-mers to extract for --report (default: 5)")
     p_ev.add_argument("--lookup-kmer",
                    dest="lookup_kmer",
                    type=str,
                    metavar='str',
-                   help = "Provide RNA k-mer of size --kmer-size to look up and return score and motif (if found in sequences, no plot if --only-seq)")
+                   help = "Provide RNA k-mer of size --kmer-size to look up and return stats and motif (if found in sequences, no plot if --only-seq)")
     p_ev.add_argument("--add-train-in",
                    dest="add_train_folder",
                    type=str,
+                   metavar='str',
                    default = False,
                    help = "Second model training folder (output of graphprot2 train) for plotting prediction scores of both models on --gt-in positive dataset. Note that if dataset features of the two models are not identical, comparison might be less informative")
     p_ev.add_argument("--theme",
@@ -1504,13 +1505,14 @@ def main_train(args):
 
 def main_eval(args):
     """
-    Evaluate properties learned from positive binding sites.
+    Evaluate model properties using the training set.
 
     """
 
     print("Running for you in EVAL mode ... ")
 
     assert os.path.isdir(args.in_train_folder), "--train-in folder does not exist"
+
     # Model + model parameter file.
     params_file = args.in_train_folder + "/final.params"
     model_file = args.in_train_folder + "/final.model"
@@ -1564,9 +1566,9 @@ def main_eval(args):
     args.undirected = False
     if params_dic["undirected"] == "True":
         undirected = True
-        args.undirected = False
+        args.undirected = True
     onlyseq = False
-    if args.num_features == 4
+    if args.num_features == 4:
         onlyseq = True
 
     # Get graphprot2 train parameters for additional checks.
@@ -1610,6 +1612,7 @@ def main_eval(args):
             assert len(args.lookup_kmer) == args.kmer_size, "--lookup-kmer length needs to be == --kmer-size"
     else:
         assert not args.lookup_kmer, "--lookup-kmer requires --report to be set"
+        assert not args.add_train_folder, "--add-train-in requires --report to be set"
 
     # Window extension from center left and right.
     win_extlr = int(args.win_size/2)
@@ -1667,7 +1670,7 @@ def main_eval(args):
                                                              undirected=undirected,
                                                              str_elem_1h=str_elem_1h)
     l_dataset = len(all_features)
-    print("Dataset size:          %i" %(l_dataset))
+    print("Positive set size:     %i" %(l_dataset))
 
     # Check sequence size vs set window size.
     min_seq_len = 66666666
@@ -1771,12 +1774,11 @@ def main_eval(args):
         neg_ws_scores = model_util.get_scores(predict_loader, device, model,
                                               min_max_norm=True)
         # Checks.
+        assert neg_ws_scores, "neg_ws_scores empty"
         c_all_neg_graphs = len(all_neg_graphs)
-        assert c_all_graphs == c_all_neg_graphs, "c_all_graphs != c_all_neg_graphs (%i != %i)" %(c_all_graphs, c_all_neg_graphs)
-
-    # More.
-    if neg_ws_scores:
-        assert len(neg_ws_scores) == len(ws_scores), "len(neg_ws_scores) != len(ws_scores)"
+        c_neg_ws_scores = len(neg_ws_scores)
+        print("Negative set size:     %i" %(c_all_neg_graphs))
+        assert c_neg_ws_scores == c_all_neg_graphs, "c_neg_ws_scores != c_all_neg_graphs (%i != %i)" %(c_neg_ws_scores, c_all_neg_graphs)
 
     """
     Additional model given via --add-train-in
@@ -1969,6 +1971,22 @@ def main_eval(args):
         gi2sc_dic[i] = sc
     assert len(gi2sc_dic) == len(seqs_dic), "length gi2sc_dic != length seqs_dic"
 
+    # Print out two model scores stats.
+    if add_ws_scores:
+        print("Output whole-site scores for both models ... ")
+        two_model_scores_out = args.out_folder + "/two_model_scores.out"
+        TMOUT = open(two_model_scores_out, "w")
+        TMOUT.write("model1_score_rank\tsequence_id\tmodel1_score\tmodel2_score\tscore_diff\tsequence\n")
+        ws_sc_rank = 0
+        for gi, ws_sc in sorted(gi2sc_dic.items(), key=lambda item: item[1], reverse=True):
+            ws_sc_rank += 1
+            add_ws_sc = add_ws_scores[gi]
+            seq_id = idx2id_dic[gi]
+            seq = seqs_dic[seq_id]
+            abs_diff = abs(ws_sc - add_ws_sc)
+            TMOUT.write("%i\t%s\t%.6f\t%.6f\t%.6f\t%s\n" %(ws_sc_rank, seq_id, ws_sc, add_ws_sc, abs_diff, seq))
+        TMOUT.close()
+
     # For directed graphs, shift profiles to left.
     shift_profiles = False
     if shift_profiles:
@@ -2007,7 +2025,7 @@ def main_eval(args):
     win_info_st = "w%i" %(args.win_size)
 
     # Sort graphs by score to evaluate top sites.
-    rank_scores_out = args.out_folder + "/rank_score_sites.out"
+    rank_scores_out = args.out_folder + "/whole_site_scores.out"
     RSOUT = open(rank_scores_out, "w")
     site_count = 0
     id_i = 10 ** len(str(args.nr_top_profiles))
@@ -2051,7 +2069,7 @@ def main_eval(args):
         id2minpos_dic[seq_id] = min_pos
 
         # Store rank + site ID + score in file.
-        RSOUT.write("%i\t%s\t%f\n" %(site_count, seq_id, ws_sc))
+        RSOUT.write("%i\t%s\t%f\t%s\n" %(site_count, seq_id, ws_sc, seq))
 
         # Print only top --nr-top-profiles profiles.
         if site_count <= args.nr_top_profiles:
@@ -2351,7 +2369,7 @@ def main_eval(args):
     """
     lookup_kmer = False
     lookup_plot_file = False
-    c_top_kmers = 20
+    c_top_kmers = 25
 
     if args.report:
 
@@ -2370,6 +2388,8 @@ def main_eval(args):
         kmerseqid2hits_dic = {}
         # k-mer score stdev.
         kmer2scstdev_dic = {}
+        # Minimum k-mer score for Jaccard calculations.
+        min_kmer_score = 0.1
 
         print("--report set. Gather more results ... ")
         print("Score k-mers ... ")
@@ -2426,9 +2446,9 @@ def main_eval(args):
             for i,kmer in enumerate(kmer_list):
                 kmer_score = kmer_scores[i]
                 kmer2sc_dic[kmer] = kmer_score
-                if kmer_score > 0:
+                if kmer_score >= min_kmer_score:
                     kmer2seqids_dic[kmer] = []
-                if lookup_kmer:
+                if lookup_kmer and lookup_kmer == kmer:
                     kmer2seqids_dic[kmer] = []
             # Fill kmer2seqids_dic and store k-mer hit positions in sequences.
             for seq_id in seqs_dic:
@@ -2437,8 +2457,11 @@ def main_eval(args):
                     if re.search(kmer, seq):
                         kmer2seqids_dic[kmer].append(seq_id)
                         kmerseqid = "%s,%s" %(kmer,seq_id)
-                        hit_list = gp2lib.get_kmer_hit_ends(seq,kmer)
+                        hit_list = gp2lib.get_kmer_hit_ends(seq, kmer)
                         kmerseqid2hits_dic[kmerseqid] = hit_list
+
+            c_kmers_higher_zero = len(kmer2seqids_dic)
+            print("# k-mers with scores >= %s:  %i" %(str(min_kmer_score), c_kmers_higher_zero))
 
         else:
             # More features comin at ya.
@@ -2539,7 +2562,7 @@ def main_eval(args):
                         if win_kmer == lookup_kmer:
                             win_lookup_kmer = True
                     # Store sequence IDs for k-mers score > 0.
-                    if win_score > 0 or win_lookup_kmer:
+                    if win_score > min_kmer_score or win_lookup_kmer:
                         if win_kmer not in kmer2seqids_dic:
                             kmer2seqids_dic[win_kmer] = [seq_id]
                         else:
@@ -2586,8 +2609,11 @@ def main_eval(args):
                     for j in range(l_sv):
                         kmer2mm_dic[kmer][i][j] = kmer2mm_dic[kmer][i][j] / kmer_count
                 # Average k-mer score.
-                kmer_sc_avg = statistics.mean(kmer2sclist_dic[kmer])
-                kmer_sc_stdev = statistics.stdev(kmer2sclist_dic[kmer])
+                kmer_sc_avg = kmer2sclist_dic[kmer][0]
+                kmer_sc_stdev = 0.0
+                if len(kmer2sclist_dic[kmer]) > 1:
+                    kmer_sc_avg = statistics.mean(kmer2sclist_dic[kmer])
+                    kmer_sc_stdev = statistics.stdev(kmer2sclist_dic[kmer])
                 kmer2sc_dic[kmer] = kmer_sc_avg
                 kmer2scstdev_dic[kmer] = kmer_sc_stdev
                 # Calculate standard deviations for one-channel numerical features at each motif position.
@@ -2606,7 +2632,28 @@ def main_eval(args):
             kmer_rank += 1
             kmer2rank_dic[kmer] = kmer_rank
 
-        # Jaccard index calculation.
+        """
+        Jaccard index calculation.
+
+        len(kmer2seqids_dic) == number of k-mers with score > 0
+        Number of pairs to check:
+        n! / (n-k)! * k!
+        with n = 4^(kmer_size), e.g. kmer_size = 5, n = 1024,
+        and k = 2 (selecting two k-mers from n without replacement)
+        NOTE that in our case n is smaller since we only look at subset
+        of k-mers (e.g. ones with score > 0). Also some k-mers do not
+        have intersections (c_zero_intersects).
+        ALSO, not all k-mers might be present in the positive training set.
+
+        Could also be tried:
+        Simple matching coefficient:
+        https://en.wikipedia.org/wiki/Simple_matching_coefficient
+        https://en.wikipedia.org/wiki/Jaccard_index (Jaccard vs SMC difference described)
+
+        """
+        min_jacc_sc = 0.1
+
+        print("Calculate k-mer Jaccard index stats ... ")
         for kmer in kmer2seqids_dic:
             # Convert lists to sets.
             ids_list = kmer2seqids_dic[kmer]
@@ -2615,6 +2662,7 @@ def main_eval(args):
         kmer_pair_dic = {}
         jacc_scores_dic = {}
         jacc_stats_dic = {}
+        c_zero_intersects = 0
         for kmer1, ids1 in sorted(kmer2seqids_dic.items()):
             for kmer2, ids2 in sorted(kmer2seqids_dic.items()):
                 if kmer1 == kmer2:
@@ -2628,22 +2676,43 @@ def main_eval(args):
                 # Compare.
                 intersects = ids1.intersection(ids2)
                 if len(intersects) == 0:
+                    c_zero_intersects += 1
                     continue
                 # Jaccard index.
                 union = ids1.union(ids2)
                 c_intersects = len(intersects)
                 c_union = len(union)
                 jaccard_idx = float(c_intersects / c_union)
+                if jaccard_idx < min_jacc_sc:
+                    continue
                 min_dist_list = []
+
                 # Go over all sequences containing both to get min distances.
                 for seq_id in intersects:
                     kmer1sid = "%s,%s" %(kmer1,seq_id)
                     kmer2sid = "%s,%s" %(kmer2,seq_id)
                     min_dist = gp2lib.get_min_hit_end_distance(kmerseqid2hits_dic[kmer1sid],kmerseqid2hits_dic[kmer2sid])
                     min_dist_list.append(min_dist)
+
+                # Checks.
+                if not min_dist_list:
+                    print("ERROR: min_dist_list empty")
+                    print(kmer1, kmer2, jaccard_idx)
+                    print("Intersects were:")
+                    for seq_id in intersects:
+                        kmer1sid = "%s,%s" %(kmer1,seq_id)
+                        kmer2sid = "%s,%s" %(kmer2,seq_id)
+                        print(kmer1sid, kmerseqid2hits_dic[kmer1sid])
+                        print(kmer2sid, kmerseqid2hits_dic[kmer2sid])
+                        print("min_dist:", min_dist)
+                    sys.exit()
+
                 # Statistics.
-                min_dist_mean = statistics.mean(min_dist_list)
-                min_dist_stdev = statistics.stdev(min_dist_list)
+                min_dist_mean = min_dist_list[0]
+                min_dist_stdev = 0.0
+                if len(min_dist_list) != 1:
+                    min_dist_mean = statistics.mean(min_dist_list)
+                    min_dist_stdev = statistics.stdev(min_dist_list)
                 jacc_id = "%s,%s" %(kmer1,kmer2)
                 # k-mer scores.
                 kmer1_sc = kmer2sc_dic[kmer1]
@@ -2652,9 +2721,12 @@ def main_eval(args):
                     kmer1_sc = kmer2bestsc_dic[kmer1]
                     kmer2_sc = kmer2bestsc_dic[kmer2]
                 sum_sc = kmer1_sc + kmer2_sc
-                jacc_scores_dic[jacc_id] = sum_sc
+                jacc_scores_dic[jacc_id] = jaccard_idx
                 jacc_stats_dic[jacc_id] = [kmer1, kmer2, kmer1_sc, kmer2_sc, jaccard_idx, min_dist_mean, min_dist_stdev, c_intersects, c_union]
 
+        c_jacc_sc = len(jacc_scores_dic)
+        print("# k-mer pairs with intersections:     %i" %(c_jacc_sc))
+        print("# k-mer pairs without intersections:  %i" %(c_zero_intersects))
 
         """
         Output k-mer stats tables.
@@ -2663,9 +2735,12 @@ def main_eval(args):
         kmer2scrank_dic = {}
         kmer2avgscrank_dic = {}
         kmer_stats_out = motif_plots_folder + "/kmer_stats.out"
-        lookup_kmer_stats_out = motif_plots_folder + "/lookup_kmer_stats.out"
         KSOUT = open(kmer_stats_out, "w")
-        LKSOUT = open(lookup_kmer_stats_out, "w")
+        if lookup_kmer:
+            lookup_kmer_stats_out = motif_plots_folder + "/lookup_kmer_stats.out"
+            LKSOUT = open(lookup_kmer_stats_out, "w")
+            LKSOUT.write("score_rank\tkmer\tscore\tkmer_count\tcount_rank\n")
+
         if onlyseq:
             sc_rank = 0
             KSOUT.write("score_rank\tkmer\tscore\tkmer_count\tcount_rank\n")
@@ -2699,15 +2774,13 @@ def main_eval(args):
                 else:
                     KSOUT.write("%i\t%i\t%s\t%s\t%s\t%s\t%i\t%i\n" %(sc_rank, avg_sc_rank, kmer, str(sc), str(avg_sc), str(avg_sc_stdev), kmer_count, kmer_count_rank))
         KSOUT.close()
-        print("Output table file with k-mer statistics:\n%s" %(kmer_stats_out))
         if lookup_kmer:
-            print("Output table file with lookup k-mer statistics:\n%s" %(lookup_kmer_stats_out))
+            LKSOUT.close()
 
         # Plot / report lookup k-mer stats.
         lookup_plot_file = False
 
         if lookup_kmer and not onlyseq:
-            lookup_kmer_stats_out = motif_plots_folder + "/lookup_kmer_stats.out"
             lookup_plot_file = motif_plots_folder + "/" "lookup_" + lookup_kmer + "." + plot_format
             print("Plotting %s ... " %(lookup_plot_file))
             gp2lib.make_motif_plot(kmer2mm_dic[kmer], ch_info_dic, lookup_plot_file,
@@ -2719,8 +2792,6 @@ def main_eval(args):
         plots_subfolder = "html_plots"
         # Get library and logo path.
         gp2lib_path = os.path.dirname(gp2lib.__file__)
-        # Number of k-mer plots to generate.
-        top_kmer_plots = 25
         # Generate report.
         gp2lib.gp2_eval_generate_html_report(ws_scores, neg_ws_scores,
                                              args.out_folder, gp2lib_path,
@@ -2735,21 +2806,20 @@ def main_eval(args):
                                              kmer_stdev_dic=kmer_stdev_dic,
                                              kmer2bestmm_dic=kmer2bestmm_dic,
                                              kmer2c_dic=kmer2c_dic,
+                                             min_kmer_score=min_kmer_score,
+                                             min_jacc_sc=min_jacc_sc,
                                              kmer_size=args.kmer_size,
                                              ch_info_dic=ch_info_dic,
                                              top_motif_file_dic=top_motif_file_dic,
                                              bottom_motif_file_dic=bottom_motif_file_dic,
-                                             kmer_top_n=top_kmer_plots,
+                                             kmer_top_n=c_top_kmers,
                                              add_ws_scores=add_ws_scores,
-                                             model_file=model_file1,
-                                             add_model_file=model_file2,
                                              onlyseq=onlyseq,
                                              theme=args.theme,
-                                             lookup_kmer=False,
+                                             lookup_kmer=lookup_kmer,
                                              jacc_scores_dic=jacc_scores_dic,
                                              jacc_stats_dic=jacc_stats_dic,
-                                             plots_subfolder=plots_subfolder,
-                                             kmer_plots_folder=kmer_plots_folder)
+                                             plots_subfolder=plots_subfolder)
 
 
     print("")
@@ -2762,7 +2832,13 @@ def main_eval(args):
         for motif_out_file in bottom_motif_file_dic:
             print("Bottom motif plot:\n%s" %(motif_out_file))
             print("Bottom profile plots folder:\n%s" %(bottom_profiles_folder))
+    print("Whole-site scores output table file:\n%s" %(rank_scores_out))
+    if add_ws_scores:
+        print("Two model whole-site scores output table file:\n%s" %(two_model_scores_out))
     if args.report:
+        print("Output table file with k-mer statistics:\n%s" %(kmer_stats_out))
+        if lookup_kmer:
+                print("Output table file with lookup k-mer statistics:\n%s" %(lookup_kmer_stats_out))
         print("Model evaluation report .html:\n%s" %(html_report_out))
     if lookup_plot_file:
         print("Look-up k-mer %s plot:\n%s" %(lookup_kmer, lookup_plot_file))
