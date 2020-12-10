@@ -296,7 +296,9 @@ def train_final_model(args, n_features, train_dataset, train_epochs, device,
                       fc_hidden_dim=args.fc_hidden_dim,
                       out_dim=2).to(device)
     # Define optimizer.
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    #optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+
 
     for epoch in range(0, train_epochs):
         # Train network, going over whole dataset.
@@ -336,7 +338,8 @@ def train_default_hp_model(args, n_features, train_dataset,
                       dropout_rate=model_dr,
                       out_dim=2).to(device)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=model_lr, weight_decay=model_weight_decay)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=model_lr, weight_decay=model_weight_decay)
+    #optimizer = torch.optim.Adam(model.parameters(), lr=model_lr, weight_decay=model_weight_decay)
     best_train_loss = 1000000000.0
     best_train_acc = 0
     best_train_auc = 0
@@ -420,7 +423,8 @@ def select_model(args, n_features, train_dataset, val_dataset,
                                           dropout_rate=dr,
                                           out_dim=2).to(device)
 
-                        optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+                        #optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+                        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
                         best_val_loss = 1000000000.0
                         best_val_acc = 0
                         best_val_auc = 0
