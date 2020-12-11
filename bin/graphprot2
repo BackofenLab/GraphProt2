@@ -607,8 +607,8 @@ def setup_argument_parser():
                    help = "Add base pairs and position-wise structural elements probabilities features (calculate with RNAplfold) (default: False)")
     p_gta.add_argument("--bp-in",
                    dest="bp_in",
-                   default = False,
-                   action = "store_true",
+                   type=str,
+                   metavar='str',
                    help = "Supply a custom base pair annotation file for all --in sites. This disables base pair calculation for the positive set (default: False)")
     p_gta.add_argument("--plfold-u",
                    dest="plfold_u",
@@ -724,11 +724,26 @@ def setup_argument_parser():
                    type=str,
                    metavar='str',
                    help = "Supply file with transcript IDs (one ID per row) for exon-intron labeling (using the corresponding exon regions from --gtf). By default, exon regions of the most prominent transcripts (automatically selected from --gtf) are used (default: False)")
+    p_gpa.add_argument("--phastcons",
+                   dest="pc_bw",
+                   type=str,
+                   metavar='str',
+                   help = "Genomic .bigWig file with phastCons conservation scores to add as annotations")
+    p_gpa.add_argument("--phylop",
+                   dest="pp_bw",
+                   type=str,
+                   metavar='str',
+                   help = "Genomic .bigWig file with phyloP conservation scores to add as annotations")
     p_gpa.add_argument("--feat-in",
                    dest="feat_in",
                    type=str,
                    metavar='str',
-                   help = "Provide tabular file with additional position-wise genomic region features (infos and paths to BED files) to add")
+                   help = "Provide tabular file with additional position-wise genomic region features (infos and paths to BED files) to add. BE SURE to use the same file as used for generating the training dataset (graphprot2 gt --feat-in) for training the model from --train-in!")
+    p_gpa.add_argument("--bp-in",
+                   dest="bp_in",
+                   type=str,
+                   metavar='str',
+                   help = "Supply a custom base pair annotation file for all --in sites. This disables base pair calculation for --in sites (default: False)")
     p_gpa.add_argument("--bps-prob-cutoff",
                    dest = "bps_cutoff",
                    type = float,
@@ -736,6 +751,7 @@ def setup_argument_parser():
                    default = 0.5,
                    help = "Base pair probability cutoff for filtering base pairs added to the test graphs (default: use cutoff info from --train-in)")
     return p
+
 
 ################################################################################
 
@@ -3536,6 +3552,8 @@ def main_gt(args):
     # Custom base pairs check.
     if args.bp_in:
         assert args.add_str, "--bp-in requires --str to be set for structure calculation"
+    else:
+        args.bp_in = False
     # Silence con_ext options.
     args.con_ext = False
     args.pre_con_ext_merge = False
@@ -5194,155 +5212,122 @@ def main_gp(args):
     f.closed
     assert train_fid_dic, "train_fid_dic empty"
     assert "fa" in train_fid_dic, "sequence feature \"fa\" missing in %s" %(gp2_train_features_file)
+
+    # Additional feature file.
+    feat_in_file = False
+    if args.feat_in:
+        assert os.path.exists(args.feat_in), "provided --feat-in file not found"
+        if train_settings_dic["feat_in"] != "None":
+            if os.path.exists(train_settings_dic["feat_in"]):
+                print("WARNING: previous --feat-in file path found in --train-in, but will be overwritten by set --feat-in")
+        feat_in_file = args.feat_in
+    else:
+        if train_settings_dic["feat_in"] != "None":
+            if os.path.exists(train_settings_dic["feat_in"]):
+                feat_in_file = train_settings_dic["feat_in"]
+    # Get additional feature IDs.
+    add_fid_dic = {}
+    if feat_in_file:
+        with open(feat_in_file) as f:
+            for line in f:
+                row = line.strip()
+                cols = line.strip().split("\t")
+                feat_id = cols[0]
+                add_fid_dic[feat_id] = 1
+        f.closed
+
+    # Region features.
+    args.exon_intron_annot = False
+    args.intron_border_annot = False
+    args.exon_intron_n = False
+    args.tr_reg_annot = False
+    args.tr_reg_codon_annot = False
+    args.tr_reg_border_annot = False
+    args.rep_reg_annot = False
+    # Structure features.
+    args.plfold_u = None
+    args.plfold_l = None
+    args.plfold_w = None
+    args.add_str = False
+
     onlyseq = False
     if len(train_fid_dic) == 1:
         onlyseq = True
+    else:
+        # Check for GTF and genome file.
+        if "in_gtf" in train_settings_dic:
+            assert os.path.exists(train_settings_dic["in_gtf"]), "please provide a GTF file via --gtf (ideally the same that was used to generate training data for training model from --train-in)"
+            args.in_gtf = train_settings_dic["in_gtf"]
+            print("Using --gtf file specified in --train-in ... ")
+        if "in_2bit" in train_settings_dic:
+            assert os.path.exists(train_settings_dic["in_2bit"]), "please provide a genomic 2.bit file via --gen (ideally the same that was used to generate training data for training model from --train-in)"
+            args.in_2bit = train_settings_dic["in_2bit"]
+            print("Using --gen file specified in --train-in ... ")
 
-    # Go over each feature and set args / check for input.
-
-"""
-
-fa	C	A,C,G,U	-
-pc.con	N	phastcons_score	prob
-pp.con	N	phylop_score	minmax2
-eia	C	E,I	-
-
-exon_intron_annot
-intron_border_annot
-exon_intron_n
-tr_list
-pc_bw
-pp_bw
-tr_reg_annot
-tr_reg_codon_annot
-tr_reg_border_annot
-rep_reg_annot
-add_str
-bp_in
-plfold_u
-plfold_l
-plfold_w
-"""
-
-
-
-
-
-    # Check for important settings.
-    assert "only_seq" in train_settings_dic, "only_seq info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "use_pc_con" in train_settings_dic, "use_pc_con info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "use_pp_con" in train_settings_dic, "use_pp_con info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "use_eia" in train_settings_dic, "use_eia info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "use_tra" in train_settings_dic, "use_tra info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "use_rra" in train_settings_dic, "use_rra info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "use_str_elem_p" in train_settings_dic, "use_str_elem_p info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "use_bps" in train_settings_dic, "use_bps info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "use_add_feat" in train_settings_dic, "use_add_feat info missing in --train-in settings file %s" %(train_settings_dic)
-    # Settings ported over from gp2 gt.
-    assert "in_gtf" in train_settings_dic, "in_gtf info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "in_2bit" in train_settings_dic, "in_2bit info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "tr_list" in train_settings_dic, "tr_list info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "pc_bw" in train_settings_dic, "pc_bw info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "pp_bw" in train_settings_dic, "pp_bw info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "bp_in" in train_settings_dic, "bp_in info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "feat_in" in train_settings_dic, "feat_in info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "feat_in_1h" in train_settings_dic, "feat_in_1h info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "feat_in_norm" in train_settings_dic, "feat_in_norm info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "plfold_u" in train_settings_dic, "plfold_u info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "plfold_l" in train_settings_dic, "plfold_l info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "plfold_w" in train_settings_dic, "plfold_w info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "exon_intron_annot" in train_settings_dic, "exon_intron_annot info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "intron_border_annot" in train_settings_dic, "intron_border_annot info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "exon_intron_n" in train_settings_dic, "exon_intron_n info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "eia_all_ex" in train_settings_dic, "eia_all_ex info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "tr_reg_annot" in train_settings_dic, "tr_reg_annot info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "tr_reg_codon_annot" in train_settings_dic, "tr_reg_codon_annot info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "tr_reg_border_annot" in train_settings_dic, "tr_reg_border_annot info missing in --train-in settings file %s" %(train_settings_dic)
-    assert "str_elem_1h" in train_settings_dic, "str_elem_1h info missing in --train-in settings file %s" %(train_settings_dic)
-
-    # Assign feature selection to args.
-    args.only_seq = False
-    args.use_pc_con = False
-    args.use_pp_con = False
-    args.use_eia = False
-    args.use_tra = False
-    args.use_rra = False
-    args.use_str_elem_p = False
-    args.use_bps = False
-    args.use_add_feat = False
-    if train_settings_dic["only_seq"] == "True":
-        args.only_seq = True
-    if train_settings_dic["use_pc_con"] == "True":
-        args.use_pc_con = True
-    if train_settings_dic["use_pp_con"] == "True":
-        args.use_pp_con = True
-    if train_settings_dic["use_eia"] == "True":
-        args.use_eia = True
-    if train_settings_dic["use_tra"] == "True":
-        args.use_tra = True
-    if train_settings_dic["use_rra"] == "True":
-        args.use_rra = True
-    if train_settings_dic["use_str_elem_p"] == "True":
-        args.use_str_elem_p = True
-    if train_settings_dic["use_bps"] == "True":
-        args.use_bps = True
-    if train_settings_dic["use_add_feat"] == "True":
-        args.use_add_feat = True
-    # To check for additional features.
-    indiv_feat_check = args.use_pc_con + args.use_pp_con + args.use_eia + args.use_tra + args.use_rra + args.use_str_elem_p + args.use_bps + args.use_add_feat
-
-    # Select features with which --train-in model was trained.
-    args.add_str = False
-    if train_settings_dic["use_bps"] == "True" or train_settings_dic["use_str_elem_p"] == "True":
-        args.add_str = True
-
-
-
-    """
-    gp settings:
-    in_gtf
-    in_2bit
-    mode
-    seq_ext
-    keep_ids
-    gene_filter
-    report
-    theme
-    tr_list
-    feat_in
-    bps_cutoff
-
-    """
-    onlyseq = False
-    args.only_seq = False
-    if train_settings_dic["only_seq"] == "True":
-        args.only_seq = True
-        onlyseq = True
-
-
-    if os.path.exists(train_settings_dic["in_gtf"]):
-        print("Using --gtf ")
-
-    args.in_gtf = gt_settings_dic["in_gtf"]
-    args.in_2bit = gt_settings_dic["in_2bit"]
-    args.tr_list = gt_settings_dic["tr_list"]
-    args.pc_bw = gt_settings_dic["pc_bw"]
-    args.pp_bw = gt_settings_dic["pp_bw"]
-    args.bp_in = gt_settings_dic["bp_in"]
-    args.feat_in = gt_settings_dic["feat_in"]
-    args.feat_in_1h = gt_settings_dic["feat_in_1h"]
-    args.feat_in_norm = gt_settings_dic["feat_in_norm"]
-    args.plfold_u = gt_settings_dic["plfold_u"]
-    args.plfold_l = gt_settings_dic["plfold_l"]
-    args.plfold_w = gt_settings_dic["plfold_w"]
-    args.exon_intron_annot = gt_settings_dic["exon_intron_annot"]
-    args.intron_border_annot = gt_settings_dic["intron_border_annot"]
-    args.exon_intron_n = gt_settings_dic["exon_intron_n"]
-    args.eia_all_ex = gt_settings_dic["eia_all_ex"]
-    args.tr_reg_annot = gt_settings_dic["tr_reg_annot"]
-    args.tr_reg_codon_annot = gt_settings_dic["tr_reg_codon_annot"]
-    args.tr_reg_border_annot = gt_settings_dic["tr_reg_border_annot"]
-
+    # Check features used to train model.
+    add_feat_found = False
+    std_feat_found = False
+    for fid in train_fid_dic:
+        if fid == "fa":
+            continue
+        if fid == "pc.bw":
+            std_feat_found = True
+            if not args.pc_bw:
+                assert os.path.exists(train_settings_dic["pc.bw"]), "please provide a --phastcons file (since model was trained on using phastCons conservation feature)"
+                args.pc_bw = train_settings_dic["pc.bw"]
+            else:
+                assert os.path.exists(args.pc_bw), "provided --phastcons file %s not found" %(args.pc_bw)
+        elif fid == "pp.bw":
+            std_feat_found = True
+            if not args.pp_bw:
+                assert os.path.exists(train_settings_dic["pp.bw"]), "please provide a --phylop file (since model was trained on using phyloP conservation feature)"
+                args.pp_bw = train_settings_dic["pp.bw"]
+            else:
+                assert os.path.exists(args.pp_bw), "provided --phylop file %s not found" %(args.pp_bw)
+        elif fid == "eia":
+            std_feat_found = True
+            if train_settings_dic["tr_list"] != "None":
+                if os.path.exists(train_settings_dic["tr_list"]) and args.tr_list:
+                    print("WARNING: previous --tr-list file path found in --train-in, but will be overwritten by set --tr-list")
+                if os.path.exists(train_settings_dic["tr_list"]) and not args.tr_list:
+                    print("Using --tr-list file specified in --train-in ... ")
+                    args.tr_list = train_settings_dic["tr_list"]
+                if not os.path.exists(train_settings_dic["tr_list"]) and not args.tr_list:
+                    print("WARNING: --train-in model was trained using specified transcript information via a --tr-list file but no file is provided")
+                    args.tr_list = False
+            args.exon_intron_annot = True
+            if train_settings_dic["intron_border_annot"]  == "True":
+                args.intron_border_annot = True
+            if train_settings_dic["exon_intron_n"]  == "True":
+                args.exon_intron_n = True
+        elif fid == "tra":
+            std_feat_found = True
+            if train_settings_dic["tr_list"] != "None":
+                if os.path.exists(train_settings_dic["tr_list"]) and args.tr_list:
+                    print("WARNING: previous --tr-list path found in --train-in, but will be overwritten by set --tr-list")
+                if os.path.exists(train_settings_dic["tr_list"]) and not args.tr_list:
+                    print("Using --tr-list file specified in --train-in ... ")
+                    args.tr_list = train_settings_dic["tr_list"]
+                if not os.path.exists(train_settings_dic["tr_list"]) and not args.tr_list:
+                    print("WARNING: --train-in model was trained using specified transcript information via a --tr-list file but no file is provided")
+                    args.tr_list = False
+            args.tr_reg_annot = True
+            if train_settings_dic["tr_reg_codon_annot"]  == "True":
+                args.tr_reg_codon_annot = True
+            if train_settings_dic["tr_reg_border_annot"]  == "True":
+                args.tr_reg_border_annot = True
+        elif fid == "rra":
+            std_feat_found = True
+            args.rep_reg_annot = True
+        elif fid == "elem_p.str" or fid == "bpp.str":
+            args.add_str = True
+            args.plfold_u = int(train_settings_dic["plfold_u"])
+            args.plfold_l = int(train_settings_dic["plfold_l"])
+            args.plfold_w = int(train_settings_dic["plfold_w"])
+        else:
+            add_feat_found = True
+            assert feat_in_file, "--train-in model was trained with additional features, but no additional feature file set (please provide same --feat-in file)"
+            assert fid in add_fid_dic, "feature ID %s not found in additional feature file %s. Please provide correct --feat-in file" %(fid, feat_in_file)
 
     """
     Temporary output files.
@@ -5373,7 +5358,8 @@ plfold_w
 
     # Check if --in file is FASTA file.
     if gp2lib.fasta_check_fasta_file(args.in_sites):
-        assert not indiv_feat_check, "FASTA sequences supplied via --in, but --train-in model was trained on additional features. Please provide BED regions ... "
+        if std_feat_found or add_feat_found:
+            assert False, "FASTA sequences supplied via --in, but --train-in model was trained on additional features. Please provide BED regions ... "
         # Read in sequences (this also checks for unique headers + converts to RNA).
         print("Processing --in FASTA sequences ... ")
         print("Read in --in FASTA sequences and convert to RNA ... ")
@@ -5383,36 +5369,13 @@ plfold_w
         # Output sequences.
         gp2lib.fasta_output_dic(test_seqs_dic, test_fasta_out)
 
-        # Looking for lowercase context.
-        lc_context = False
-        for seq_id in id2vpse_dic:
-            seq_l = len(test_seqs_dic[seq_id])
-            if id2vpse_dic[seq_id][1] != seq_l or id2vpse_dic[seq_id][0] != 1:
-                lc_context = True
-                break
-
         # Sequence character counts.
         seq_cc_dic = gp2lib.seqs_dic_count_chars(test_seqs_dic)
-        if lc_context:
-            print("Lowercase context regions found inside --in sequences ... ")
-            allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1, 'a': 1, 'c': 1, 'g': 1, 'u': 1}
-            for nt in seq_cc_dic:
-                if nt not in allowed_nt_dic:
-                    assert False, "--in sequences contain \"%s\" character (allowed characters: A C G U a c g u)" %(nt)
-            FEATOUT.write("fa\tC\tA,C,G,U,a,c,g,u\t-\n")
-            # Get most frequenet lowercase extension.
-            major_lcl = gp2lib.get_major_lc_len_from_seqs_dic(test_seqs_dic)
-            assert major_lcl, "no lowercase regions extracted (major_lcl evaluated to False)"
-            print("Most frequent lowercase region length found:  %i" %(major_lcl))
-            print("Set --con-ext to this length ... ")
-            # Use major_lcl as con_ext.
-            args.con_ext = major_lcl
-        else:
-            allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1}
-            for nt in seq_cc_dic:
-                if nt not in allowed_nt_dic:
-                    assert False, "--in sequences contain \"%s\" character (allowed characters: A C G U)" %(nt)
-            FEATOUT.write("fa\tC\tA,C,G,U\t-\n")
+        allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1}
+        for nt in seq_cc_dic:
+            if nt not in allowed_nt_dic:
+                assert False, "--in sequences contain \"%s\" character (allowed characters: A C G U)" %(nt)
+        FEATOUT.write("fa\tC\tA,C,G,U\t-\n")
 
         # Secondary structure stats dictionaries.
         test_str_stats_dic = None
@@ -5528,11 +5491,6 @@ plfold_w
         assert args.exon_intron_annot, "--eia-ib requires --eia to be effective"
     if args.exon_intron_n:
         assert args.exon_intron_annot, "--eia-n requires --eia to be effective"
-
-    # Check whether split regions are given and --con-ext.
-    if args.con_ext:
-        if gp2lib.bed_check_for_part_ids(args.in_sites):
-            assert False, "--in BED file column 4 contains part IDs (_e, _p endings, used to merge exons or in general two genomic regions). Please disable --con-ext or change IDs"
 
     # If --in column 4 IDs should be kept, check their uniqueness.
     if args.keep_ids:
@@ -5752,24 +5710,6 @@ plfold_w
             test_seqs_rep_lc_dic[seq_id] = seq
             test_seqs_dic[seq_id] = seq.upper()
 
-    # Make sequences lowercase-uppercase-lowercase.
-    id2ucr_dic = {}
-    if args.con_ext:
-        print("Make site sequence context (--con-ext) lowercase ... ")
-        # Process positive sequences.
-        for seq_id in test_seqs_dic:
-            assert seq_id in id2pl_dic, "site ID \"%s\" missing in id2pl_dic" %(seq_id)
-            uslc_len = id2pl_dic[seq_id][0]
-            uc_len = id2pl_dic[seq_id][1]
-            dslc_len = id2pl_dic[seq_id][2]
-            seq = test_seqs_dic[seq_id]
-            uc_s = uslc_len + 1
-            uc_e = uslc_len + uc_len
-            new_seq = gp2lib.add_lowercase_context_to_sequences(seq, uc_s, uc_e,
-                                                      convert_to_rna=True)
-            test_seqs_dic[seq_id] = new_seq
-            id2ucr_dic[seq_id] = [uc_s, uc_e]
-
     # Length statistics for final positives + negatives.
     final_len_list = []
     final_len_list = gp2lib.get_seq_len_list_from_dic(test_seqs_dic)
@@ -5857,10 +5797,7 @@ plfold_w
         test_rra_stats_dic = {}
 
     # Store feature infos.
-    if args.con_ext:
-        FEATOUT.write("fa\tC\tA,C,G,U,a,c,g,u\t-\n")
-    else:
-        FEATOUT.write("fa\tC\tA,C,G,U\t-\n")
+    FEATOUT.write("fa\tC\tA,C,G,U\t-\n")
     if args.add_str:
         FEATOUT.write("elem_p.str\tN\tE,H,I,M,S\tprob\n")
     if args.add_str or args.bp_in:
@@ -5914,7 +5851,7 @@ plfold_w
         print("Get secondary structure information ... ")
         gp2lib.calc_ext_str_features(id2row_dic, chr_len_dic,
                                      test_bpp_out, test_str_elem_p_out, args,
-                                     id2ucr_dic=id2ucr_dic,
+                                     id2ucr_dic=False,
                                      stats_dic=test_str_stats_dic,
                                      bp_check_seqs_dic=test_seqs_dic,
                                      tr_regions=transcript_regions,
@@ -6123,7 +6060,7 @@ plfold_w
         gp2lib.gp2_gp_generate_html_report(test_seqs_dic,
                                            args.out_folder, dataset_type, gp2lib_path,
                                            html_report_out=html_report_out,
-                                           id2ucr_dic=id2ucr_dic,
+                                           id2ucr_dic=False,
                                            plots_subfolder=plots_subfolder,
                                            test_str_stats_dic=test_str_stats_dic,
                                            test_phastcons_stats_dic=test_phastcons_stats_dic,
