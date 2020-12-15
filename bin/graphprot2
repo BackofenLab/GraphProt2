@@ -696,11 +696,6 @@ def setup_argument_parser():
                    metavar='int',
                    default = False,
                    help = "Up- and downstream sequence extension length of --in sites (if --in BED, site definition by --mode) (default: False)")
-    p_gp.add_argument("--keep-ids",
-                   dest="keep_ids",
-                   default = False,
-                   action = "store_true",
-                   help = "Keep --in BED column 4 site IDs. Note that site IDs have to be unique (default: False)")
     p_gp.add_argument("--gene-filter",
                    dest="gene_filter",
                    default = False,
@@ -1645,12 +1640,12 @@ def main_eval(args):
     # Motif output folder.
     motif_plots_folder = args.out_folder
     # k-mer analysis.
-    kmer_plots_folder = args.out_folder + "/" + "kmer_plots"
-    if args.report:
-        if os.path.exists(kmer_plots_folder):
-            shutil.rmtree(kmer_plots_folder)
-        if args.num_features != 4:
-            os.makedirs(kmer_plots_folder)
+    #kmer_plots_folder = args.out_folder + "/" + "kmer_plots"
+    #if args.report:
+    #    if os.path.exists(kmer_plots_folder):
+    #        shutil.rmtree(kmer_plots_folder)
+    #    if args.num_features != 4:
+    #        os.makedirs(kmer_plots_folder)
 
     # Some facts.
     print("# dataset features:    %i" %(args.num_features))
@@ -2478,7 +2473,7 @@ def main_eval(args):
 
         else:
             # More features comin at ya.
-            print("--train-in model trained on sequences+additional features. Generate k-mer graphs ... ")
+            print("--train-in model trained on sequences + additional features. Generate k-mer graphs ... ")
             for feat_list in all_features:
                 # For each position in feat_list.
                 l_feat = len(feat_list)
@@ -2586,7 +2581,7 @@ def main_eval(args):
                             hit_list = gp2lib.get_kmer_hit_ends(seq,win_kmer)
                             kmerseqid2hits_dic[kmerseqid] = hit_list
                     # Record score for average score calculation later.
-                    if win_kmer not in kmer2sc_dic:
+                    if win_kmer not in kmer2sclist_dic:
                         kmer2sclist_dic[win_kmer] = [win_score]
                     else:
                         kmer2sclist_dic[win_kmer].append(win_score)
@@ -2624,7 +2619,7 @@ def main_eval(args):
                 # Average k-mer score.
                 kmer_sc_avg = kmer2sclist_dic[kmer][0]
                 kmer_sc_stdev = 0.0
-                if len(kmer2sclist_dic[kmer]) > 1:
+                if len(kmer2sclist_dic[kmer]) != 1:
                     kmer_sc_avg = statistics.mean(kmer2sclist_dic[kmer])
                     kmer_sc_stdev = statistics.stdev(kmer2sclist_dic[kmer])
                 kmer2sc_dic[kmer] = kmer_sc_avg
@@ -2633,6 +2628,7 @@ def main_eval(args):
                 fid2stdev_dic = {}
                 if calc_stdev:
                     for fid in stdev_fid2fidx_dic:
+                        fid2stdev_dic[fid] = []
                         kmer_fid = "%s,%s" %(kmer, fid)
                         for i in range(l_mm):
                             fid2stdev_dic[fid].append(statistics.stdev(kmerfid2scl_dic[kmer_fid][i]))
@@ -2752,7 +2748,10 @@ def main_eval(args):
         if lookup_kmer:
             lookup_kmer_stats_out = motif_plots_folder + "/lookup_kmer_stats.out"
             LKSOUT = open(lookup_kmer_stats_out, "w")
-            LKSOUT.write("score_rank\tkmer\tscore\tkmer_count\tcount_rank\n")
+            if onlyseq:
+                LKSOUT.write("score_rank\tkmer\tscore\tkmer_count\tcount_rank\n")
+            else:
+                LKSOUT.write("best_score_rank\tavg_score_rank\tkmer\tbest_score\tavg_score\tavg_sc_stdev\tkmer_count\tcount_rank\n")
 
         if onlyseq:
             sc_rank = 0
@@ -2763,9 +2762,9 @@ def main_eval(args):
                 kmer_count = kmer2c_dic[kmer]
                 kmer2scrank_dic[kmer] = sc_rank
                 if lookup_kmer and kmer == lookup_kmer:
-                    LKSOUT.write("%i\t%s\t%s\t%i\t%i\n" %(sc_rank, kmer, str(sc), kmer_count, kmer_count_rank))
+                    LKSOUT.write("%i\t%s\t%.6f\t%i\t%i\n" %(sc_rank, kmer, sc, kmer_count, kmer_count_rank))
                 else:
-                    KSOUT.write("%i\t%s\t%s\t%i\t%i\n" %(sc_rank, kmer, str(sc), kmer_count, kmer_count_rank))
+                    KSOUT.write("%i\t%s\t%.6f\t%i\t%i\n" %(sc_rank, kmer, sc, kmer_count, kmer_count_rank))
         else:
             # Get k-mer average score ranks.
             avg_sc_rank = 0
@@ -2773,7 +2772,7 @@ def main_eval(args):
                 avg_sc_rank += 1
                 kmer2avgscrank_dic[kmer] = avg_sc_rank
             sc_rank = 0
-            KSOUT.write("best_score_rank\tavg_score_rank\tkmer\tbest_score\tavg_score\tavg_score_stdev\tkmer_count\tcount_rank\n")
+            KSOUT.write("best_score_rank\tavg_score_rank\tkmer\tbest_score\tavg_score\tavg_sc_stdev\tkmer_count\tcount_rank\n")
             for kmer, sc in sorted(kmer2bestsc_dic.items(), key=lambda item: item[1], reverse=True):
                 sc_rank += 1
                 kmer_count_rank = kmer2rank_dic[kmer]
@@ -2783,9 +2782,9 @@ def main_eval(args):
                 avg_sc_stdev = kmer2scstdev_dic[kmer]
                 avg_sc_rank = kmer2avgscrank_dic[kmer]
                 if lookup_kmer and kmer == lookup_kmer:
-                    LKSOUT.write("%i\t%i\t%s\t%s\t%s\t%s\t%i\t%i\n" %(sc_rank, avg_sc_rank, kmer, str(sc), str(avg_sc), str(avg_sc_stdev), kmer_count, kmer_count_rank))
+                    LKSOUT.write("%i\t%i\t%s\t%.6f\t%.6f\t%.6f\t%i\t%i\n" %(sc_rank, avg_sc_rank, kmer, sc, avg_sc, avg_sc_stdev, kmer_count, kmer_count_rank))
                 else:
-                    KSOUT.write("%i\t%i\t%s\t%s\t%s\t%s\t%i\t%i\n" %(sc_rank, avg_sc_rank, kmer, str(sc), str(avg_sc), str(avg_sc_stdev), kmer_count, kmer_count_rank))
+                    KSOUT.write("%i\t%i\t%s\t%.6f\t%.6f\t%.6f\t%i\t%i\n" %(sc_rank, avg_sc_rank, kmer, sc, avg_sc, avg_sc_stdev, kmer_count, kmer_count_rank))
         KSOUT.close()
         if lookup_kmer:
             LKSOUT.close()
@@ -5190,9 +5189,13 @@ def main_gp(args):
 
     # Checks.
     assert os.path.exists(args.train_in_folder), "--train in folder not found"
+    check_model_file = args.train_in_folder + "/final.model"
+    check_params_file = args.train_in_folder + "/final.params"
+    assert os.path.exists(check_model_file), "--train-in contains no .model file (final.model missing). Please train model without --gen-cv option"
+    assert os.path.exists(check_params_file), "--train-in contains no .params file (final.params missing). Please train model without --gen-cv option"
 
     # Get infos from graphprot2 train settings (partly ported over from gt).
-    gp2_train_settings_file = args.in_folder + "/settings.graphprot2_train.out"
+    gp2_train_settings_file = args.train_in_folder + "/settings.graphprot2_train.out"
     assert os.path.exists(gp2_train_settings_file), "graphprot2 train settings file %s not found" %(gp2_train_settings_file)
     train_settings_dic = {}
     with open(gp2_train_settings_file) as f:
@@ -5203,7 +5206,7 @@ def main_gp(args):
     assert train_settings_dic, "train_settings_dic empty"
 
     # Get used model features.
-    gp2_train_features_file = args.in_folder + "/features.out"
+    gp2_train_features_file = args.train_in_folder + "/features.out"
     train_fid_dic = {}
     with open(gp2_train_features_file) as f:
         for line in f:
@@ -5249,20 +5252,37 @@ def main_gp(args):
     args.plfold_l = None
     args.plfold_w = None
     args.add_str = False
+    # Disable con_ext.
+    args.con_ext = False
+
+    in_file_fasta = False
+    if gp2lib.fasta_check_fasta_file(args.in_sites):
+        in_file_fasta = True
 
     onlyseq = False
     if len(train_fid_dic) == 1:
         onlyseq = True
-    else:
+    if not in_file_fasta:
         # Check for GTF and genome file.
-        if "in_gtf" in train_settings_dic:
+        if "in_gtf" in train_settings_dic and not args.in_gtf:
             assert os.path.exists(train_settings_dic["in_gtf"]), "please provide a GTF file via --gtf (ideally the same that was used to generate training data for training model from --train-in)"
             args.in_gtf = train_settings_dic["in_gtf"]
             print("Using --gtf file specified in --train-in ... ")
-        if "in_2bit" in train_settings_dic:
+        if "in_2bit" in train_settings_dic and not args.in_2bit:
             assert os.path.exists(train_settings_dic["in_2bit"]), "please provide a genomic 2.bit file via --gen (ideally the same that was used to generate training data for training model from --train-in)"
             args.in_2bit = train_settings_dic["in_2bit"]
             print("Using --gen file specified in --train-in ... ")
+
+    """
+    fa	C	A,C,G,U	-
+    bpp.str	N	bp_prob	prob
+    elem_p.str	N	p_e,p_h,p_i,p_m,p_s	prob
+    pc.con	N	phastcons_score	prob
+    pp.con	N	phylop_score	minmax2
+    tra	C	C,F,N,T	-
+    eia	C	E,I	-
+    rra	C	N,R	-
+    """
 
     # Check features used to train model.
     add_feat_found = False
@@ -5270,18 +5290,18 @@ def main_gp(args):
     for fid in train_fid_dic:
         if fid == "fa":
             continue
-        if fid == "pc.bw":
+        if fid == "pc.con":
             std_feat_found = True
             if not args.pc_bw:
-                assert os.path.exists(train_settings_dic["pc.bw"]), "please provide a --phastcons file (since model was trained on using phastCons conservation feature)"
-                args.pc_bw = train_settings_dic["pc.bw"]
+                assert os.path.exists(train_settings_dic["pc_bw"]), "please provide a --phastcons file (since model was trained with phastCons conservation feature)"
+                args.pc_bw = train_settings_dic["pc_bw"]
             else:
                 assert os.path.exists(args.pc_bw), "provided --phastcons file %s not found" %(args.pc_bw)
-        elif fid == "pp.bw":
+        elif fid == "pp.con":
             std_feat_found = True
             if not args.pp_bw:
-                assert os.path.exists(train_settings_dic["pp.bw"]), "please provide a --phylop file (since model was trained on using phyloP conservation feature)"
-                args.pp_bw = train_settings_dic["pp.bw"]
+                assert os.path.exists(train_settings_dic["pp_bw"]), "please provide a --phylop file (since model was trained with phyloP conservation feature)"
+                args.pp_bw = train_settings_dic["pp_bw"]
             else:
                 assert os.path.exists(args.pp_bw), "provided --phylop file %s not found" %(args.pp_bw)
         elif fid == "eia":
@@ -5357,9 +5377,12 @@ def main_gp(args):
     """
 
     # Check if --in file is FASTA file.
-    if gp2lib.fasta_check_fasta_file(args.in_sites):
+    if in_file_fasta:
         if std_feat_found or add_feat_found:
             assert False, "FASTA sequences supplied via --in, but --train-in model was trained on additional features. Please provide BED regions ... "
+        # Delete old BED files.
+        if os.path.exists(test_bed_out):
+            os.remove(test_bed_out)
         # Read in sequences (this also checks for unique headers + converts to RNA).
         print("Processing --in FASTA sequences ... ")
         print("Read in --in FASTA sequences and convert to RNA ... ")
@@ -5491,10 +5514,8 @@ def main_gp(args):
         assert args.exon_intron_annot, "--eia-ib requires --eia to be effective"
     if args.exon_intron_n:
         assert args.exon_intron_annot, "--eia-n requires --eia to be effective"
-
-    # If --in column 4 IDs should be kept, check their uniqueness.
-    if args.keep_ids:
-        assert gp2lib.bed_check_unique_ids(args.in_sites), "--in BED file \"%s\" column 4 IDs not unique. Disable --keep-ids or provide unique IDs" %(args.in_sites)
+    # Check uniqueness of IDs.
+    assert gp2lib.bed_check_unique_ids(args.in_sites), "--in BED file \"%s\" column 4 IDs not unique. Please provide BED entries with unique column 4 IDs" %(args.in_sites)
 
     # Mode settings output file.
     SETOUT = open(settings_file, "w")
@@ -5523,16 +5544,17 @@ def main_gp(args):
 
     # If transcript_regions, there should be no genomic col1 IDs.
     tr_seqs_dic = {}
+    core_ids_label_dic = {}
     if transcript_regions:
         # Check for set --exon-intron.
         if args.exon_intron_annot:
-            print("ERROR: setting --eia is useless for transcript sites. Please disable or provide genomic input sites.")
+            print("ERROR: setting --eia is useless for transcript sites. Please use --train-in model not trained with --eia or provide genomic input sites.")
             sys.exit()
         if args.intron_border_annot:
-            print("ERROR: setting --eia-ib is useless for transcript sites. Please disable or provide genomic input sites.")
+            print("ERROR: setting --eia-ib is useless for transcript sites. Please use --train-in model not trained with --eia or provide genomic input sites.")
             sys.exit()
         if args.exon_intron_n:
-            print("ERROR: setting --eia-ib is useless for transcript sites. Please disable or provide genomic input sites.")
+            print("ERROR: setting --eia-ib is useless for transcript sites. Please use --train-in model not trained with --eia or provide genomic input sites.")
             sys.exit()
         # Read in transcript lengths from --gtf.
         print("Get transcript lengths from --gtf ... ")
@@ -5564,10 +5586,11 @@ def main_gp(args):
             print("ERROR: setting --tra-borders only supported for transcript sites. Please disable or provide transcript input sites.")
             sys.exit()
         # Check for genomic region _e or _p (split) IDs (exon regions).
+        in_reg_ids_dic = gp2lib.bed_get_region_ids(args.in_sites)
+        core_ids_dic = gp2lib.get_core_id_to_part_counts_dic(in_reg_ids_dic,
+                                                             label_dic=core_ids_label_dic)
         if args.exon_intron_annot:
             print("Genomic regions and --eia enabled: check for split IDs ... ")
-            in_reg_ids_dic = gp2lib.bed_get_region_ids(args.in_sites)
-            core_ids_dic = gp2lib.get_core_id_to_part_counts_dic(in_reg_ids_dic)
             for core_id in core_ids_dic:
                 assert core_ids_dic[core_id] == 1, "--eia enabled but genomic split IDs (== exon regions) found. Disable --eia or use transcript regions"
     """
@@ -5588,8 +5611,7 @@ def main_gp(args):
     id2row_dic = gp2lib.process_test_sites(args.in_sites, tmp_bed, chr_len_dic,
                                            id2pl_dic, args,
                                            transcript_regions=transcript_regions,
-                                           count_dic=count_stats_dic,
-                                           id_prefix="TEST")
+                                           count_dic=count_stats_dic)
     print("# sites found in --in:               %i" %(count_stats_dic['c_in']))
     if count_stats_dic['c_filt_ref']:
         print("# sites removed (reference ID):      %i" %(count_stats_dic['c_filt_ref']))
@@ -5715,13 +5737,44 @@ def main_gp(args):
     final_len_list = gp2lib.get_seq_len_list_from_dic(test_seqs_dic)
     c_final_test = len(final_len_list)
 
+    test_ids_output_dic = {}
+    for test_id in test_seqs_dic:
+        test_ids_output_dic[test_id] = 1
+
+    # Merge split _e or _p sites into one sequence.
+    if core_ids_label_dic:
+        print("Split BED regions encountered. Merging split region sequences ... ")
+        c_del = 0
+        c_new = 0
+        c_before = len(test_seqs_dic)
+        for core_id in core_ids_label_dic:
+            new_id = core_id
+            new_seq = ""
+            part_label = core_ids_label_dic[core_id]
+            c_parts = core_ids_dic[core_id]
+            assert c_parts > 1, "c_parts == 1 but core_ids_label_dic should only contain entries > 2 (core_id: %s)" %(core_id)
+            part_i = 0
+            for i in range(c_parts):
+                part_i = i + 1
+                part_id = core_id + "_" + part_label + str(part_i)
+                assert part_id in test_seqs_dic, "part ID %s not in test_seqs_dic" %(part_id)
+                new_seq += test_seqs_dic[part_id]
+                del test_seqs_dic[part_id]
+                c_del += 1
+            test_seqs_dic[new_id] = new_seq
+            c_new += 1
+        c_after = len(test_seqs_dic)
+        print("# of regions before merging:  %i" %(c_before))
+        print("# of regions after merging:   %i (-%i +%i)" %(c_after, c_del, c_new))
+        c_final_test = c_after
+
     # Output full-length (+ context) sequences.
     print("Output selected sites to BED and FASTA ... ")
     gp2lib.fasta_output_dic(test_seqs_dic, test_fasta_out)
 
     # Output BED regions.
     gp2lib.bed_write_row_dic_into_file(id2row_dic, test_bed_out,
-                                       id2out_dic=test_seqs_dic)
+                                       id2out_dic=test_ids_output_dic)
     print("# prediction sites output:  %i" %(c_final_test))
 
     """

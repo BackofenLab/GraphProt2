@@ -7454,7 +7454,7 @@ def create_eval_model_comp_scatter_plot(model1_scores, model2_scores, out_plot,
         # Make plot.
         sns.set(style="darkgrid", rc={ "axes.labelcolor": text_color, "text.color": text_color, "xtick.color": text_color, "ytick.color": text_color, "grid.color": plot_color, "axes.edgecolor": plot_color})
         fig, ax = plt.subplots()
-        sns.scatterplot(x="m1_score", y="m2_score", data=df, color='blue')
+        sns.scatterplot(x="m1_score", y="m2_score", data=df, color='blue', s=3)
         plt.text(max_x , min_y, r2str, color='blue', horizontalalignment='right', size=10)
         fig.set_figwidth(5)
         fig.set_figheight(4)
@@ -7658,7 +7658,6 @@ def gp2_eval_generate_html_report(ws_scores, neg_ws_scores,
         assert kmer_stdev_dic, "kmer_stdev_dic needed in case of additional features"
         assert kmer2bestmm_dic, "kmer2bestmm_dic needed in case of additional features"
         assert ch_info_dic, "ch_info_dic needed in case of additional features"
-        assert kmer_plots_folder, "kmer_plots_folder needed in case of additional features"
         assert kmer2avgscrank_dic, "kmer2avgscrank_dic needed in case of additional features"
 
     # Import markdown to generate report.
@@ -7689,22 +7688,25 @@ def gp2_eval_generate_html_report(ws_scores, neg_ws_scores,
     logo1_path = gp2lib_path + "/content/logo1.png"
     logo2_path = gp2lib_path + "/content/logo2.png"
     logo3_path = gp2lib_path + "/content/logo3.png"
+    sorttable_js_path = gp2lib_path + "/content/sorttable.js"
 
     # Create theme-specific HTML header.
     if theme == 1:
         mdtext = """
 <head>
 <title>GraphProt2 - Model Evaluation Report</title>
+<script src="%s" type="text/javascript"></script>
 </head>
 
 <img src="%s" alt="gp2_logo"
 	title="gp2_logo" width="600" />
 
-""" %(logo1_path)
+""" %(sorttable_js_path, logo1_path)
     elif theme == 2:
         mdtext = """
 <head>
 <title>GraphProt2 - Model Evaluation Report</title>
+<script src="%s" type="text/javascript"></script>
 <style>
 h1 {color:#fd3b9d;}
 h2 {color:#fd3b9d;}
@@ -7717,11 +7719,12 @@ h3 {color:#fd3b9d;}
 
 <body style="font-family:sans-serif" bgcolor="#190250" text="#fcc826" link="#fd3b9d" vlink="#fd3b9d" alink="#fd3b9d">
 
-""" %(logo2_path)
+""" %(sorttable_js_path, logo2_path)
     elif theme == 3:
         mdtext = """
 <head>
 <title>GraphProt2 - Model Evaluation Report</title>
+<script src="%s" type="text/javascript"></script>
 <style>
 h1 {color:#1fcc2c;}
 h2 {color:#1fcc2c;}
@@ -7734,7 +7737,7 @@ h3 {color:#1fcc2c;}
 
 <body style="font-family:monospace" bgcolor="#1d271e" text="#1fcc2c" link="#1fcc2c" vlink="#1fcc2c" alink="#1fcc2c">
 
-""" %(logo3_path)
+""" %(sorttable_js_path, logo3_path)
     else:
         assert False, "invalid theme ID given"
 
@@ -7793,8 +7796,8 @@ sequences (given a sufficient model performance).
     mdtext += 'title="Whole-site score distributions" width="500" />' + "\n"
     mdtext += """
 
-**Figure:** Whole-site score distributions for the positive (positives) and
-negative (negatives) sequence set, scored by the trained model.
+**Figure:** Whole-site score distributions for the positive (Positives) and
+negative (Negatives) sequence set, scored by the trained model.
 
 &nbsp;
 
@@ -7852,12 +7855,12 @@ k-mers are scored by the model, using the subgraph encompassing the k-mer.
         mdtext += """
 ## k-mer statistics ### {#kmer-stats}
 
-**Table:** sequence k-mer statistics (score rank, k-mer score, k-mer count,
+**Table:** Sequence k-mer statistics (score (sc) rank, k-mer score, k-mer count,
 count rank) for the top %i scoring sequence %i-mers (ranked by k-mer score).
 
 """ %(kmer_top_n, kmer_size)
 
-        mdtext += "| score rank | &nbsp; k-mer &nbsp; | &nbsp; k-mer score &nbsp; | k-mer count | k-mer count rank | \n"
+        mdtext += "| sc rank | &nbsp; k-mer &nbsp; | &nbsp; k-mer sc &nbsp; | k-mer count | k-mer count rank | \n"
         mdtext += "| :-: | :-: | :-: | :-: | :-: |\n"
         sc_rank = 0
         for kmer, sc in sorted(kmer2sc_dic.items(), key=lambda item: item[1], reverse=True):
@@ -7873,23 +7876,30 @@ count rank) for the top %i scoring sequence %i-mers (ranked by k-mer score).
         mdtext += """
 ## k-mer co-occurrence statistics ### {#kmer-cooc-stats}
 
-**Table:** sequence k-mer co-occurrence statistics (Jaccard index rank, k-mer 1,
-k-mer 2, Jaccard index score, k-mer 1 score, k-mer 2 score, mean minimum distance
+**Table:** sequence k-mer co-occurrence statistics (Jaccard index (JI) rank, k-mer 1,
+k-mer 2, Jaccard index, k-mer 1 score (sc), k-mer 2 score, mean minimum distance
 of k-mers on sequences containing both k-mers with standard deviation, number
 of intersections (sequences containing both k-mers), size of union of sequences
 containing the two k-mers).
 Entries are sorted by the Jaccard index of the two k-mers (where set is defined
 as the set of sequences containing the k-mer). Only the top %i k-mer pairs
-are shown, with a minimum Jaccard index of %s and a minimum k-mer score of
-%s.
+are shown, with a minimum Jaccard index of %s, a minimum k-mer score of
+%s, and a minimum # of intersections of 10, and a minimum mean minimum distance
+(yes!) of %i. An empty table means that no pairs have met the filtering criteria.
 
-""" %(kmer_top_n, str(min_jacc_sc), str(min_kmer_score))
+""" %(kmer_top_n, str(min_jacc_sc), str(min_kmer_score), kmer_size)
 
-        mdtext += "| Jaccard rank | &nbsp; k-mer 1 &nbsp; |  &nbsp; k-mer 2 &nbsp; | Jaccard index score | k-mer 1 score | k-mer 2 score | mean minimum distance (+- stdev) | # intersections | # union | \n"
+        mdtext += "| JI rank | &nbsp; k-mer 1 &nbsp; |  &nbsp; k-mer 2 &nbsp; | JI | k-mer 1 sc | k-mer 2 sc | mean min dist (+- stdev) | # intersect | # union | \n"
         mdtext += "| :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | \n"
         jacc_rank = 0
         kmers2sumsc_dic = {}
         for kmers, jacc_idx in sorted(jacc_scores_dic.items(), key=lambda item: item[1], reverse=True):
+            min_dist_mean = jacc_stats_dic[kmers][5]
+            c_intersects = jacc_stats_dic[kmers][7]
+            if min_dist_mean < kmer_size:
+                continue
+            if c_intersects < 10:
+                continue
             jacc_rank += 1
             if jacc_rank > kmer_top_n:
                 break
@@ -7899,9 +7909,7 @@ are shown, with a minimum Jaccard index of %s and a minimum k-mer score of
             kmer2_sc = jacc_stats_dic[kmers][3]
             sum_sc = kmer1_sc + kmer2_sc
             kmers2sumsc_dic[kmers] = sum_sc
-            min_dist_mean = jacc_stats_dic[kmers][5]
             min_dist_stdev = jacc_stats_dic[kmers][6]
-            c_intersects = jacc_stats_dic[kmers][7]
             c_union = jacc_stats_dic[kmers][8]
             mdtext += "| %i | %s | %s | %.6f | %.6f | %.6f | %.6f (+- %.6f) | %i | %i |\n" %(jacc_rank, kmer1, kmer2, jacc_idx, kmer1_sc, kmer2_sc, min_dist_mean, min_dist_stdev, c_intersects, c_union)
         mdtext += "\n&nbsp;\n&nbsp;\n"
@@ -7912,12 +7920,12 @@ are shown, with a minimum Jaccard index of %s and a minimum k-mer score of
             mdtext += """
 ## Lookup k-mer statistics ### {#lookup-kmer-stats}
 
-**Table:** lookup k-mer statistics (score rank, k-mer score, k-mer count,
+**Table:** lookup k-mer statistics (score (sc) rank, k-mer score, k-mer count,
 count rank) for lookup k-mer %s.
 
 """ %(lookup_kmer)
 
-            mdtext += "| score rank | &nbsp; k-mer &nbsp; | &nbsp; k-mer score &nbsp; | k-mer count | k-mer count rank | \n"
+            mdtext += "| sc rank | &nbsp; k-mer &nbsp; | &nbsp; k-mer sc &nbsp; | k-mer count | k-mer count rank | \n"
             mdtext += "| :-: | :-: | :-: | :-: | :-: |\n"
             lk_sc_rank = kmer2scrank_dic[lookup_kmer]
             lk_sc = kmer2sc_dic[lookup_kmer]
@@ -7931,13 +7939,13 @@ count rank) for lookup k-mer %s.
 ## Lookup k-mer co-occurrence statistics ### {#lookup-kmer-cooc-stats}
 
 **Table:** Lookup sequence k-mer co-occurrence statistics.
-Entries are sorted by the Jaccard index of the two k-mers.
+Entries are sorted by the Jaccard index (JI) of the two k-mers.
 Only the top %i k-mer pairs are shown, with a minimum Jaccard index
-of %s and a minimum k-mer score of %s.
+of %s, a minimum k-mer score (sc) of %s, and a minimum # of intersections of 10.
 
 """ %(kmer_top_n, str(min_jacc_sc), str(min_kmer_score))
 
-            mdtext += "| Jaccard rank | &nbsp; k-mer 1 &nbsp; |  &nbsp; k-mer 2 &nbsp; | Jaccard index score | k-mer 1 score | k-mer 2 score | mean minimum distance (+- stdev) | # intersections | # union | \n"
+            mdtext += "| JI rank | &nbsp; k-mer 1 &nbsp; |  &nbsp; k-mer 2 &nbsp; | JI | k-mer 1 sc | k-mer 2 sc | mean min dist (+- stdev) | # intersect | # union | \n"
             mdtext += "| :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | \n"
             jacc_rank = 0
             kmers2sumsc_dic = {}
@@ -8009,7 +8017,14 @@ positive training set (with additional features).
         mdtext += """
 
 **Figure:** Average vs. best k-mer scores scatter plot for all k-mers found in the
-positive training set (with additional features).
+positive training set (with additional features). The more the best score of each k-mer
+deviates from its average score, the more scattered the points should be above the
+diagonal line (y = x) in the upper-left area. No points should be located below
+the diagonal (lower right), since the best score is always >= the average score.
+Points on the diagonal are likely k-mers with an occurence = 1, i.e., best score ==
+average score. Points near the diagonal are k-mers that feature similar annotated
+additional feature values across the positive dataset.
+
 &nbsp;
 
 """
@@ -8018,8 +8033,8 @@ positive training set (with additional features).
         mdtext += """
 ## k-mer statistics ### {#kmer-stats}
 
-**Table:** sequence k-mer statistics with additional features (best score rank,
-best k-mer score, average k-mer score + standard deviation, average k-mer rank,
+**Table:** Sequence k-mer statistics with additional features (best score (sc) rank,
+best k-mer score, average (avg) k-mer score + standard deviation, average k-mer rank,
 total k-mer count, and total count rank) for the top %i scoring %i-mers
 (ranked by best k-mer score). Best scoring motif + average scoring motif are
 also shown.
@@ -8037,8 +8052,8 @@ also shown.
         kmer_i = 10 ** len(str(c_kmers))
         sc_rank = 0
 
-        mdtext += "| best score rank | &nbsp; k-mer &nbsp; | best k-mer score | best score motif | average k-mer rank | average k-mer score | average score motif | k-mer count | k-mer count rank |\n"
-        mdtext += "| :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |\n"
+        mdtext += "| best sc rank | &nbsp; k-mer &nbsp; | best k-mer sc | best sc motif | avg k-mer rank | avg k-mer sc | avg sc stdev | avg sc motif | avg + best sc | diff(avg sc, best sc) | k-mer count | k-mer count rank |\n"
+        mdtext += "| :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |\n"
 
         for kmer, best_sc in sorted(kmer2bestsc_dic.items(), key=lambda item: item[1], reverse=True):
             sc_rank += 1
@@ -8050,6 +8065,8 @@ also shown.
             avg_sc = kmer2sc_dic[kmer]
             avg_sc_stdev = kmer2scstdev_dic[kmer]
             avg_sc_rank = kmer2avgscrank_dic[kmer]
+            sc_sum = best_sc + avg_sc
+            sc_diff = abs(best_sc-avg_sc)
             # Generate average score motif.
             avg_sc_plot_file = avg_motif_plots_folder + "/" + str(kmer_i)[1:] + "_" + kmer + ".avg_sc.png"
             make_motif_plot(kmer2mm_dic[kmer], ch_info_dic, avg_sc_plot_file,
@@ -8060,7 +8077,7 @@ also shown.
             make_motif_plot(kmer2bestmm_dic[kmer], ch_info_dic, best_sc_plot_file,
                             fid2stdev_dic=False)
             pp2 = plots_folder + "/best_motif_plots/" + str(kmer_i)[1:] + "_" + kmer + ".best_sc.png"
-            mdtext += '| %i | %s | %s | <image src = "%s" width="300px"></image> | %i | %s (+- %s) | <image src = "%s" width="300px"></image> | %i | %i |\n' %(sc_rank, kmer, str(best_sc), pp1, avg_sc_rank, str(avg_sc), str(avg_sc_stdev), pp2, kmer_count, kmer_count_rank)
+            mdtext += '| %i | %s | %.6f | <image src = "%s" width="150px"></image> | %i | %.6f | %.6f | <image src = "%s" width="150px"></image> | %.6f | %.6f | %i | %i |\n' %(sc_rank, kmer, best_sc, pp2, avg_sc_rank, avg_sc, avg_sc_stdev, pp1, sc_sum, sc_diff, kmer_count, kmer_count_rank)
         mdtext += "\n&nbsp;\n&nbsp;\n"
 
         # k-mer co-occurrence statistics table for additional features.
@@ -8068,22 +8085,29 @@ also shown.
 ## k-mer co-occurrence statistics ### {#kmer-cooc-stats}
 
 **Table:** sequence k-mer co-occurrence statistics with additional features
-(Jaccard index rank, k-mer 1, k-mer 2, Jaccard index score, best k-mer 1 score,
+(Jaccard index (JI) rank, k-mer 1, k-mer 2, Jaccard index, best k-mer 1 score (sc),
 best k-mer 2 score, mean minimum distance of k-mers on sequences containing both
 k-mers with standard deviation, number of intersections (sequences containing
 both k-mers), size of union of sequences containing the two k-mers).
 Entries are sorted by the Jaccard index of the two k-mers (where set is defined
 as the set of sequences containing the k-mer). Only the top %i k-mer pairs
-are shown, with a minimum Jaccard index of %s and a minimum k-mer score of
-%s.
+are shown, with a minimum Jaccard index of %s a minimum k-mer score of
+%s, a minimum # of intersections of 10, , and a minimum mean minimum distance
+(yes!) of %i. An empty table means that no pairs have met the filtering criteria.
 
-""" %(kmer_top_n, str(min_jacc_sc), str(min_kmer_score))
+""" %(kmer_top_n, str(min_jacc_sc), str(min_kmer_score), kmer_size)
 
-        mdtext += "| Jaccard rank | &nbsp; k-mer 1 &nbsp; |  &nbsp; k-mer 2 &nbsp; | Jaccard index score | k-mer 1 score | k-mer 2 score | mean minimum distance (+- stdev) | # intersections | # union | \n"
-        mdtext += "| :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | \n"
+        mdtext += "| JI rank | &nbsp; k-mer 1 &nbsp; |  &nbsp; k-mer 2 &nbsp; | JI | k-mer 1 sc | k-mer 2 sc | mean min dist | dist stdev | # intersect | # union | \n"
+        mdtext += "| :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | \n"
         jacc_rank = 0
         kmers2sumsc_dic = {}
         for kmers, jacc_idx in sorted(jacc_scores_dic.items(), key=lambda item: item[1], reverse=True):
+            min_dist_mean = jacc_stats_dic[kmers][5]
+            c_intersects = jacc_stats_dic[kmers][7]
+            if c_intersects < 10:
+                continue
+            if min_dist_mean < kmer_size:
+                continue
             jacc_rank += 1
             if jacc_rank > kmer_top_n:
                 break
@@ -8093,11 +8117,9 @@ are shown, with a minimum Jaccard index of %s and a minimum k-mer score of
             kmer2_sc = jacc_stats_dic[kmers][3]
             sum_sc = kmer1_sc + kmer2_sc
             kmers2sumsc_dic[kmers] = sum_sc
-            min_dist_mean = jacc_stats_dic[kmers][5]
             min_dist_stdev = jacc_stats_dic[kmers][6]
-            c_intersects = jacc_stats_dic[kmers][7]
             c_union = jacc_stats_dic[kmers][8]
-            mdtext += "| %i | %s | %s | %.6f | %.6f | %.6f | %.6f (+- %.6f) | %i | %i |\n" %(jacc_rank, kmer1, kmer2, jacc_idx, kmer1_sc, kmer2_sc, min_dist_mean, min_dist_stdev, c_intersects, c_union)
+            mdtext += "| %i | %s | %s | %.6f | %.6f | %.6f | %.3f | %.3f | %i | %i |\n" %(jacc_rank, kmer1, kmer2, jacc_idx, kmer1_sc, kmer2_sc, min_dist_mean, min_dist_stdev, c_intersects, c_union)
         mdtext += "\n&nbsp;\n&nbsp;\n"
 
         if lookup_kmer:
@@ -8106,14 +8128,14 @@ are shown, with a minimum Jaccard index of %s and a minimum k-mer score of
             mdtext += """
 ## Lookup k-mer statistics ### {#lookup-kmer-stats}
 
-**Table:** lookup k-mer statistics (best score rank, average score rank,
+**Table:** lookup k-mer statistics (best score (sc) rank, average (avg) score rank,
 k-mer score, k-mer count,
 count rank) for lookup k-mer %s and training data with additional features.
 
 """ %(lookup_kmer)
 
-            mdtext += "| best score rank | average score rank | &nbsp; k-mer &nbsp; | best k-mer score | average k-mer score | average score stdev | best score motif | average score motif | k-mer count | k-mer count rank | \n"
-            mdtext += "| :-: | :-: | :-: | :-: | :-: |\n"
+            mdtext += "| best sc rank | avg sc rank | &nbsp; k-mer &nbsp; | best k-mer sc | avg k-mer sc | avg sc stdev | best sc motif | avg sc motif | k-mer count | k-mer count rank | \n"
+            mdtext += "| :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | \n"
             lk_best_sc_rank = kmer2scrank_dic[lookup_kmer]
             lk_avg_sc_rank = kmer2avgscrank_dic[lookup_kmer]
             lk_best_sc = kmer2bestsc_dic[lookup_kmer]
@@ -8127,10 +8149,10 @@ count rank) for lookup k-mer %s and training data with additional features.
             pp1 = plots_folder + "/lookup_kmer_%s.avg_sc.png" %(lookup_kmer)
 
             lk_best_plot_file = plots_out_folder + "/lookup_kmer_%s.best_sc.png" %(lookup_kmer)
-            make_motif_plot(kmer2bestmm_dic[kmer], ch_info_dic, lk_best_plot_file,
+            make_motif_plot(kmer2bestmm_dic[lookup_kmer], ch_info_dic, lk_best_plot_file,
                             fid2stdev_dic=False)
             pp2 = plots_folder + "/lookup_kmer_%s.best_sc.png" %(lookup_kmer)
-            mdtext += '| %i | %i | %s | %s | %s | %s | <image src = "%s" width="300px"></image> | <image src = "%s" width="300px"></image> | %i | %i |\n' %(lk_best_sc_rank, lk_avg_sc_rank, kmer, str(lk_best_sc), str(lk_avg_sc), str(lk_avg_sc_stdev), pp1, pp2, kmer_count, kmer_count_rank)
+            mdtext += '| %i | %i | %s | %.6f | %.6f | %.6f | <image src = "%s" width="150px"></image> | <image src = "%s" width="150px"></image> | %i | %i |\n' %(lk_best_sc_rank, lk_avg_sc_rank, kmer, lk_best_sc, lk_avg_sc, lk_avg_sc_stdev, pp2, pp1, kmer_count, kmer_count_rank)
             mdtext += "\n&nbsp;\n&nbsp;\n"
 
             # Lookup k-mer co-occurrence statistics table for additional features.
@@ -8139,26 +8161,26 @@ count rank) for lookup k-mer %s and training data with additional features.
 
 **Table:** Lookup k-mer co-occurrence statistics for for lookup k-mer %s and
 training data with additional features.
-Entries are sorted by the Jaccard index of the two k-mers. The Jaccard index of
+Entries are sorted by the Jaccard index (JI) of the two k-mers. The Jaccard index of
 two k-mers is calculated based on the two sequence sets that contain the
 two k-mers, with each sequence ID being a set member. Scores are best k-mer scores.
 Only the top %i k-mer pairs including %s are shown, with a minimum Jaccard index
 of %s and a minimum k-mer score of %s.
 
-""" %(lookup_kmer, lookup_kmer, kmer_top_n, str(min_jacc_sc), str(min_kmer_score))
+""" %(lookup_kmer, kmer_top_n, lookup_kmer, str(min_jacc_sc), str(min_kmer_score))
 
-            mdtext += "| Jaccard rank | &nbsp; k-mer 1 &nbsp; |  &nbsp; k-mer 2 &nbsp; | Jaccard index score | k-mer 1 score | k-mer 2 score | mean minimum distance (+- stdev) | # intersections | # union | \n"
+            mdtext += "| JI rank | &nbsp; k-mer 1 &nbsp; |  &nbsp; k-mer 2 &nbsp; | JI | k-mer 1 score | k-mer 2 score | mean min dist (+- stdev) | # intersect | # union | \n"
             mdtext += "| :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | \n"
             jacc_rank = 0
             kmers2sumsc_dic = {}
             for kmers, jacc_idx in sorted(jacc_scores_dic.items(), key=lambda item: item[1], reverse=True):
-                jacc_rank += 1
-                if jacc_rank > kmer_top_n:
-                    break
                 kmer1 = jacc_stats_dic[kmers][0]
                 kmer2 = jacc_stats_dic[kmers][1]
                 if kmer1 != lookup_kmer and kmer2 != lookup_kmer:
                     continue
+                jacc_rank += 1
+                if jacc_rank > kmer_top_n:
+                    break
                 kmer1_sc = jacc_stats_dic[kmers][2]
                 kmer2_sc = jacc_stats_dic[kmers][3]
                 sum_sc = kmer1_sc + kmer2_sc
@@ -8215,10 +8237,17 @@ on the positive training set for the two input models. Model 1: model from
     #OUTMD = open(md_out,"w")
     #OUTMD.write("%s\n" %(mdtext))
     #OUTMD.close()
-
     OUTHTML = open(html_out,"w")
     OUTHTML.write("%s\n" %(md2html))
     OUTHTML.close()
+
+    # change <table> to sortable.
+    check_cmd = "sed -i 's/<table>/<table class=" + '"sortable"' + ">/g' " + html_out
+    output = subprocess.getoutput(check_cmd)
+    error = False
+    if output:
+        error = True
+    assert error == False, "sed command returned error:\n%s" %(output)
 
 
 ################################################################################
@@ -12507,7 +12536,7 @@ def process_test_sites(in_bed, out_bed, chr_len_dic,
                        id2pl_dic, args,
                        transcript_regions=False,
                        count_dic=None,
-                       id_prefix="CLIP"):
+                       id_prefix=False):
     """
     Process --in sites from graphprot2 gp.
 
@@ -12557,8 +12586,9 @@ def process_test_sites(in_bed, out_bed, chr_len_dic,
 
             # IDs.
             c_out += 1
-            new_site_id = id_prefix + "_" + str(c_out)
-            if args.keep_ids:
+            if id_prefix:
+                new_site_id = id_prefix + "_" + str(c_out)
+            else:
                 new_site_id = site_id
 
             # Store future uppercase region length.
@@ -13062,7 +13092,7 @@ def add_phastcons_scores_plot(df, fig, gs, i,
     #nn_logo.ax.set_xlim([20, 115])
     #ax.set_xticks([]) # no x-ticks.
     #nn_logo.ax.set_ylim([-.6, .75])
-    if disable_y_labels:
+    if not disable_y_labels:
         ax.set_ylim([0, 1])
         ax.set_yticks([0, 1])
         ax.set_yticklabels(['0', '1'])
