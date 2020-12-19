@@ -617,8 +617,8 @@ def read_bpp_into_dic(bpp_file, vp_dic,
     Return dictionary with base pair+probability list for each sequence
     (key: sequence id, value: "bp_start-bp_end,bp_prob").
     bps_mode: define which base pairs get extracted.
-    bps_mode=1 : only bps with start+end in base vp
-    bps_mode=2 : bps in extended vp region with start or end in base vp
+    bps_mode=1 : bps in extended vp region with start or end in base vp
+    bps_mode=2 : only bps with start+end in base vp
 
     >>> bpp_test = "test_data/test.bpp"
     >>> vp_dic = {"CLIP_01": [150, 250]}
@@ -7584,7 +7584,8 @@ def create_eval_kde_plot(set1_scores, set2_scores, out_plot,
         # Make plot.
         sns.set(style="darkgrid", rc={ "axes.labelcolor": text_color, "text.color": text_color, "xtick.color": text_color, "ytick.color": text_color, "grid.color": plot_color, "axes.edgecolor": plot_color})
         fig, ax = plt.subplots()
-        sns.kdeplot(x="score", data=df, hue="set", palette=["blue", "darkblue"])
+        # aqua, deepskyblue
+        sns.kdeplot(x="score", data=df, hue="set", palette=["blue", "deepskyblue"])
         fig.set_figwidth(5)
         fig.set_figheight(4)
         ax.set(xlabel=x_label)
@@ -10341,8 +10342,6 @@ def load_eval_data(args,
     # Init feat_dic (storing node feature vector data) with sequence one-hot encodings.
     for seq_id in seqs_dic:
         seq = seqs_dic[seq_id]
-        l_seq = len(seq)
-        feat_dic[seq_id] = []
         feat_dic[seq_id] = string_vectorizer(seq, custom_alphabet=fid2cat_dic["fa"])
 
     # Channel info dictionary.
@@ -10484,8 +10483,8 @@ def load_predict_data(args,
                       return_graphs=False):
 
     """
-    Load whole site prediction data from GraphProt2 predict output folder
-    and return.
+    Load prediction data from GraphProt2 predict output folder
+    and return either as list of graphs or list of feature lists.
 
     """
 
@@ -10536,6 +10535,9 @@ def load_predict_data(args,
             fid2norm_dic[feat_id] = feat_norm
     f.closed
     assert fid2type_dic, "no feature infos read in from graphprot2 train feature file %s" %(feat_file)
+    # Check sequence feature.
+    assert "fa" in fid2type_dic, "feature ID \"fa\" not in feature file"
+    assert fid2cat_dic["fa"] == ["A", "C", "G", "U"], "sequence feature alphabet != A,C,G,U"
 
     # args.mode == 2 (predict position-wise scoring profiles) check.
     if args.mode == 2:
@@ -10561,80 +10563,24 @@ def load_predict_data(args,
         if not (args.mode == 2 and fid == "fa"):
             assert gp_fid2row_dic[fid] == fid2row_dic[fid], "feature infos for feature ID \"%s\" differ between gp + train feature files (train: \"%s\", gp: \"%s\")" %(fid, gp_fid2row_dic[fid], fid2row_dic[fid])
 
-    # Get sequence context extension set in gp.
-    con_ext = False
-    gp_settings_file = args.in_folder + "/settings.graphprot2_gp.out"
-    if os.path.exists(gp_settings_file):
-        with open(gp_settings_file) as f:
-            for line in f:
-                cols = line.strip().split("\t")
-                if cols[0] == "con_ext":
-                    if cols[1] == "False":
-                        con_ext = False
-                    else:
-                        con_ext = int(cols[1])
-        f.closed
-    # Get base pair + con_ext settings from train.
-    bps_mode = 1
-    bps_cutoff = 0.5
-    con_ext_train = False
-    train_settings_file = args.model_in_folder + "/settings.graphprot2_train.out"
-    if os.path.exists(train_settings_file):
-        with open(train_settings_file) as f:
-            for line in f:
-                cols = line.strip().split("\t")
-                if cols[0] == "bps_mode":
-                    bps_mode = int(cols[1])
-                if cols[0] == "bps_cutoff":
-                    bps_cutoff = float(cols[1])
-                if cols[0] == "con_ext":
-                    if cols[1] == "False":
-                        con_ext_train = False
-                    else:
-                        con_ext_train = int(cols[1])
-        f.closed
-    # Compare gp + train context settings.
-    seqs_all_uc = False
-    if con_ext:
-        if not con_ext_train:
-            print("WARNING: --con-ext prediction data incompatible with trained model")
-            print("           Changing lowercase context regions to uppercase to")
-            print("            restore compatibility with trained model. To use")
-            print("             lowercase context regions in predictions train")
-            print("              a compatible model (graphprot2 gt --con-ext")
-            print("              and graphprot2 train --uc-context disabled)")
-            seqs_all_uc = True
-
-    # If we have a lowercase uppercase model.
-    if con_ext_train:
-        if con_ext:
-            if args.con_ext:
-                if con_ext_train != args.con_ext:
-                    print("WARNING: set context extension differs between trained model and --con-ext (%i != %i)" %(con_ext_train, predict_con_ext))
-            else:
-                if con_ext_train != con_ext:
-                    print("WARNING: --con-ext differs between trained model and --in dataset (%i != %i)" %(con_ext_train, con_ext))
-        else:
-            # Only a problem for --mode 1 whole site prediction.
-            if args.mode == 1:
-                assert False, "Provided model (--model-in) was trained on upper- and lowercase context, but --in dataset does not contain lowercase context. Please provide a compatible model+dataset combination for whole site prediction (--mode 1)."
-
-        if args.mode == 2:
-            # Convert profile prediction sequences to uppercase.
-            seqs_all_uc = True
-
-    # Check sequence feature.
-    assert "fa" in fid2type_dic, "feature ID \"fa\" not in feature file"
-
-    if con_ext_train:
-        assert fid2cat_dic["fa"] == ["A", "C", "G", "U", "a", "c", "g", "u"], "sequence feature alphabet != A,C,G,U,a,c,g,u"
-    else:
-        assert fid2cat_dic["fa"] == ["A", "C", "G", "U"], "sequence feature alphabet != A,C,G,U"
+    # Get base pair cutoff from train.
+    bps_cutoff = False
+    gp2_train_param_file = args.model_in_folder + "/settings.graphprot2_train.out"
+    assert os.path.isfile(gp2_train_param_file), "missing graphprot2 train parameter file %s" %(gp2_train_param_file)
+    gp2_train_param_dic = read_settings_into_dic(gp2_train_param_file)
+    if "bpp.str" in fid2type_dic:
+        assert "bps_cutoff" in gp2_train_param_dic, "bps_cutoff info missing in graphprot2 train parameter file %s" %(gp2_train_param_file)
+        bps_cutoff = float(cols[1])
+    # Get str_elem_1h info.
+    str_elem_1h = False
+    assert "str_elem_1h" in gp2_train_param_dic, "str_elem_1h info missing in graphprot2 train parameter file %s" %(gp2_train_param_file)
+    if gp2_train_param_dic["str_elem_1h"] == "True":
+        str_elem_1h = True
 
     # Read in FASTA sequences.
     test_fa_in = args.in_folder + "/" + "test.fa"
     assert os.path.exists(test_fa_in), "--in folder does not contain %s"  %(test_fa_in)
-    seqs_dic = read_fasta_into_dic(test_fa_in, all_uc=seqs_all_uc)
+    test_seqs_dic = read_fasta_into_dic(test_fa_in, all_uc=True)
     assert test_seqs_dic, "no sequences read in from FASTA file \"%s\"" %(test_fa_in)
 
     # Get uppercase (viewpoint) region start and ends for each sequence.
@@ -10645,23 +10591,19 @@ def load_predict_data(args,
     feat_dic = {}
 
     # Init feat_dic (storing node feature vector data) with sequence one-hot encodings.
-    for seq_id in seqs_dic:
-        seq = seqs_dic[seq_id]
-        l_seq = len(seq)
-        feat_dic[seq_id] = []
+    for seq_id in test_seqs_dic:
+        seq = test_seqs_dic[seq_id]
         feat_dic[seq_id] = string_vectorizer(seq, custom_alphabet=fid2cat_dic["fa"])
-
-    # Add sequence one-hot channels.
-    for c in fid2cat_dic["fa"]:
-        channel_nr += 1
-        channel_id = c
-        channel_info = "%i\t%s\tfa\tC\tone_hot" %(channel_nr, channel_id)
-        channel_info_list.append(channel_info)
 
     # Check and read in more data.
     for fid, ftype in sorted(fid2type_dic.items()): # fid e.g. fa, ftype: C,N.
-        if fid == "fa": # already added to feat_dic (first item).
-            continue
+        if fid == "fa":
+            # Add sequence one-hot channels.
+            for c in fid2cat_dic["fa"]:
+                channel_nr += 1
+                channel_id = c
+                channel_info = "%i\t%s\tfa\tC\tone_hot" %(channel_nr, channel_id)
+                channel_info_list.append(channel_info)
         if fid == "bpp.str":
             test_bpp_in = args.in_folder + "/" + "test.bpp.str"
             assert os.path.exists(test_bpp_in), "--in folder does not contain %s"  %(test_bpp_in)
@@ -10669,28 +10611,45 @@ def load_predict_data(args,
             bpp_dic = read_bpp_into_dic(test_bpp_in, vp_dic,
                                         bps_mode=args.bps_mode)
             assert bpp_dic, "no base pair information read in (bpp_dic empty)"
-
         else:
             # All features (additional to .fa) like .elem_p.str, .con, .eia, .tra, .rra, or user defined.
             feat_alphabet = fid2cat_dic[fid]
-            test_feat_in = args.in_folder + "/test." + fid
+            test_feat_in = args.in_gt_folder + "/test." + fid
+
             assert os.path.exists(test_feat_in), "--in folder does not contain %s"  %(test_feat_in)
             print("Read in .%s annotations ... " %(fid))
+            n_to_1h = False
+            # Special case: convert elem_p.str probabilities to 1-hot encoding.
+            if fid == "elem_p.str" and str_elem_1h:
+                n_to_1h = True
             feat_dic = read_feat_into_dic(test_feat_in, ftype,
                                           feat_dic=feat_dic,
+                                          n_to_1h=n_to_1h,
                                           label_list=feat_alphabet)
             assert feat_dic, "no .%s information read in (feat_dic empty)" %(fid)
+            if fid == "elem_p.str" and str_elem_1h:
+                ftype = "C"
+            ch_info_dic[fid] = [ftype, [], [], "-"]
             if ftype == "N":
-                channel_nr += 1
-                encoding = fid2norm_dic[fid]
-                channel_info = "%i\t%s\t%s\tN\t%s" %(channel_nr, fid2cat_dic[fid], fid, encoding)
-                channel_info_list.append(channel_info)
-            elif ftype == "C":
-                for c in fid2cat_dic[fid]:
+                for c in feat_alphabet:
                     channel_nr += 1
-                    channel_id = fid + "_" + c
+                    channel_id = c
+                    encoding = fid2norm_dic[fid]
+                    channel_info = "%i\t%s\t%s\tN\t%s" %(channel_nr, channel_id, fid, encoding)
+                    channel_info_list.append(channel_info)
+                    ch_info_dic[fid][1].append(channel_nr-1)
+                    ch_info_dic[fid][2].append(channel_id)
+                    ch_info_dic[fid][3] = encoding
+            elif ftype == "C":
+                for c in feat_alphabet:
+                    channel_nr += 1
+                    #channel_id = fid + "_" + c
+                    channel_id = c
                     channel_info = "%i\t%s\t%s\tC\tone_hot" %(channel_nr, channel_id, fid)
                     channel_info_list.append(channel_info)
+                    ch_info_dic[fid][1].append(channel_nr-1)
+                    ch_info_dic[fid][2].append(channel_id)
+                    ch_info_dic[fid][3] = "-"
             else:
                 assert False, "invalid feature type given (%s) for feature %s" %(ftype,fid)
 
@@ -10712,7 +10671,7 @@ def load_predict_data(args,
     idx2id_dic = {}
     id2idx_dic = {}
     i = 0
-    for seq_id,seq in sorted(seqs_dic.items()):
+    for seq_id,seq in sorted(test_seqs_dic.items()):
         seq_ids_list.append(seq_id)
         label_list.append(i)
         id2idx_dic[seq_id] = i
@@ -10726,7 +10685,7 @@ def load_predict_data(args,
 
     for idx, label in enumerate(label_list):
         seq_id = seq_ids_list[idx]
-        seq = seqs_dic[seq_id]
+        seq = test_seqs_dic[seq_id]
         l_seq = len(seq)
 
         # Make edge indices for backbone.
@@ -10786,10 +10745,10 @@ def load_predict_data(args,
     # Return some double talking jive data.
     if return_graphs:
         assert all_graphs, "no graphs constructed (all_graphs empty)"
-        return seqs_dic, idx2id_dic, all_graphs
+        return test_seqs_dic, idx2id_dic, all_graphs
     else:
         assert all_features, "no graphs constructed (all_features empty)"
-        return seqs_dic, bpp_dic, idx2id_dic, all_features
+        return test_seqs_dic, bpp_dic, idx2id_dic, all_features
 
 
 ################################################################################
@@ -11368,8 +11327,6 @@ def load_training_data(args,
     # Init feat_dic (storing node feature vector data) with sequence one-hot encodings.
     for seq_id in seqs_dic:
         seq = seqs_dic[seq_id]
-        l_seq = len(seq)
-        feat_dic[seq_id] = []
         feat_dic[seq_id] = string_vectorizer(seq, custom_alphabet=fid2cat_dic["fa"])
     # Add sequence one-hot channels.
     for c in fid2cat_dic["fa"]:

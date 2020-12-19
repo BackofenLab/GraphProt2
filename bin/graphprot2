@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 from torch_geometric.data import DataLoader, Data
-from graphprot2.MyNets import FunnelGNN,MyDataset
+from graphprot2.MyNets import FunnelGNN, MyDataset
 from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
 from graphprot2 import model_util
 from graphprot2 import gp2lib
@@ -389,18 +389,12 @@ def setup_argument_parser():
                    default = 1,
                    choices = [1,2],
                    help = "Define prediction mode. (1) predict whole sites, (2) predict position-wise scoring profiles and extract top-scoring sites from profiles (default: 1)")
-    p_pr.add_argument("--win-size",
-                   dest="win_size",
+    p_pr.add_argument("--win-ext",
+                   dest="win_ext",
                    type = int,
                    metavar='int',
-                   default = 11,
-                   help = "Windows size for calculating position-wise scoring profiles. The center position of the window gets the window score assigned (therefore only uneven --win-size numbers are supported) (default: 11)")
-    p_pr.add_argument("--peak-ext",
-                   dest = "peak_ext",
-                   type = int,
-                   metavar='int',
-                   default = 30,
-                   help = "Up- and downstream peak position extension for extracting top-scoring sites from fixed-window profiles (default: 30)")
+                   default = 20,
+                   help = "Window middle position extension on both sides for calculating position-wise scoring profiles. The center position of the window gets the window score assigned. If --seq-ext + --mode 1 was used in graphprot2 train, best set --win-ext to --seq-ext value (default: 20)")
     p_pr.add_argument("--thr",
                    dest="sc_thr",
                    type = float,
@@ -2377,7 +2371,7 @@ def main_eval(args):
     """
     lookup_kmer = False
     lookup_plot_file = False
-    c_top_kmers = 25
+    c_top_kmers = 30
 
     if args.report:
 
@@ -2873,15 +2867,12 @@ def main_predict(args):
 
     # Silence con_ext options.
     args.con_ext = False
+    args.bps_mode = 1
 
     # --in folder containing prediction data.
     assert os.path.isdir(args.in_folder), "--in folder does not exist"
     # --model-in folder containing trained model.
     assert os.path.isdir(args.model_in_folder), "--model-in folder does not exist"
-    # Check set win_size (uneven number demanded).
-    if args.mode == 2:
-        assert args.win_size % 2, "--win-size needs to be uneven"
-        assert args.win_size > 1 and args.win_size <= 31, "use reasonable --win-size (> 1 and <= 31) or refer to wide profiles output"
 
     # Model and model parameter file.
     params_file = args.model_in_folder + "/final.params"
@@ -2895,14 +2886,60 @@ def main_predict(args):
     assert "batch_size" in params_dic, "batch_size info missing in model parameter file %s" %(params_file)
     assert "num_features" in params_dic, "num_features info missing in model parameter file %s" %(params_file)
     assert "dr" in params_dic, "dr (dropout rate) info missing in model parameter file %s" %(params_file)
+    assert "incr_hidden_dim" in params_dic, "incr_hidden_dim info missing in model parameter file %s" %(params_file)
+    assert "gadd_pool" in params_dic, "gadd_pool info missing in model parameter file %s" %(params_file)
+    assert "nr_hidden_layers" in params_dic, "nr_hidden_layers info missing in model parameter file %s" %(params_file)
     fc_hidden_dim = int(params_dic["fc_hidden_dim"])
     node_hidden_dim	= int(params_dic["node_hidden_dim"])
     batch_size = int(params_dic["batch_size"])
     num_features = int(params_dic["num_features"])
+    nr_hidden_layers = int(params_dic["nr_hidden_layers"])
     dr = float(params_dic["dr"])
     args.undirected = False
     if "undirected" in params_dic:
         args.undirected = True
+    gadd_pool = True
+    if params_dic["gadd_pool"] == "False":
+        gadd_pool = False
+    incr_hidden_dim = False
+    if params_dic["incr_hidden_dim"] == "True":
+        incr_hidden_dim = True
+
+    """
+    Make sure --model-in and --in features.out is compatible.
+    Features model was trained on need to be available / the same
+    in --in folder.
+
+    """
+    # Get model feature infos from --model-in.
+    gp2_train_features_file = args.train_in_folder + "/features.out"
+    train_fid_dic = {}
+    with open(gp2_train_features_file) as f:
+        for line in f:
+            cols = line.strip().split("\t")
+            cols_str = ",".join(cols)
+            train_fid_dic[cols[0]] = cols_str
+    f.closed
+    assert train_fid_dic, "train_fid_dic empty"
+    assert "fa" in train_fid_dic, "sequence feature \"fa\" missing in %s" %(gp2_train_features_file)
+    # Get feature infos from prediction dataset --in.
+    gp2_gp_features_file = args.in_folder + "/features.out"
+    gp_fid_dic = {}
+    with open(gp2_gp_features_file) as f:
+        for line in f:
+            cols = line.strip().split("\t")
+            cols_str = ",".join(cols)
+            gp_fid_dic[cols[0]] = cols_str
+    f.closed
+    assert gp_fid_dic, "train_fid_dic empty"
+    assert "fa" in gp_fid_dic, "sequence feature \"fa\" missing in %s" %(gp2_gp_features_file)
+    # Pairwise feature comparison.
+    # assert len(train_fid_dic) == len(gp_fid_dic), "differing # of features encountered in --in and --model-in features.out (%i vs %i). --in and --model need to be compatible with each other regarding used features" %(len(gp_fid_dic), len(train_fid_dic))
+    for fid in train_fid_dic:
+        assert fid in gp_fid_dic, "feature ID %s found in --train-in but missing in --in features.out file. --in and --model need to be compatible with each other regarding used features" %(fid)
+        assert train_fid_dic[fid] == gp_fid_dic[fid], "feature ID %s annotation varies in --in and --model-in features.out (\"%s\" vs \"%s\"). --in and --model need to be compatible with each other regarding used features" %(fid, gp_fid_dic[fid], train_fid_dic[fid])
+    # No base pairs allowed in profile prediction mode.
+    assert "bpp.str" not in train_fid_dic, "--model-in model was trained with base pair information, but profile prediction mode (--mode 2) so far does not support base pair information. Use --mode 1 or train models without base pair information"
 
     # Generate results output folder.
     out_folder = args.out_folder
@@ -2914,40 +2951,29 @@ def main_predict(args):
     gp2_train_param_file = model_folder + "/settings.graphprot2_train.out"
     assert os.path.isfile(gp2_train_param_file), "missing graphprot2 train parameter file %s" %(gp2_train_param_file)
     gp2_train_param_dic = gp2lib.read_settings_into_dic(gp2_train_param_file)
+    assert "bps_cutoff" in gp2_train_param_dic, "bps_cutoff info missing in graphprot2 train parameter file %s" %(gp2_train_param_file)
+    args.bps_cutoff = bps_cutoff = float(cols[1])
 
-    #if "use_bps" in gp2_train_param_dic:
-    #    assert gp2_train_param_dic["use_bps"] == "False", "graphprot2 eval currently does not support --use-bps in grahprot2 train"
-    assert "con_ext" in gp2_train_param_dic, "con_ext info tag missing in %s" %(gp2_train_param_file)
-    # Get nucleotide alphabet + con_ext info.
-    con_ext = False
-    con_ext_str = gp2_train_param_dic["con_ext"]
-    if con_ext_str != "False": # if not False, must be INT.
-        con_ext = int(con_ext_str)
-    if args.con_ext:
-        assert con_ext, "--con-ext set but --model-in model does not support lowercase context"
-
-    # Output files.
+    # Whole-site predictions output files.
     ws_scores_out = out_folder + "/" + "whole_site_scores.out"
     ws_scores_bed = out_folder + "/" + "whole_site_scores.bed"
-    score_profiles_out = out_folder + "/" + "profiles.out"
-    peak_regions_bed = out_folder + "/" + "profiles_peak_regions.bed"
-    peak_regions_ref_bed = out_folder + "/" + "profiles_peak_regions.ref.bed"
-    top_prof_sites_bed = out_folder + "/" + "wide_profiles_top_sites.bed"
-    top_prof_sites_ref_bed = out_folder + "/" + "wide_profiles_top_sites.ref.bed"
-    top_prof_sites_merged_bed = out_folder + "/" + "wide_profiles_top_sites.merged.bed"
-    top_prof_sites_merged_ref_bed = out_folder + "/" + "wide_profiles_top_sites.merged.ref.bed"
-    # Profile window scores output file.
-    prof_win_sc_out_file = out_folder + "/" + "profiles_window_scores.out"
-    # Wide (fixed) window scores output file.
-    pe_prof_win_sc_out_file = out_folder + "/" + "wide_profiles_window_scores.out"
-    if os.path.exists(prof_win_sc_out_file):
-        os.remove(prof_win_sc_out_file)
-    if os.path.exists(pe_prof_win_sc_out_file):
-        os.remove(pe_prof_win_sc_out_file)
+    # Profile predictions output files.
+    score_profiles_out = out_folder + "/" + "profiles.winext%i.out" %(args.win_ext)
+    peak_regions_bed = out_folder + "/" + "profiles.winext%i.peak_regions.bed" %(args.win_ext)
+    peak_regions_ref_bed = out_folder + "/" + "profiles.winext%i.peak_regions.ref.bed" %(args.win_ext)
+    peak_pos_bed = out_folder + "/" + "profiles.winext%i.peak_positions.bed" %(args.win_ext)
+    peak_pos_ref_bed = out_folder + "/" + "profiles.winext%i.peak_pos.ref.bed" %(args.win_ext)
+    peak_pos_ext_bed = out_folder + "/" + "profiles.winext%i.peak_pos.ext.bed" %(args.win_ext)
+    peak_pos_ext_ref_bed = out_folder + "/" + "profiles.winext%i.peak_pos.ext.ref.bed" %(args.win_ext)
+    peak_pos_ext_merged_bed = out_folder + "/" + "profiles.winext%i.peak_pos.ext.merged.bed" %(args.win_ext)
+    peak_pos_ext_merged_ref_bed = out_folder + "/" + "profiles.winext%i.peak_pos.ext.merged.ref.bed" %(args.win_ext)
 
     print("Model training input folder:       %s" %(model_folder))
     print("Prediction set input folder:       %s" %(in_folder))
     print("Prediction results output folder:  %s" %(out_folder))
+
+    # Window length check.
+    win_len = args.win_ext * 2 + 1
 
     # Read in region information.
     id2chr_dic = {}
@@ -2955,6 +2981,7 @@ def main_predict(args):
     id2e_dic = {}
     id2pol_dic = {}
     test_bed_in = args.in_folder + "/" + "test.bed"
+    c_shorties = 0
     only_seq = True
     if os.path.exists(test_bed_in):
         only_seq = False
@@ -2965,6 +2992,9 @@ def main_predict(args):
                 chr_id = cols[0]
                 site_s = int(cols[1])
                 site_e = int(cols[2])
+                site_l = site_e - site_s
+                if site_l < win_len:
+                    c_shorties += 1
                 site_id = cols[3]
                 site_pol = cols[5]
                 id2chr_dic[site_id] = chr_id
@@ -2973,12 +3003,9 @@ def main_predict(args):
                 id2pol_dic[site_id] = site_pol
         f.closed
 
-    if args.mode == 2:
-
-        print("Profile window size:           %i" %(args.win_size))
-        print("Top-scoring sites --peak-ext:  %i" %(args.peak_ext))
-    if con_ext:
-        print("--model-in model with --con-ext %i ... " %(con_ext))
+    # Report sites < window length.
+    if c_shorties:
+        print("WARNING: %i --in sites < window length encountered" %(c_shorties))
 
     # Output mode settings.
     settings_file = out_folder + "/settings.graphprot2_predict.out"
@@ -3020,6 +3047,9 @@ def main_predict(args):
                           node_hidden_dim=node_hidden_dim,
                           fc_hidden_dim=fc_hidden_dim,
                           dropout_rate=dr,
+                          nr_hidden_layers=nr_hidden_layers,
+                          add_gadd=gadd_pool,
+                          incr_hidden_dim=incr_hidden_dim,
                           out_dim=2).to(device)
         model.load_state_dict(torch.load(model_file))
 
@@ -3053,20 +3083,16 @@ def main_predict(args):
             WSOUT.close()
 
     """
-    CASE 2: profile + peak predictions.
+    CASE 2: window profile + peak predictions.
 
-    - Predict position-wise scoring profiles using args.win_size
-      windows size
-    - Extract peak regions from profiles (regions above args.sc_thr)
-    - Predict wide profiles using --peak-ext (and optionally --con-ext)
-    - Extract peak regions from wide profiles and store top-scoring positions
-      extended by --peak-ext (and optionally --con-ext) as top-scoring
-      sites
-    - Merge overlapping peak regions and top-scoring sites (controlled by
-      --max-merge-dist).
+    - Predict position-wise scoring profiles in sliding window fashion,
+      with window size args.win_ext * 2 + 1 (truncated at borders)
+    - Based on position-wise scores extract peak regions from profiles,
+      defined as regions with scores >= args.sc_thr
+    - Optionally control merging of nearby peak regions (and extended
+      top position sites) by --max-merge-dist
     - If genomic or transcript regions given as input, map peak regions
       and top-scoring sites to reference (update coordinates).
-
 
     # Shuffle graphs.
     random.seed(1)
@@ -3089,35 +3115,161 @@ def main_predict(args):
                                                              return_graphs=False)
 
         print("# dataset features:  %i" %(num_features))
-        print("Dataset size:        %i" %(len(all_graphs)))
+        print("Dataset size:        %i" %(len(all_features)))
+
+        # Create window graphs.
+        all_win_graphs = []
+        seq_len_list = []
+        c_all_seq_len = 0
+        win_extlr = args.win_ext
+
+        print("Create window graphs ... ")
+        for feat_list in all_features:
+            l_seq = len(feat_list)
+            # l_seq == window graphs for sequence.
+            seq_len_list.append(l_seq)
+            c_all_seq_len += l_seq
+            # For each position in feat_list.
+            l_feat = len(feat_list)
+            for wi in range(l_feat):
+                reg_s = wi - win_extlr
+                reg_e = wi + win_extlr + 1
+                if reg_e > l_feat:
+                    reg_e = l_feat
+                if reg_s < 0:
+                    reg_s = 0
+                feat_list_win = feat_list[reg_s:reg_e]
+                l_feat_win = len(feat_list_win)
+                # Construct window graph.
+                edge_index_1 = []
+                edge_index_2 = []
+                for ni in range(l_feat_win - 1):
+                    edge_index_1.append(ni)
+                    edge_index_2.append(ni+1)
+                    if args.undirected:
+                        edge_index_1.append(ni+1)
+                        edge_index_2.append(ni)
+
+                edge_index = torch.tensor([edge_index_1, edge_index_2], dtype=torch.long)
+                x = torch.tensor(feat_list_win, dtype=torch.float)
+                data = Data(x=x, edge_index=edge_index, y=1)
+                all_win_graphs.append(data)
+
+        # Checks.
+        c_all_win_graphs = len(all_win_graphs)
+        assert c_all_win_graphs, "no window graphs constructed (# window graphs == 0)"
+        assert c_all_seq_len == c_all_win_graphs, "total sequence length != # of window graphs (%i != %i)" %(c_all_seq_len, c_all_win_graphs)
 
         # Load model.
         print("Load model ... ")
         model = FunnelGNN(input_dim=num_features,
                           node_hidden_dim=node_hidden_dim,
                           fc_hidden_dim=fc_hidden_dim,
+                          dropout_rate=dr,
+                          nr_hidden_layers=nr_hidden_layers,
+                          add_gadd=gadd_pool,
+                          incr_hidden_dim=incr_hidden_dim,
                           out_dim=2).to(device)
         model.load_state_dict(torch.load(model_file))
 
-        # For each graph, predict profiles.
-        all_graphs = [] # window graphs ...
-        all_labels = [] # [0,0,0,0,0,1,1,1,1,1,...]
-        extlr = int(args.win_size/2)
-        for idx,feat_list in all_features:
+        # Load dataset.
+        print("Load window graphs dataset ... ")
+        predict_dataset = MyDataset(all_win_graphs)
+        predict_loader = DataLoader(predict_dataset, batch_size=batch_size, shuffle=False)
+
+        # Predict.
+        print("Predict windows ... ")
+        win_scores = model_util.get_scores(predict_loader, device, model,
+                                           min_max_norm=True)
+
+        # Checks.
+        c_win_scores = len(win_scores)
+        assert c_win_scores == c_all_seq_len, "# window graph scores != total sequence length (%i != %i)" %(c_win_scores, c_all_seq_len)
+
+        # Create list of profile scores.
+        profile_scores_ll = []
+        si = 0
+        for l in seq_len_list:
+            se = si + l
+            profile_scores_ll.append(win_scores[si:se])
+            si += l
+        assert profile_scores_ll, "profile_scores_ll list empty"
+        assert len(profile_scores_ll) == c_ws_scores, "length profile scores list != # whole-site scores"
+
+        # Check lengths.
+        for idx in idx2id_dic:
             seq_id = idx2id_dic[idx]
             seq = seqs_dic[seq_id]
-            for idx in range(len(feat_list)): # range(len ...) not pythonic, just for i in list ..
-                reg_s = idx - extlr
-                reg_e = idx + extlr + 1
+            seq_l = len(seq)
+            scl_l = len(profile_scores_ll[idx])
+            assert seq_l == scl_l, "differing lengths for sequence and profile scores list (seq_id: %s, %i != %i)" %(seq_id, seq_l, scl_l)
 
 
-        """
-        if con_ext:
-            Adapt nucleotide feature, 10000000 : A, 00001000 : a
-        if not con_ext:
-            1000
-            0000
-        """
+
+"""
+
+    # Profile predictions output files.
+    score_profiles_out = out_folder + "/" + "profiles.winext%i.out" %(args.win_ext)
+    peak_regions_bed = out_folder + "/" + "profiles.winext%i.peak_regions.bed" %(args.win_ext)
+    peak_regions_ref_bed = out_folder + "/" + "profiles.winext%i.peak_regions.ref.bed" %(args.win_ext)
+    peak_pos_bed = out_folder + "/" + "profiles.winext%i.peak_positions.bed" %(args.win_ext)
+    peak_pos_ref_bed = out_folder + "/" + "profiles.winext%i.peak_pos.ref.bed" %(args.win_ext)
+    peak_pos_ext_bed = out_folder + "/" + "profiles.winext%i.peak_pos.ext.bed" %(args.win_ext)
+    peak_pos_ext_ref_bed = out_folder + "/" + "profiles.winext%i.peak_pos.ext.ref.bed" %(args.win_ext)
+    peak_pos_ext_merged_bed = out_folder + "/" + "profiles.winext%i.peak_pos.ext.merged.bed" %(args.win_ext)
+    peak_pos_ext_merged_ref_bed = out_folder + "/" + "profiles.winext%i.peak_pos.ext.merged.ref.bed" %(args.win_ext)
+
+"""
+
+        PROFOUT = open(score_profiles_out, "w")
+        PEAKOUT = open(peak_regions_bed, "w")
+        PEAKROUT = open(peak_regions_ref_bed, "w")
+        TOPOUT = open(top_prof_sites_bed, "w")
+        TOPROUT = open(top_prof_sites_ref_bed, "w")
+        # Peak count.
+        peak_i = 0
+
+
+
+            # Get peak regions + positions.
+            peak_list = gp2lib.list_extract_peaks(window_scores,
+                                                  max_merge_dist=args.max_merge_dist,
+                                                  coords="bed",
+                                                  sc_thr=args.sc_thr)
+
+
+
+            # Output peak regions.
+            for peak_reg in peak_list:
+                peak_s = peak_reg[0]
+                peak_e = peak_reg[1]
+                top_pos = peak_reg[2]
+                top_sc = peak_reg[3]
+                peak_i += 1
+                peak_id = "peak_%i" %(peak_i)
+                PEAKOUT.write("%s\t%i\t%i\t%s,%i,%f\t0\t+\n" %(seq_id, peak_s, peak_e, peak_id, top_pos, top_sc))
+                if not only_seq:
+                    new_s, new_e = gp2lib.bed_convert_coords(peak_s, peak_e, ref_s, ref_e, site_pol)
+                    new_top_s, new_top_e = gp2lib.bed_convert_coords(top_pos-1, top_pos, ref_s, ref_e, site_pol)
+                    PEAKROUT.write("%s\t%i\t%i\t%s,%i,%f\t0\t%s\n" %(chr_id, new_s, new_e, peak_id, new_top_e, top_sc, site_pol))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
