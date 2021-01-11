@@ -10490,14 +10490,14 @@ def load_predict_data(args,
 
     # Checks.
     assert os.path.isdir(args.in_folder), "--in folder does not exist"
-    assert os.path.isdir(args.model_in_folder), "--model-in folder does not exist"
+    assert os.path.isdir(args.train_in_folder), "--train-in model folder does not exist"
 
     # Feature file containing info for features used for model training.
-    feat_file = args.model_in_folder + "/" + "features.out"
+    feat_file = args.train_in_folder + "/" + "features.out"
     assert os.path.exists(feat_file), "%s features file expected but not does not exist" %(feat_file)
 
     # Read in model parameters.
-    params_file = args.model_in_folder + "/final.params"
+    params_file = args.train_in_folder + "/final.params"
     assert os.path.isfile(params_file), "missing model training parameter file %s" %(params_file)
     params_dic = read_settings_into_dic(params_file)
     assert "num_features" in params_dic, "num_features info missing in model parameter file %s" %(params_file)
@@ -10565,7 +10565,7 @@ def load_predict_data(args,
 
     # Get base pair cutoff from train.
     bps_cutoff = False
-    gp2_train_param_file = args.model_in_folder + "/settings.graphprot2_train.out"
+    gp2_train_param_file = args.train_in_folder + "/settings.graphprot2_train.out"
     assert os.path.isfile(gp2_train_param_file), "missing graphprot2 train parameter file %s" %(gp2_train_param_file)
     gp2_train_param_dic = read_settings_into_dic(gp2_train_param_file)
     if "bpp.str" in fid2type_dic:
@@ -10604,6 +10604,7 @@ def load_predict_data(args,
                 channel_id = c
                 channel_info = "%i\t%s\tfa\tC\tone_hot" %(channel_nr, channel_id)
                 channel_info_list.append(channel_info)
+            continue
         if fid == "bpp.str":
             test_bpp_in = args.in_folder + "/" + "test.bpp.str"
             assert os.path.exists(test_bpp_in), "--in folder does not contain %s"  %(test_bpp_in)
@@ -10614,7 +10615,7 @@ def load_predict_data(args,
         else:
             # All features (additional to .fa) like .elem_p.str, .con, .eia, .tra, .rra, or user defined.
             feat_alphabet = fid2cat_dic[fid]
-            test_feat_in = args.in_gt_folder + "/test." + fid
+            test_feat_in = args.in_folder + "/test." + fid
 
             assert os.path.exists(test_feat_in), "--in folder does not contain %s"  %(test_feat_in)
             print("Read in .%s annotations ... " %(fid))
@@ -10629,7 +10630,6 @@ def load_predict_data(args,
             assert feat_dic, "no .%s information read in (feat_dic empty)" %(fid)
             if fid == "elem_p.str" and str_elem_1h:
                 ftype = "C"
-            ch_info_dic[fid] = [ftype, [], [], "-"]
             if ftype == "N":
                 for c in feat_alphabet:
                     channel_nr += 1
@@ -10637,9 +10637,6 @@ def load_predict_data(args,
                     encoding = fid2norm_dic[fid]
                     channel_info = "%i\t%s\t%s\tN\t%s" %(channel_nr, channel_id, fid, encoding)
                     channel_info_list.append(channel_info)
-                    ch_info_dic[fid][1].append(channel_nr-1)
-                    ch_info_dic[fid][2].append(channel_id)
-                    ch_info_dic[fid][3] = encoding
             elif ftype == "C":
                 for c in feat_alphabet:
                     channel_nr += 1
@@ -10647,9 +10644,6 @@ def load_predict_data(args,
                     channel_id = c
                     channel_info = "%i\t%s\t%s\tC\tone_hot" %(channel_nr, channel_id, fid)
                     channel_info_list.append(channel_info)
-                    ch_info_dic[fid][1].append(channel_nr-1)
-                    ch_info_dic[fid][2].append(channel_id)
-                    ch_info_dic[fid][3] = "-"
             else:
                 assert False, "invalid feature type given (%s) for feature %s" %(ftype,fid)
 
@@ -10768,10 +10762,10 @@ def load_ws_predict_data(args,
 
     # Checks.
     assert os.path.isdir(args.in_folder), "--in folder does not exist"
-    assert os.path.isdir(args.model_in_folder), "--model-in folder does not exist"
+    assert os.path.isdir(args.train_in_folder), "--train-in model folder does not exist"
 
     # Feature file containing info for features used for model training.
-    feat_file = args.model_in_folder + "/" + "features.out"
+    feat_file = args.train_in_folder + "/" + "features.out"
     assert os.path.exists(feat_file), "%s features file expected but not does not exist" %(feat_file)
 
     # Data ID.
@@ -10877,7 +10871,7 @@ def load_ws_predict_data(args,
     bps_mode = 1
     bps_cutoff = 0.5
     con_ext_train = False
-    train_settings_file = args.model_in_folder + "/settings.graphprot2_train.out"
+    train_settings_file = args.train_in_folder + "/settings.graphprot2_train.out"
     if os.path.exists(train_settings_file):
         with open(train_settings_file) as f:
             for line in f:
@@ -12491,6 +12485,7 @@ def revise_in_sites(in_bed, out_bed,
 
 def process_test_sites(in_bed, out_bed, chr_len_dic,
                        id2pl_dic, args,
+                       check_ids=False,
                        transcript_regions=False,
                        count_dic=None,
                        id_prefix=False):
@@ -12543,6 +12538,10 @@ def process_test_sites(in_bed, out_bed, chr_len_dic,
 
             # IDs.
             c_out += 1
+            # Remove white spaces from IDs.
+            if check_ids:
+                site_id = site_id.strip().replace(" ", "_")
+            # New IDs.
             if id_prefix:
                 new_site_id = id_prefix + "_" + str(c_out)
             else:

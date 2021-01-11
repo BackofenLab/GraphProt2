@@ -370,8 +370,8 @@ def setup_argument_parser():
                    type=str,
                    required = True,
                    help = "Input prediction data folder (output of graphprot2 gp)")
-    p_prm.add_argument("--model-in",
-                   dest="model_in_folder",
+    p_prm.add_argument("--train-in",
+                   dest="train_in_folder",
                    type=str,
                    required = True,
                    help = "Input model training folder containing model file and parameters (output of graphprot2 train)")
@@ -558,7 +558,7 @@ def setup_argument_parser():
                    dest="eia_all_ex",
                    default = False,
                    action = "store_true",
-                   help = "Use all annotated exons in --gtf file, instead of exons of most prominent transcripts or exon defined by --tr-list. Set --tr-list will this be effective only for --tra (default: False)")
+                   help = "Use all annotated exons in --gtf file, instead of exons of most prominent transcripts or exon defined by --tr-list. Set this and --tr-list will be effective only for --tra (default: False)")
     p_gta.add_argument("--tr-list",
                    dest="tr_list",
                    type=str,
@@ -713,6 +713,11 @@ def setup_argument_parser():
                    type=str,
                    metavar='str',
                    help = "Supply file with transcript IDs (one ID per row) for exon-intron labeling (using the corresponding exon regions from --gtf). By default, exon regions of the most prominent transcripts (automatically selected from --gtf) are used (default: False)")
+    p_gpa.add_argument("--eia-all-ex",
+                   dest="eia_all_ex",
+                   default = False,
+                   action = "store_true",
+                   help = "Use all annotated exons in --gtf file, instead of exons of most prominent transcripts or exon defined by --tr-list. Set this and --tr-list will be effective only for --tra. NOTE that by default --eia-all-ex is disabled, even if --train-in model was trained with --eia-all-ex (default: False)")
     p_gpa.add_argument("--phastcons",
                    dest="pc_bw",
                    type=str,
@@ -2872,11 +2877,11 @@ def main_predict(args):
     # --in folder containing prediction data.
     assert os.path.isdir(args.in_folder), "--in folder does not exist"
     # --model-in folder containing trained model.
-    assert os.path.isdir(args.model_in_folder), "--model-in folder does not exist"
+    assert os.path.isdir(args.train_in_folder), "--model-in folder does not exist"
 
     # Model and model parameter file.
-    params_file = args.model_in_folder + "/final.params"
-    model_file = args.model_in_folder + "/final.model"
+    params_file = args.train_in_folder + "/final.params"
+    model_file = args.train_in_folder + "/final.model"
     assert os.path.isfile(params_file), "missing model training parameter file %s" %(params_file)
     assert os.path.isfile(params_file), "missing model file %s" %(model_file)
     # Read in and check model parameters.
@@ -2945,14 +2950,14 @@ def main_predict(args):
     out_folder = args.out_folder
     if not os.path.exists(out_folder):
         os.makedirs(out_folder)
-    model_folder = args.model_in_folder
+    model_folder = args.train_in_folder
 
     # Get graphprot2 train parameters.
     gp2_train_param_file = model_folder + "/settings.graphprot2_train.out"
     assert os.path.isfile(gp2_train_param_file), "missing graphprot2 train parameter file %s" %(gp2_train_param_file)
     gp2_train_param_dic = gp2lib.read_settings_into_dic(gp2_train_param_file)
     assert "bps_cutoff" in gp2_train_param_dic, "bps_cutoff info missing in graphprot2 train parameter file %s" %(gp2_train_param_file)
-    args.bps_cutoff = bps_cutoff = float(cols[1])
+    args.bps_cutoff = float(gp2_train_param_dic["bps_cutoff"])
 
     # Whole-site predictions output files.
     ws_scores_out = out_folder + "/" + "whole_site_scores.out"
@@ -2969,7 +2974,7 @@ def main_predict(args):
     peak_pos_ext_merged_ref_bed = out_folder + "/" + "profiles.winext%i.peak_pos.ext.merged.ref.bed" %(args.win_ext)
 
     print("Model training input folder:       %s" %(model_folder))
-    print("Prediction set input folder:       %s" %(in_folder))
+    print("Prediction set input folder:       %s" %(args.in_folder))
     print("Prediction results output folder:  %s" %(out_folder))
 
     # Window length check.
@@ -2982,6 +2987,7 @@ def main_predict(args):
     id2pol_dic = {}
     test_bed_in = args.in_folder + "/" + "test.bed"
     c_shorties = 0
+    # only_seq : original input were sequences.
     only_seq = True
     if os.path.exists(test_bed_in):
         only_seq = False
@@ -3194,9 +3200,27 @@ def main_predict(args):
             profile_scores_ll.append(win_scores[si:se])
             si += l
         assert profile_scores_ll, "profile_scores_ll list empty"
-        assert len(profile_scores_ll) == c_ws_scores, "length profile scores list != # whole-site scores"
+        l_all_features = len(all_features)
+        l_profile_scores_ll = len(profile_scores_ll)
+        assert l_profile_scores_ll == l_all_features, "length profile scores list != length all features list"
 
-        # Check lengths.
+        """
+        Extract peak regions, and store peak regions and top scoring positions
+        in various output files (if not only_seq also regions mapped to reference).
+
+        """
+
+        PROFOUT = open(score_profiles_out, "w")
+        PEAKREGOUT = open(peak_regions_bed, "w")
+        PEAKPOSOUT = open(peak_pos_bed, "w")
+        PEAKPOSEXTOUT = open(peak_pos_ext_bed, "w")
+        if not only_seq:
+            PEAKREGREFOUT = open(peak_regions_ref_bed, "w")
+            PEAKPOSREFOUT = open(peak_pos_ref_bed, "w")
+            PEAKPOSEXTREFOUT = open(peak_pos_ext_ref_bed, "w")
+
+        peaks_found = 0
+
         for idx in idx2id_dic:
             seq_id = idx2id_dic[idx]
             seq = seqs_dic[seq_id]
@@ -3204,376 +3228,94 @@ def main_predict(args):
             scl_l = len(profile_scores_ll[idx])
             assert seq_l == scl_l, "differing lengths for sequence and profile scores list (seq_id: %s, %i != %i)" %(seq_id, seq_l, scl_l)
 
+            if not only_seq:
+                chr_id = id2chr_dic[seq_id]
+                ref_s = id2s_dic[seq_id]
+                ref_e = id2e_dic[seq_id]
+                ref_pol = id2pol_dic[seq_id]
 
+            seq_list = list(seq)
 
-"""
-
-    # Profile predictions output files.
-    score_profiles_out = out_folder + "/" + "profiles.winext%i.out" %(args.win_ext)
-    peak_regions_bed = out_folder + "/" + "profiles.winext%i.peak_regions.bed" %(args.win_ext)
-    peak_regions_ref_bed = out_folder + "/" + "profiles.winext%i.peak_regions.ref.bed" %(args.win_ext)
-    peak_pos_bed = out_folder + "/" + "profiles.winext%i.peak_positions.bed" %(args.win_ext)
-    peak_pos_ref_bed = out_folder + "/" + "profiles.winext%i.peak_pos.ref.bed" %(args.win_ext)
-    peak_pos_ext_bed = out_folder + "/" + "profiles.winext%i.peak_pos.ext.bed" %(args.win_ext)
-    peak_pos_ext_ref_bed = out_folder + "/" + "profiles.winext%i.peak_pos.ext.ref.bed" %(args.win_ext)
-    peak_pos_ext_merged_bed = out_folder + "/" + "profiles.winext%i.peak_pos.ext.merged.bed" %(args.win_ext)
-    peak_pos_ext_merged_ref_bed = out_folder + "/" + "profiles.winext%i.peak_pos.ext.merged.ref.bed" %(args.win_ext)
-
-"""
-
-        PROFOUT = open(score_profiles_out, "w")
-        PEAKOUT = open(peak_regions_bed, "w")
-        PEAKROUT = open(peak_regions_ref_bed, "w")
-        TOPOUT = open(top_prof_sites_bed, "w")
-        TOPROUT = open(top_prof_sites_ref_bed, "w")
-        # Peak count.
-        peak_i = 0
-
-
-
-            # Get peak regions + positions.
-            peak_list = gp2lib.list_extract_peaks(window_scores,
-                                                  max_merge_dist=args.max_merge_dist,
-                                                  coords="bed",
-                                                  sc_thr=args.sc_thr)
-
-
-
-            # Output peak regions.
-            for peak_reg in peak_list:
-                peak_s = peak_reg[0]
-                peak_e = peak_reg[1]
-                top_pos = peak_reg[2]
-                top_sc = peak_reg[3]
-                peak_i += 1
-                peak_id = "peak_%i" %(peak_i)
-                PEAKOUT.write("%s\t%i\t%i\t%s,%i,%f\t0\t+\n" %(seq_id, peak_s, peak_e, peak_id, top_pos, top_sc))
-                if not only_seq:
-                    new_s, new_e = gp2lib.bed_convert_coords(peak_s, peak_e, ref_s, ref_e, site_pol)
-                    new_top_s, new_top_e = gp2lib.bed_convert_coords(top_pos-1, top_pos, ref_s, ref_e, site_pol)
-                    PEAKROUT.write("%s\t%i\t%i\t%s,%i,%f\t0\t%s\n" %(chr_id, new_s, new_e, peak_id, new_top_e, top_sc, site_pol))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-        for w_size in list_w_sizes:
-            # Extension left / right.
-            extlr = int(w_size/2)
-            # For each position in graph.
-            for i in range(g_len):
-                reg_s = i - extlr
-                reg_e = i + extlr + 1
-                # If lowercase context extension specified.
-                if con_ext:
-                    reg_s = reg_s - lc_ext
-                    reg_e = reg_e + lc_ext
-                if reg_e > g_len:
-                    reg_e = g_len
-                if reg_s < 0:
-                    reg_s = 0
-
-                if con_ext:
-                    center_pos = i + 1
-                    sl_node_labels = get_uc_lc_list_segment(list_node_labels,
-                                                            center_pos,
-                                                            vp_ext=extlr,
-                                                            con_ext=lc_ext)
-                else:
-                    sl_node_labels = list_node_labels[reg_s:reg_e]
-
-                # Sublist of node attributes.
-                sl_node_attr = []
-                if use_node_attr:
-                    sl_node_attr = list_node_attr[reg_s:reg_e]
-                    assert len(sl_node_attr) == len(sl_node_labels), "sl_node_attr length != sl_node_labels length (%i != %i)" %(len(sl_node_attr), len(sl_node_labels))
-                g_idx += 1
-                sl_len = len(sl_node_labels)
-                if win_sc_out_file and w_size == max_w_size:
-                    # Get sequence.
-                    sub_seq = node_label_list_to_seq(sl_node_labels)
-                    sub_seqs_list.append(sub_seq)
-                    reg_se_list.append([reg_s,reg_e])
-                # Graph indicators.
-                list_graph_indicators.extend([g_idx]*sl_len)
-                # Nodel labels.
-                list_all_node_labels.extend(sl_node_labels)
-                # Node attributes.
-                if use_node_attr:
-                    list_all_node_attributes.extend(sl_node_attr)
-                # Edges.
-                for n_idx_temp in range(sl_len):
-                    if n_idx_temp != (sl_len - 1):
-                        list_all_edges.append((n_idx_temp + n_idx, n_idx_temp + 1 + n_idx))
-                        list_all_edges.append((n_idx_temp + 1 + n_idx, n_idx_temp + n_idx))
-                n_idx += sl_len
-        assert list_graph_indicators, "list_graph_indicators empty"
-
-
-        """
-        In the end you want to get one score for each sequence position.
-        So len(seq1) + len(seq2) + ...
-
-
-        feat_list = [[], [], [], []]
-
-            data == graphs[0]
-            len(data.x):
-                Number of nodes.
-            data.x[0]:
-                Node feature vector
-            data.x[0][0]:
-                First element of node feature vector
-            data.x[0][:3]:
-                First three elements.
-            data.x[0][1:3]:
-                Second + third element.
-            data.x[0][1:200]:
-                Second to last element (doesnt care if 2nd index to big)
-            for nfv in data.x:
-                print(nfv)
-                Go over the node feature vectors of one graph.
-
-        """
-
-        # 1-hot string to nucleotide label.
-        hot2l_dic = {'1000': 1,
-                     '0100': 2,
-                     '0010': 3,
-                     '0001': 4}
-        hot2nt_dic = {'1000': "A",
-                      '0100': "C",
-                      '0010': "G",
-                      '0001': "U"}
-        # If lowercase context model.
-        if con_ext:
-            hot2l_dic = {'10000000': 1,
-                         '01000000': 2,
-                         '00100000': 3,
-                         '00010000': 4,
-                         '00001000': 5,
-                         '00000100': 6,
-                         '00000010': 7,
-                         '00000001': 8}
-            hot2nt_dic = {'10000000': "A",
-                          '01000000': "C",
-                          '00100000': "G",
-                          '00010000': "U",
-                          '00001000': "a",
-                          '00000100': "c",
-                          '00000010': "g",
-                          '00000001': "u"}
-
-        # Get character counts for sequences.
-        cc_dic = gp2lib.seqs_dic_count_chars(test_seqs_dic)
-        # Check for invalid nucleotides characters.
-        allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1}
-        c_nts = 4
-        if con_ext:
-            allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1, 'a': 1, 'c': 1, 'g': 1, 'u': 1}
-            c_nts = 8
-        for nt in cc_dic:
-            if nt not in allowed_nt_dic:
-                assert False, "test sequences with invalid character \"%s\" encountered (allowed characters: ACGU(acgu)" %(nt)
-        # assert len(cc_dic) == c_nts, "# of nucleotide characters in test set != expected # (%i != %i)" %(len(cc_dic), c_nts)
-
-        PROFOUT = open(score_profiles_out, "w")
-        PEAKOUT = open(peak_regions_bed, "w")
-        PEAKROUT = open(peak_regions_ref_bed, "w")
-        TOPOUT = open(top_prof_sites_bed, "w")
-        TOPROUT = open(top_prof_sites_ref_bed, "w")
-        # Peak count.
-        peak_i = 0
-        # List of lists with profile scores.
-        profile_scores_ll = []
-
-        print("Compute profile scores and top sites ... ")
-
-        for i,g in enumerate(dataset):
-            x = g.x
-            x = x.tolist()
-            g_l = len(x)
-            # Sequence ID.
-            seq_id = idx2id_dic[i]
-            # List of node attributes.
-            list_node_attr = []
-            # List of node labels.
-            list_node_labels = []
-            # List of nt labels.
-            seqs_list = []
-
-            for v in x:
-                if use_node_attr:
-                    nav = [str(e) for e in v[:-c_nts]]
-                    list_node_attr.append(",".join(nav))
-                # Nucleotides.
-                seq_1h = [int(e) for e in v[-c_nts:]]
-                seq_1h_s = [str(e) for e in seq_1h]
-                seq_1h_s = "".join(seq_1h_s)
-                assert seq_1h_s in hot2l_dic, "seq_1h_s %s not in hot2l_dic" %(seq_1h_s)
-                n_i = hot2l_dic[seq_1h_s]
-                list_node_labels.append(n_i)
-                # Get sequence nucleotides list.
-                nt = hot2nt_dic[seq_1h_s]
-                seqs_list.append(nt)
-
-            # Tickets please.
-            assert list_node_labels, "list_node_labels empty"
-            len_nodes = len(list_node_labels)
-
-            # Skip sequences containing < 4 different nucleotides.
-            #if len(set(list_node_labels)) != 4:
-            #    print("Sequence %s contains < 4 individual nucleotides. Skip this sequence ... " %(seq_id))
-            #    continue
-
-            # Predict sliding window profiles.
-            window_scores = model_util.get_window_scores(args.list_win_sizes,
-                                              dataset_name=data_id,
-                                              list_node_attr=list_node_attr,
-                                              list_node_labels=list_node_labels,
-                                              use_node_attr=use_node_attr,
-                                              model=model,
-                                              con_ext=False,
-                                              lc_context=con_ext,
-                                              device=device,
-                                              batch_size=batch_size,
-                                              seq_id=seq_id,
-                                              win_sc_out_file=prof_win_sc_out_file,
-                                              geometric_folder=out_folder)
-            assert len_nodes == len(window_scores), "# nodes != # window scores"
-
-            # Get peak regions + positions.
-            peak_list = gp2lib.list_extract_peaks(window_scores,
-                                                  max_merge_dist=args.max_merge_dist,
-                                                  coords="bed",
-                                                  sc_thr=args.sc_thr)
-
-            # If not peaks found (above --thr score).
-            if not peak_list:
-                print("WARNING: no profile (--win-size) peaks for sequence %s ... " %(seq_id))
-                continue
-            else:
-                peaks_found = True
-
-            # Output profile.
             PROFOUT.write(">%s\n" %(seq_id))
-            for i,sc in enumerate(window_scores):
-                nt = seqs_list[i]
+            for i,sc in enumerate(profile_scores_ll[idx]):
+                nt = seq_list[i]
                 pos = i + 1
                 PROFOUT.write("%i\t%s\t%f\n" %(pos, nt, sc))
 
-            if not only_seq:
-                chr_id = id2chr_dic[seq_id]
-                site_pol = id2pol_dic[seq_id]
-                ref_s = id2s_dic[site_id]
-                ref_e = id2e_dic[site_id]
+            # Get peak regions + positions.
+            peak_list = gp2lib.list_extract_peaks(profile_scores_ll[idx],
+                                                  max_merge_dist=args.max_merge_dist,
+                                                  coords="bed",
+                                                  sc_thr=args.sc_thr)
 
+            # Peak count.
+            peak_i = 0
             # Output peak regions.
             for peak_reg in peak_list:
                 peak_s = peak_reg[0]
                 peak_e = peak_reg[1]
                 top_pos = peak_reg[2]
                 top_sc = peak_reg[3]
+                top_pos_s = top_pos - 1
+                top_pos_ext_s = top_pos_s - args.win_ext
+                top_pos_ext_e = top_pos + args.win_ext
+                if top_pos_ext_s < 0:
+                    top_pos_ext_s = 0
+                if top_pos_ext_e > seq_l:
+                    top_pos_ext_e = seq_l
+                tp_ext_l = top_pos_ext_e - top_pos_ext_s
                 peak_i += 1
+                peaks_found += 1
                 peak_id = "peak_%i" %(peak_i)
-                PEAKOUT.write("%s\t%i\t%i\t%s,%i,%f\t0\t+\n" %(seq_id, peak_s, peak_e, peak_id, top_pos, top_sc))
+                PEAKREGOUT.write("%s\t%i\t%i\t%s,%i,%f\t0\t+\n" %(seq_id, peak_s, peak_e, peak_id, top_pos, top_sc))
+                PEAKPOSOUT.write("%s\t%i\t%i\t%s,%i\t%f\t+\n" %(seq_id, top_pos_s, top_pos, peak_id, top_pos, top_sc))
+                PEAKPOSEXTOUT.write("%s\t%i\t%i\t%s,%i\t%f\t+\n" %(seq_id, top_pos_ext_s, top_pos_ext_e, peak_id, top_pos, top_sc))
+                # Reference coordinates.
                 if not only_seq:
-                    new_s, new_e = gp2lib.bed_convert_coords(peak_s, peak_e, ref_s, ref_e, site_pol)
-                    new_top_s, new_top_e = gp2lib.bed_convert_coords(top_pos-1, top_pos, ref_s, ref_e, site_pol)
-                    PEAKROUT.write("%s\t%i\t%i\t%s,%i,%f\t0\t%s\n" %(chr_id, new_s, new_e, peak_id, new_top_e, top_sc, site_pol))
+                    new_s, new_e = gp2lib.bed_convert_coords(peak_s, peak_e, ref_s, ref_e, ref_pol)
+                    new_top_s, new_top_e = gp2lib.bed_convert_coords(top_pos-1, top_pos, ref_s, ref_e, ref_pol)
+                    new_top_ext_s = new_top_s - args.win_ext
+                    new_top_ext_e = new_top_e + args.win_ext
+                    if new_top_ext_s < ref_s:
+                        new_top_ext_s = ref_s
+                    if new_top_ext_e > ref_e:
+                        new_top_ext_e = ref_e
+                    # Check.
+                    tp_ext_ref_l = new_top_ext_e - new_top_ext_s
+                    assert tp_ext_ref_l == tp_ext_l, "tp_ext_l != tp_ext_ref_l (%i != %i)" %(tp_ext_ref_l, tp_ext_l)
+                    PEAKREGREFOUT.write("%s\t%i\t%i\t%s,%i,%f\t0\t%s\n" %(chr_id, new_s, new_e, peak_id, new_top_e, top_sc, ref_pol))
+                    PEAKPOSREFOUT.write("%s\t%i\t%i\t%s,%i\t%f\t%s\n" %(chr_id, new_top_s, new_top_e, peak_id, new_top_e, top_sc, ref_pol))
+                    PEAKPOSEXTREFOUT.write("%s\t%i\t%i\t%s,%i\t%f\t%s\n" %(chr_id, new_top_ext_s, new_top_ext_e, peak_id, new_top_e, top_sc, ref_pol))
 
-            # Predict fixed (args.peak_ext) window profiles.
-            peak_ext_win_size=args.peak_ext*2
-            if args.con_ext:
-                print("Set context extension to --con-ext %i ... " %(args.con_ext))
-                con_ext = args.con_ext
-            fixed_win_scores = model_util.get_window_scores([peak_ext_win_size],
-                                              dataset_name=data_id,
-                                              list_node_attr=list_node_attr,
-                                              list_node_labels=list_node_labels,
-                                              use_node_attr=use_node_attr,
-                                              model=model,
-                                              lc_context=con_ext,
-                                              con_ext=con_ext,
-                                              device=device,
-                                              batch_size=batch_size,
-                                              seq_id=seq_id,
-                                              win_sc_out_file=pe_prof_win_sc_out_file,
-                                              geometric_folder=out_folder)
-            assert len_nodes == len(fixed_win_scores), "# nodes != # fixed window scores"
-
-            # Get peak regions + positions.
-            wide_win_peak_list = gp2lib.list_extract_peaks(fixed_win_scores,
-                                                  max_merge_dist=args.max_merge_dist,
-                                                  coords="bed",
-                                                  sc_thr=args.sc_thr)
-
-            # If not peaks found (above --thr score).
-            if not wide_win_peak_list:
-                print("WARNING: no wide profile peaks (--peak-ext, --con-ext) for sequence %s ... " %(seq_id))
-                continue
-            else:
-                wide_peaks_found = True
-
-            # Output peak regions.
-            for peak_reg in wide_win_peak_list:
-                top_pos = peak_reg[2]
-                top_sc = peak_reg[3]
-                win_s = top_pos - args.peak_ext - 1
-                win_e = top_pos + args.peak_ext
-                if con_ext:
-                    win_s -= con_ext
-                    win_e += con_ext
-                if win_e > len_nodes:
-                    win_e = len_nodes
-                if win_s < 0:
-                    win_s = 0
-                TOPOUT.write("%s\t%i\t%i\t%s,%i\t%f\t+\n" %(seq_id, win_s, win_e, seq_id, top_pos, top_sc))
-                if not only_seq:
-                    new_s, new_e = gp2lib.bed_convert_coords(win_s, win_e, ref_s, ref_e, site_pol)
-                    new_top_s, new_top_e = gp2lib.bed_convert_coords(top_pos-1, top_pos, ref_s, ref_e, site_pol)
-                    TOPROUT.write("%s\t%i\t%i\t%s,%i\t%f\t+\n" %(chr_id, new_s, new_e, seq_id, new_top_e, top_sc))
+            if not peak_i:
+                print("WARNING: no profile peaks found for sequence %s ... " %(seq_id))
 
         PROFOUT.close()
-        PEAKOUT.close()
-        PEAKROUT.close()
-        TOPOUT.close()
-        TOPROUT.close()
+        PEAKREGOUT.close()
+        PEAKPOSOUT.close()
+        PEAKPOSEXTOUT.close()
+        if not only_seq:
+            PEAKREGREFOUT.close()
+            PEAKPOSREFOUT.close()
+            PEAKPOSEXTREFOUT.close()
 
-        # Select best sites from overlapping sites.
-        if wide_peaks_found:
-            gp2lib.bed_sort_merge_output_top_entries(top_prof_sites_bed, top_prof_sites_merged_bed)
-        else:
-            print("WARNING: no wide profile peaks (--peak-ext, --con-ext) for any input sequence!")
+        if not peaks_found:
+            print("WARNING: no profile peaks found for any input sequence!")
+            print("         Try with lower --thr to obtain profile peaks for the given sequences")
+            sys.exit()
+
+        # Merge extended peaks.
+        gp2lib.bed_sort_merge_output_top_entries(peak_pos_ext_bed, peak_pos_ext_merged_bed)
         if only_seq:
             if os.path.exists(peak_regions_ref_bed):
                 os.remove(peak_regions_ref_bed)
-            if os.path.exists(top_prof_sites_ref_bed):
-                os.remove(top_prof_sites_ref_bed)
-            if os.path.exists(top_prof_sites_merged_ref_bed):
-                os.remove(top_prof_sites_merged_ref_bed)
+            if os.path.exists(peak_pos_ref_bed):
+                os.remove(peak_pos_ref_bed)
+            if os.path.exists(peak_pos_ext_ref_bed):
+                os.remove(peak_pos_ext_ref_bed)
         else:
-            if wide_peaks_found:
-                gp2lib.bed_sort_merge_output_top_entries(top_prof_sites_ref_bed, top_prof_sites_merged_ref_bed)
+            gp2lib.bed_sort_merge_output_top_entries(peak_pos_ext_ref_bed, peak_pos_ext_merged_ref_bed)
 
-        if not peaks_found:
-            print("WARNING: no profile (--win-size) peaks for any input sequence!")
 
     """
     Output file summary.
@@ -3582,32 +3324,28 @@ def main_predict(args):
 
     if args.mode == 1:
         print("")
-        print("PREDICTION OUTPUT FILES")
-        print("=======================")
+        print("WHOLE-SITE PREDICTION OUTPUT FILES")
+        print("==================================")
         print("Whole site predictions output file:\n%s" %(ws_scores_out))
         if not only_seq:
             print("Whole site predictions BED file:\n%s" %(ws_scores_bed))
     if args.mode == 2:
-        if peaks_found:
-            print("")
-            print("PREDICTION OUTPUT FILES")
-            print("=======================")
-            print("Profiles (--win-size) output file:\n%s" %(score_profiles_out))
-            print("Profiles (--win-size) window scores:\n%s" %(prof_win_sc_out_file))
-            print("Profiles (--win-size) peak regions  .bed:\n%s" %(peak_regions_bed))
-            if not only_seq:
-                print("Profiles peak regions on reference .bed:\n%s" %(peak_regions_ref_bed))
-        if wide_peaks_found:
-            if not peaks_found:
-                print("")
-                print("PREDICTION OUTPUT FILES")
-                print("=======================")
-            print("Wide profiles (--peak-ext, --con-ext) window scores:\n%s" %(pe_prof_win_sc_out_file))
-            print("Wide profiles (--peak-ext, --con-ext) top-scoring sites .bed:\n%s" %(top_prof_sites_bed))
-            print("Wide profiles top select-best-in-case-of-overlaps sites .bed:\n%s" %(top_prof_sites_merged_bed))
-            if not only_seq:
-                print("Wide profiles top-scoring sites on reference .bed:\n%s" %(top_prof_sites_ref_bed))
-                print("Wide profiles select-best-in-case-of-overlaps sites on reference .bed:\n%s" %(top_prof_sites_merged_ref_bed))
+        print("")
+        print("PROFILE PREDICTION OUTPUT FILES")
+        print("===============================")
+        print("Profiles output file:\n%s" %(score_profiles_out))
+        print("Peak regions (regions with scores above --thr):\n%s" %(peak_regions_bed))
+        if not only_seq:
+            print("Peak regions on reference:\n%s" %(peak_regions_ref_bed))
+        print("Peak regions top scoring positions:\n%s" %(peak_pos_bed))
+        if not only_seq:
+            print("Peak regions top scoring positions on reference:\n%s" %(peak_pos_ref_bed))
+        print("Peak regions extended top scoring positions:\n%s" %(peak_pos_ext_bed))
+        if not only_seq:
+            print("Peak regions extended top scoring positions on reference:\n%s" %(peak_pos_ext_ref_bed))
+        print("Peak regions extended+merged top scoring positions:\n%s" %(peak_pos_ext_merged_bed))
+        if not only_seq:
+            print("Peak regions extended+merged top scoring positions on reference:\n%s" %(peak_pos_ext_merged_ref_bed))
     print("")
 
 
@@ -5472,6 +5210,14 @@ def main_gp(args):
                 args.intron_border_annot = True
             if train_settings_dic["exon_intron_n"]  == "True":
                 args.exon_intron_n = True
+            if train_settings_dic["eia_all_ex"]  == "True":
+                if not args.eia_all_ex:
+                    print("WARNING: --model-in model was trained with --eia-all-ex which is currently disabled!")
+                    print("         Please set --eia-all-ex if desired for exon-intron annotation ... ")
+            if args.eia_all_ex:
+                assert not args.intron_border_annot, "--eia-all-ex incompatible with --eia-ib setting from --model-in model. Please unset --eia-all-ex or train model without --eia-ib or use --eia-all-ex setting in graphprot2 gt"
+                assert not args.exon_intron_n, "--eia-all-ex incompatible with --eia-n setting from --model-in model. Please unset --eia-all-ex or train model without --eia-n or use --eia-all-ex setting in graphprot2 gt"
+
         elif fid == "tra":
             std_feat_found = True
             if train_settings_dic["tr_list"] != "None":
@@ -5762,6 +5508,7 @@ def main_gp(args):
 
     id2row_dic = gp2lib.process_test_sites(args.in_sites, tmp_bed, chr_len_dic,
                                            id2pl_dic, args,
+                                           check_ids=True,
                                            transcript_regions=transcript_regions,
                                            count_dic=count_stats_dic)
     print("# sites found in --in:               %i" %(count_stats_dic['c_in']))
@@ -6150,45 +5897,77 @@ def main_gp(args):
         print("Get transcript annotations for genomic sites ... ")
         # Get transcript IDs to use for exon-intron or transcript region annotation.
         tr_ids_dic = {}
-        if args.tr_list:
-            print("Using transcript list from --tr-list to define transcript regions ... ")
-            # Read in transcript IDs from --tr-list.
-            tr_ids_dic = gp2lib.read_ids_into_dic(args.tr_list)
-            # Read in all transcript IDs in --gtf.
-            all_tr_ids_dic = gp2lib.gtf_get_transcript_ids(args.in_gtf)
-            # Check if given --tr list IDs are in --gtf.
-            for tr_id in tr_ids_dic:
-                if tr_id not in all_tr_ids_dic:
-                    print("WARNING: transcript ID \"%s\" from --tr-list not found in --gtf. Ignoring transcript ... " %(tr_id))
-        else:
-            # Create exon BED file from most prominent transcripts.
-            strict=False
-            if strict:
-                print("Get most prominent transcript for each gene from --gtf (TSL1-5 only)... ")
+        # Extract tr_ids_dic.
+        if args.tr_reg_annot or not args.eia_all_ex:
+            if args.tr_list:
+                print("Using transcript list from --tr-list to define transcript regions ... ")
+                # Read in transcript IDs from --tr-list.
+                tr_ids_dic = gp2lib.read_ids_into_dic(args.tr_list)
+                # Read in all transcript IDs in --gtf.
+                all_tr_ids_dic = gp2lib.gtf_get_transcript_ids(args.in_gtf)
+                # Check if given --tr list IDs are in --gtf.
+                del_tr_l = []
+                for tr_id in tr_ids_dic:
+                    if tr_id not in all_tr_ids_dic:
+                        print("WARNING: transcript ID \"%s\" from --tr-list not found in --gtf. Ignoring transcript ... " %(tr_id))
+                        del_tr_l.append(tr_id)
+                for tr_id in del_tr_l:
+                    del tr_ids_dic[tr_id]
+                assert tr_ids_dic, "no transcript IDs from --tr-list remain after removing IDs not found in --gtf"
             else:
-                print("Get most prominent transcript for each gene from --gtf ... ")
-            # Don't be strict (!= only TSL1-5 allowed).
-            tr_ids_dic = gp2lib.gtf_extract_most_prominent_transcripts(args.in_gtf,
-                                            "dummy",
-                                            strict=strict,
-                                            return_ids_dic=tr_ids_dic)
+                # Create exon BED file from most prominent transcripts.
+                strict=False
+                if strict:
+                    print("Get most prominent transcript for each gene from --gtf (TSL1-5 only)... ")
+                else:
+                    print("Get most prominent transcript for each gene from --gtf ... ")
+                # Don't be strict (!= only TSL1-5 allowed).
+                tr_ids_dic = gp2lib.gtf_extract_most_prominent_transcripts(args.in_gtf,
+                                                "dummy",
+                                                strict=strict,
+                                                return_ids_dic=tr_ids_dic)
+
+
+
+
+
+
+
+
 
         # Exon-intron annotations for genomic sites.
         if args.exon_intron_annot:
+
+            # All exons BED (--eia-all-ex case).
+            all_exon_bed = False
+            if args.eia_all_ex:
+                random_id = uuid.uuid1()
+                all_exon_bed = str(random_id) + ".tmp.bed"
+                print("Extract all exon regions from --gtf (--eia-all-ex enabled) ... ")
+                gp2lib.gtf_extract_unique_exon_bed(args.in_gtf, all_exon_bed,
+                                                   use_ei_labels=True)
+
             print("Extract exon-intron annotations for genomic sites ... ")
-            if args.tr_list:
-                print("Use exon regions of --tr-list transcripts from --gtf ... ")
-            else:
-                print("Use exon regions of most prominent transcripts from --gtf ... ")
-            if args.intron_border_annot:
-                print("Intron border annotation enabled ... ")
-            if args.exon_intron_n:
-                print("Non-intron non-exon region annotation enabled ... ")
+            if not all_exon_bed:
+                if args.tr_list:
+                    print("Use exon regions of --tr-list transcripts from --gtf ... ")
+                else:
+                    print("Use exon regions of most prominent transcripts from --gtf ... ")
+                if args.intron_border_annot:
+                    print("Intron border annotation enabled ... ")
+                if args.exon_intron_n:
+                    print("Non-intron non-exon region annotation enabled ... ")
+
             gp2lib.bed_get_exon_intron_annotations_from_gtf(tr_ids_dic, test_bed_out,
                                         args.in_gtf, test_eia_out,
                                         stats_dic=test_eia_stats_dic,
+                                        own_exon_bed=all_exon_bed,
                                         n_labels=args.exon_intron_n,
                                         intron_border_labels=args.intron_border_annot)
+
+            if all_exon_bed:
+                if os.path.exists(all_exon_bed):
+                    os.remove(all_exon_bed)
 
         # Transcript region annotations for genomic sites.
         if args.tr_reg_annot:
