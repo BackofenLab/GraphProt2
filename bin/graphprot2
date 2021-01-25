@@ -1532,8 +1532,8 @@ def main_eval(args):
         # Model + model parameter file.
         params_file2 = args.add_train_folder + "/final.params"
         model_file2 = args.add_train_folder + "/final.model"
-        assert os.path.isfile(model_file2), "--train2-in folder is missing a model file. Run graphprot2 train without --gen-cv to generate and store a model" %(model_file2)
-        assert os.path.isfile(params_file2), "--train2-in folder is missing a model parameter file. Disable --gen-cv when running graphprot2 train to generate and store a model" %(params_file2)
+        assert os.path.isfile(model_file2), "--add-train-in folder is missing a model file. Run graphprot2 train without --gen-cv to generate and store a model" %(model_file2)
+        assert os.path.isfile(params_file2), "--add-train-in folder is missing a model parameter file. Disable --gen-cv when running graphprot2 train to generate and store a model" %(params_file2)
 
     # Read in model parameters.
     params_dic = gp2lib.read_settings_into_dic(params_file)
@@ -1818,7 +1818,7 @@ def main_eval(args):
 
         # Set parameters.
         fc_hidden_dim2 = int(params_dic2["fc_hidden_dim"])
-        node_hidden_dim2	= int(params_dic2["node_hidden_dim"])
+        node_hidden_dim2 = int(params_dic2["node_hidden_dim"])
         batch_size2 = int(params_dic2["batch_size"])
         num_features2 = int(params_dic2["num_features"])
         nr_hidden_layers2 = int(params_dic2["nr_hidden_layers"])
@@ -1838,7 +1838,7 @@ def main_eval(args):
 
         # Get graphprot2 train parameters for additional checks.
         gp2_train_settings_file = args.add_train_folder + "/settings.graphprot2_train.out"
-        assert os.path.isfile(gp2_train_settings_file), "missing --train-in settings file %s" %(gp2_train_settings_file)
+        assert os.path.isfile(gp2_train_settings_file), "missing --add-train-in settings file %s" %(gp2_train_settings_file)
         gp2_train_settings_dic = {}
         with open(gp2_train_settings_file) as f:
             for line in f:
