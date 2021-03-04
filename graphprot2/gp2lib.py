@@ -918,7 +918,8 @@ def count_file_rows(in_file):
 
 ################################################################################
 
-def bed_check_six_col_format(bed_file):
+def bed_check_six_col_format(bed_file,
+                             nr_cols=6):
     """
     Check whether given .bed file has 6 columns.
 
@@ -935,7 +936,7 @@ def bed_check_six_col_format(bed_file):
     with open(bed_file) as f:
         for line in f:
             cols = line.strip().split("\t")
-            if len(cols) == 6:
+            if len(cols) == nr_cols:
                 six_col_format = True
             break
     f.closed
@@ -3850,7 +3851,7 @@ def gtf_extract_gene_bed(in_gtf, out_bed,
             if not gene_id in gene_ids_dic:
                 continue
 
-        # Output genomic exon region.
+        # Output gene region.
         c_out += 1
         OUTBED.write("%s\t%i\t%i\t%s\t0\t%s\n" % (chr_id,feat_s,feat_e,gene_id,feat_pol))
 
