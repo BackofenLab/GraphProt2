@@ -14,7 +14,7 @@ https://github.com/BackofenLab/GraphProt2
 
 setup(
     name='graphprot2',
-    version='0.1',
+    version='0.2',
     description='Modelling RBP binding preferences to predict RPB binding sites',
     long_description=open('README.md').read(),
     author='Michael Uhl',

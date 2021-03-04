@@ -6,6 +6,8 @@ from torch_geometric.nn import global_mean_pool as gap, global_max_pool as gmp, 
 from torch_geometric.data import Dataset
 
 
+################################################################################
+
 class MyDataset(Dataset):
     def __init__(self,
                  data_list):
@@ -25,9 +27,16 @@ class MyDataset(Dataset):
         return len(self.data_list)
 
 
-class FunnelGNN(torch.nn.Module):
-    def __init__(self, input_dim=0, node_hidden_dim=128, fc_hidden_dim=128, out_dim=2):
-        super(FunnelGNN, self).__init__()
+################################################################################
+
+class FunnelGNN_old(torch.nn.Module):
+    def __init__(self,
+                 input_dim=0,
+                 node_hidden_dim=128,
+                 fc_hidden_dim=128,
+                 dropout_rate=0.5,
+                 out_dim=2):
+        super(FunnelGNN_old, self).__init__()
         self.bn0 = torch.nn.BatchNorm1d(input_dim)
         self.conv1 = GraphConv(input_dim, node_hidden_dim)
         self.conv2 = GraphConv(node_hidden_dim, 2*node_hidden_dim)
@@ -39,6 +48,7 @@ class FunnelGNN(torch.nn.Module):
 
         self.lin1 = Linear(3*node_hidden_dim + 6*node_hidden_dim + 9*node_hidden_dim, fc_hidden_dim)
         self.lin2 = torch.nn.Linear(fc_hidden_dim, out_dim)
+        self.dropout_rate = dropout_rate
 
     def forward(self, x, edge_index, batch, edge_attr=None):
 
@@ -52,13 +62,119 @@ class FunnelGNN(torch.nn.Module):
         x3 = torch.cat([gmp(x, batch), gap(x, batch), gadd(x, batch)], dim=1)
 
         x = torch.cat([x1, x2, x3], dim=1)
-        x = F.dropout(x, p=0.5, training=self.training)
+        x = F.dropout(x, p=self.dropout_rate, training=self.training)
         x = self.lin1(x)
-        x = F.dropout(x, p=0.5, training=self.training)
+        x = F.dropout(x, p=self.dropout_rate, training=self.training)
         x = F.log_softmax(self.lin2(x), dim=-1)
 
         return x
 
+
+################################################################################
+
+class FunnelGNN(torch.nn.Module):
+    def __init__(self,
+                 input_dim=0,
+                 node_hidden_dim=128,
+                 nr_hidden_layers=4,
+                 incr_hidden_dim=False,
+                 add_gadd=False,
+                 fc_hidden_dim=128,
+                 dropout_rate=0.5,
+                 out_dim=2):
+        super(FunnelGNN, self).__init__()
+        node_hidden_dim1 = node_hidden_dim
+        node_hidden_dim2 = node_hidden_dim
+        node_hidden_dim3 = node_hidden_dim
+        node_hidden_dim4 = node_hidden_dim
+        node_hidden_dim5 = node_hidden_dim
+        if incr_hidden_dim:
+            node_hidden_dim2 = 2*node_hidden_dim
+            node_hidden_dim3 = 3*node_hidden_dim
+            node_hidden_dim4 = 4*node_hidden_dim
+            node_hidden_dim5 = 5*node_hidden_dim
+        mltpl = 2
+        if add_gadd:
+            mltpl = 3
+        self.conv1 = GraphConv(input_dim, node_hidden_dim1)
+        self.conv2 = GraphConv(node_hidden_dim1, node_hidden_dim2)
+        self.conv3 = GraphConv(node_hidden_dim2, node_hidden_dim3)
+        self.bn0 = torch.nn.BatchNorm1d(input_dim)
+        self.bn1 = torch.nn.BatchNorm1d(node_hidden_dim1)
+        self.bn2 = torch.nn.BatchNorm1d(node_hidden_dim2)
+        self.bn3 = torch.nn.BatchNorm1d(node_hidden_dim3)
+        lin1_in_dim = mltpl*node_hidden_dim1 + mltpl*node_hidden_dim2 + mltpl*node_hidden_dim3
+        if nr_hidden_layers == 4:
+            self.conv4 = GraphConv(node_hidden_dim3, node_hidden_dim4)
+            self.bn4 = torch.nn.BatchNorm1d(node_hidden_dim4)
+            lin1_in_dim += mltpl*node_hidden_dim4
+        if nr_hidden_layers == 5:
+            self.conv4 = GraphConv(node_hidden_dim3, node_hidden_dim4)
+            self.bn4 = torch.nn.BatchNorm1d(node_hidden_dim4)
+            lin1_in_dim += mltpl*node_hidden_dim4
+            self.conv5 = GraphConv(node_hidden_dim4, node_hidden_dim5)
+            self.bn5 = torch.nn.BatchNorm1d(node_hidden_dim5)
+            lin1_in_dim += mltpl*node_hidden_dim5
+        self.lin1 = Linear(lin1_in_dim, fc_hidden_dim)
+        self.lin2 = torch.nn.Linear(fc_hidden_dim, out_dim)
+        self.dropout_rate = dropout_rate
+        self.nr_hidden_layers = nr_hidden_layers
+        self.add_gadd = add_gadd
+
+    def forward(self, x, edge_index, batch, edge_attr=None):
+
+        x = self.bn1(F.leaky_relu(self.conv1(x, edge_index)))
+        if self.add_gadd:
+            x1 = torch.cat([gmp(x, batch), gap(x, batch), gadd(x, batch)], dim=1)
+        else:
+            x1 = torch.cat([gmp(x, batch), gap(x, batch)], dim=1)
+
+        x = self.bn2(F.leaky_relu(self.conv2(x, edge_index)))
+        if self.add_gadd:
+            x2 = torch.cat([gmp(x, batch), gap(x, batch), gadd(x, batch)], dim=1)
+        else:
+            x2 = torch.cat([gmp(x, batch), gap(x, batch)], dim=1)
+
+        x = self.bn3(F.leaky_relu(self.conv3(x, edge_index)))
+        if self.add_gadd:
+            x3 = torch.cat([gmp(x, batch), gap(x, batch), gadd(x, batch)], dim=1)
+        else:
+            x3 = torch.cat([gmp(x, batch), gap(x, batch)], dim=1)
+
+        if self.nr_hidden_layers == 4:
+            x = self.bn4(F.leaky_relu(self.conv4(x, edge_index)))
+            if self.add_gadd:
+                x4 = torch.cat([gmp(x, batch), gap(x, batch), gadd(x, batch)], dim=1)
+            else:
+                x4 = torch.cat([gmp(x, batch), gap(x, batch)], dim=1)
+        if self.nr_hidden_layers == 5:
+            x = self.bn4(F.leaky_relu(self.conv4(x, edge_index)))
+            if self.add_gadd:
+                x4 = torch.cat([gmp(x, batch), gap(x, batch), gadd(x, batch)], dim=1)
+            else:
+                x4 = torch.cat([gmp(x, batch), gap(x, batch)], dim=1)
+            x = self.bn5(F.leaky_relu(self.conv5(x, edge_index)))
+            if self.add_gadd:
+                x5 = torch.cat([gmp(x, batch), gap(x, batch), gadd(x, batch)], dim=1)
+            else:
+                x5 = torch.cat([gmp(x, batch), gap(x, batch)], dim=1)
+
+        if self.nr_hidden_layers == 3:
+            x = torch.cat([x1, x2, x3], dim=1)
+        elif self.nr_hidden_layers == 4:
+            x = torch.cat([x1, x2, x3, x4], dim=1)
+        elif self.nr_hidden_layers == 5:
+            x = torch.cat([x1, x2, x3, x4, x5], dim=1)
+
+        x = F.dropout(x, p=self.dropout_rate, training=self.training)
+        x = self.lin1(x)
+        x = F.dropout(x, p=self.dropout_rate, training=self.training)
+        x = F.log_softmax(self.lin2(x), dim=-1)
+
+        return x
+
+
+################################################################################
 
 class FunnelGNN_EdgeAttr(torch.nn.Module):
     def __init__(self, input_dim=0, node_hidden_dim=128, fc_hidden_dim=128, out_dim=2):
@@ -95,3 +211,5 @@ class FunnelGNN_EdgeAttr(torch.nn.Module):
 
         return x
 
+
+################################################################################

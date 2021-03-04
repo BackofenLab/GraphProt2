@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from distutils.spawn import find_executable
+from torch_geometric.data import Data
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import seaborn as sns
@@ -10,6 +11,8 @@ import numpy as np
 import statistics
 import subprocess
 import logomaker
+import random
+import torch
 import gzip
 import uuid
 import sys
@@ -407,7 +410,8 @@ def extract_viewpoint_regions_from_fasta(seqs_dic,
 
 ################################################################################
 
-def extract_uc_region_coords_from_fasta(seqs_dic):
+def extract_uc_region_coords_from_fasta(seqs_dic,
+                                        uc_coords_dic=False):
     """
     Extract uppercase (viewpoint) start + end positions from FASTA dictionary.
     Return dictionary with vectors [start,end] (1-based indices, key:fasta_id).
@@ -418,7 +422,8 @@ def extract_uc_region_coords_from_fasta(seqs_dic):
 
     """
     assert seqs_dic, "given seqs_dic empty"
-    uc_coords_dic = {}
+    if not uc_coords_dic:
+        uc_coords_dic = {}
     # Get uppercase region coordinates for each sequence.
     for seq_id, seq in sorted(seqs_dic.items()):
         l_seq = len(seq)
@@ -451,6 +456,9 @@ def read_str_elem_p_into_dic(str_elem_p_file,
     p_unpaired<t>p_external<t>p_hairpin<t>p_internal<t>p_multiloop<t>p_paired
     Read values into dictionary with sequence ID -> 2d list mapping, and
     return dictionary.
+
+    p_to_str:
+        Read in probs as strings.
 
     Example input:
     >CLIP_01
@@ -910,7 +918,8 @@ def count_file_rows(in_file):
 
 ################################################################################
 
-def bed_check_six_col_format(bed_file):
+def bed_check_six_col_format(bed_file,
+                             nr_cols=6):
     """
     Check whether given .bed file has 6 columns.
 
@@ -927,11 +936,40 @@ def bed_check_six_col_format(bed_file):
     with open(bed_file) as f:
         for line in f:
             cols = line.strip().split("\t")
-            if len(cols) == 6:
+            if len(cols) == nr_cols:
                 six_col_format = True
             break
     f.closed
     return six_col_format
+
+
+################################################################################
+
+def count_file_rows(in_file,
+                    nr_cols=False):
+    """
+    Count number of file rows. If nr_cols set, demand certain (nr_cols) number
+    of columns (separated by tab), in order for row to be counted.
+
+    >>> test_file = "test_data/test1.bed"
+    >>> count_file_rows(test_file)
+    7
+    >>> test_file = "test_data/empty_file"
+    >>> count_file_rows(test_file)
+    0
+
+    """
+    c = 0
+    with open(in_file) as f:
+        for line in f:
+            cols = line.strip().split("\t")
+            if nr_cols:
+                if len(cols) == nr_cols:
+                    c += 1
+            else:
+                c += 1
+    f.closed
+    return c
 
 
 ################################################################################
@@ -1178,7 +1216,7 @@ def calc_str_elem_up_bpp(in_fasta, out_bpp, out_str,
             # Output centered values.
             pos = i+1 # one-based sequence position.
             #OUTSTR.write("%i\t%f\t%f\t%f\t%f\t%f\t%f\n" %(pos,p_u,p_e,p_h,p_i,p_m,p_s))
-            OUTSTR.write("%f\t%f\t%f\t%f\t%f\t%f\n" %(p_u,p_e,p_h,p_i,p_m,p_s))
+            OUTSTR.write("%f\t%f\t%f\t%f\t%f\n" %(p_e,p_h,p_i,p_m,p_s))
             if stats_dic:
                 if id2ucr_dic:
                     # If id2ucr_dic, record values only for uppercase part of sequence.
@@ -1884,6 +1922,7 @@ def bed_get_exon_intron_annotations_from_gtf(tr_ids_dic, in_bed,
                                              in_gtf, eia_out,
                                              stats_dic=None,
                                              id2ucr_dic=False,
+                                             own_exon_bed=False,
                                              n_labels=False,
                                              intron_border_labels=False):
 
@@ -1903,14 +1942,18 @@ def bed_get_exon_intron_annotations_from_gtf(tr_ids_dic, in_bed,
     eia_out:
         Output file with labels.
     stats_dic:
-        If not None, extract exon intron annotation statistics and store
+        If not None, extract exon-intron annotation statistics and store
         in stats_dic.
     id2ucr_dic:
         Sequence ID to uppercase sequence start + end, with format:
         sequence_id -> "uppercase_start-uppercase_end"
         where both positions are 1-based.
-        Set to define regions for which to extract exon intron annotation
+        Set to define regions for which to extract exon-intron annotation
         stats, stored in stats_dic.
+    own_exon_bed:
+        Supply own exon BED file. This disables n_labels and
+        intron_border_labels annotations. Also tr_ids_dic is not used anymore
+        for defining transcript / exon regions.
     n_labels:
         If True, label all positions not covered by intron or exon regions
         with "N".
@@ -1943,20 +1986,24 @@ def bed_get_exon_intron_annotations_from_gtf(tr_ids_dic, in_bed,
     True
 
     """
-    # Checker.
-    assert tr_ids_dic, "given dictionary tr_ids_dic empty"
+    if own_exon_bed:
+        intron_border_labels = False
+        n_labels = False
+        exon_bed = own_exon_bed
+    else:
+        # Checker.
+        assert tr_ids_dic, "given dictionary tr_ids_dic empty"
+        random_id = uuid.uuid1()
+        exon_bed = str(random_id) + ".tmp.bed"
 
-    # Generate .tmp files.
-    random_id = uuid.uuid1()
-    exon_bed = str(random_id) + ".tmp.bed"
     intron_bed = False
     if intron_border_labels or n_labels:
         random_id = uuid.uuid1()
-        intron_bed = str(random_id) + ".tmp.bed"
+        intron_bed = str(random_id) + ".intron.tmp.bed"
     random_id = uuid.uuid1()
-    border_bed = str(random_id) + ".tmp.bed"
+    border_bed = str(random_id) + ".border.tmp.bed"
     random_id = uuid.uuid1()
-    merged_bed = str(random_id) + ".tmp.bed"
+    merged_bed = str(random_id) + ".merged.tmp.bed"
     random_id = uuid.uuid1()
     tmp_out = str(random_id) + ".tmp.out"
 
@@ -1971,10 +2018,11 @@ def bed_get_exon_intron_annotations_from_gtf(tr_ids_dic, in_bed,
             stats_dic["T"] = 0
 
     # Get exon (+ intron) regions from GTF.
-    gtf_extract_exon_bed(in_gtf, exon_bed,
-                        out_intron_bed=intron_bed,
-                        use_ei_labels=True,
-                        tr_ids_dic=tr_ids_dic)
+    if not own_exon_bed:
+        gtf_extract_exon_bed(in_gtf, exon_bed,
+                            out_intron_bed=intron_bed,
+                            use_ei_labels=True,
+                            tr_ids_dic=tr_ids_dic)
 
     # Extract intron border positions to BED.
     if intron_border_labels:
@@ -2084,7 +2132,8 @@ def bed_get_exon_intron_annotations_from_gtf(tr_ids_dic, in_bed,
 
     # Remove tmp files.
     if os.path.exists(exon_bed):
-        os.remove(exon_bed)
+        if not own_exon_bed:
+            os.remove(exon_bed)
     if intron_bed:
         if os.path.exists(intron_bed):
             os.remove(intron_bed)
@@ -2761,7 +2810,8 @@ def exon_intron_labels_read_in_ids(in_file):
 
 ################################################################################
 
-def get_chromosome_lengths_from_2bit(in_2bit, out_lengths):
+def get_chromosome_lengths_from_2bit(in_2bit, out_lengths,
+                                     std_chr_filter=False):
     """
     Get chromosome lengths from in_2bit .2bit file. Write lengths
     to out_lengths, with format:
@@ -2770,6 +2820,11 @@ def get_chromosome_lengths_from_2bit(in_2bit, out_lengths):
     chr11	135086622
     ...
     Also return a dictionary with key=chr_id and value=chr_length.
+
+    std_chr_filter:
+        Filter / convert chromosome IDs with function check_convert_chr_id(),
+        removing non-standard chromosomes, and convert IDs like 1,2,X,MT ..
+        to chr1, chr2, chrX, chrM.
 
     """
 
@@ -2792,10 +2847,18 @@ def get_chromosome_lengths_from_2bit(in_2bit, out_lengths):
             cols = line.strip().split("\t")
             chr_id = cols[0]
             chr_l = int(cols[1])
+            # Check ID.
+            if std_chr_filter:
+                new_chr_id = check_convert_chr_id(chr_id)
+                # If not standard chromosome ID or conversion failed, skip.
+                if not new_chr_id:
+                    continue
+                else:
+                    chr_id = new_chr_id
             assert chr_id not in chr_len_dic, "non-unique chromosome ID \"%s\" encountered in \"%s\"" %(chr_id, out_lengths)
             chr_len_dic[chr_id] = chr_l
     f.closed
-    assert chr_len_dic, "chr_len_dic empty (\"%s\" empty?)" %(out_lengths)
+    assert chr_len_dic, "chr_len_dic empty (\"%s\" empty? Chromosome IDs filter activated?)" %(out_lengths)
 
     return chr_len_dic
 
@@ -3467,6 +3530,82 @@ def dic_remove_entries(in_dic, filter_dic):
 
 ################################################################################
 
+def gtf_extract_unique_exon_bed(in_gtf, out_bed,
+                                use_ei_labels=False):
+    """
+    Given a .gtf file with exon features, extract exon unique (!) regions.
+    Since the Ensembl exon_id regions are not unique regarding their genomic
+    coordinates, create own IDs each representing one unique genomic region
+    (unique start+end+strand info).
+
+    Output .bed will look like this (column 4 ID == new exon ID):
+    chr1	1000	2000	NEXT1	0	+
+    chr1	3000	4000	NEXT2	0	+
+    chr1	8000	9000	NEXT3	0	-
+    chr1	6000	7000	NEXT4	0	-
+    ...
+
+    use_ei_labels:
+        Instead of using exon ID, just print "E" in column 4.
+
+    """
+
+    # Store exon ID region data.
+    reg_str_dic = {}
+
+    # Open GTF either as .gz or as text file.
+    if re.search(".+\.gz$", in_gtf):
+        f = gzip.open(in_gtf, 'rt')
+    else:
+        f = open(in_gtf, "r")
+    for line in f:
+        # Skip header.
+        if re.search("^#", line):
+            continue
+        cols = line.strip().split("\t")
+        chr_id = cols[0]
+        feature = cols[2]
+        feat_s = int(cols[3])
+        feat_e = int(cols[4])
+        feat_pol = cols[6]
+        infos = cols[8]
+        if not feature == "exon":
+            continue
+
+        # Restrict to standard chromosomes.
+        new_chr_id = check_convert_chr_id(chr_id)
+        if not new_chr_id:
+            continue
+        else:
+            chr_id = new_chr_id
+
+        # Make start coordinate 0-base (BED standard).
+        feat_s = feat_s - 1
+
+        # Store exon data.
+        check_reg_str = "%s,%i,%i,%s" %(chr_id,feat_s,feat_e,feat_pol)
+        reg_str_dic[check_reg_str] = 1
+
+    f.close()
+
+    # Output genomic exon regions.
+    OUTBED = open(out_bed, "w")
+
+    assert reg_str_dic, "no exon regions read in"
+
+    c_ex = 0
+    for reg_str in reg_str_dic:
+        cols = reg_str.split(",")
+        c_ex += 1
+        ex_id = "NEXT" + str(c_ex)
+        if use_ei_labels:
+            ex_id = "E"
+        OUTBED.write("%s\t%s\t%s\t%s\t0\t%s\n" % (cols[0], cols[1], cols[2], ex_id, cols[3]))
+    OUTBED.close()
+
+
+################################################################################
+
 def gtf_extract_exon_bed(in_gtf, out_bed,
                          out_intron_bed=False,
                          use_ei_labels=False,
@@ -3547,16 +3686,11 @@ def gtf_extract_exon_bed(in_gtf, out_bed,
             continue
 
         # Restrict to standard chromosomes.
-        if re.search("^chr", chr_id):
-            if not re.search("^chr[\dMXY]", chr_id):
-                continue
+        new_chr_id = check_convert_chr_id(chr_id)
+        if not new_chr_id:
+            continue
         else:
-            # Convert to "chr" IDs.
-            if not re.search("^[\dMXY]", chr_id):
-                continue
-            if chr_id == "MT":
-                chr_id = "M"
-            chr_id = "chr" + chr_id
+            chr_id = new_chr_id
 
         # Make start coordinate 0-base (BED standard).
         feat_s = feat_s - 1
@@ -3698,21 +3832,16 @@ def gtf_extract_gene_bed(in_gtf, out_bed,
             continue
 
         # Restrict to standard chromosomes.
-        if re.search("^chr", chr_id):
-            if not re.search("^chr[\dMXY]", chr_id):
-                continue
+        new_chr_id = check_convert_chr_id(chr_id)
+        if not new_chr_id:
+            continue
         else:
-            # Convert to "chr" IDs.
-            if not re.search("^[\dMXY]", chr_id):
-                continue
-            if chr_id == "MT":
-                chr_id = "M"
-            chr_id = "chr" + chr_id
+            chr_id = new_chr_id
 
         # Make start coordinate 0-base (BED standard).
         feat_s = feat_s - 1
 
-        # Extract transcript ID and from infos.
+        # Extract gene ID and from infos.
         m = re.search('gene_id "(.+?)"', infos)
         assert m, "gene_id entry missing in GTF file \"%s\", line \"%s\"" %(in_gtf, line)
         gene_id = m.group(1)
@@ -3722,7 +3851,7 @@ def gtf_extract_gene_bed(in_gtf, out_bed,
             if not gene_id in gene_ids_dic:
                 continue
 
-        # Output genomic exon region.
+        # Output gene region.
         c_out += 1
         OUTBED.write("%s\t%i\t%i\t%s\t0\t%s\n" % (chr_id,feat_s,feat_e,gene_id,feat_pol))
 
@@ -3784,16 +3913,11 @@ def gtf_extract_tsl_gene_bed(in_gtf, out_bed,
         feat_s = feat_s - 1
 
         # Restrict to standard chromosomes.
-        if re.search("^chr", chr_id):
-            if not re.search("^chr[\dMXY]", chr_id):
-                continue
+        new_chr_id = check_convert_chr_id(chr_id)
+        if not new_chr_id:
+            continue
         else:
-            # Convert to "chr" IDs.
-            if not re.search("^[\dMXY]", chr_id):
-                continue
-            if chr_id == "MT":
-                chr_id = "M"
-            chr_id = "chr" + chr_id
+            chr_id = new_chr_id
 
         # Extract gene ID and from infos.
         m = re.search('gene_id "(.+?)"', infos)
@@ -3904,16 +4028,11 @@ def gtf_extract_transcript_bed(in_gtf, out_bed,
             continue
 
         # Restrict to standard chromosomes.
-        if re.search("^chr", chr_id):
-            if not re.search("^chr[\dMXY]", chr_id):
-                continue
+        new_chr_id = check_convert_chr_id(chr_id)
+        if not new_chr_id:
+            continue
         else:
-            # Convert to "chr" IDs.
-            if not re.search("^[\dMXY]", chr_id):
-                continue
-            if chr_id == "MT":
-                chr_id = "M"
-            chr_id = "chr" + chr_id
+            chr_id = new_chr_id
 
         # Make start coordinate 0-base (BED standard).
         feat_s = feat_s - 1
@@ -4306,15 +4425,66 @@ def bed_convert_transcript_to_genomic_sites(in_bed, in_gtf, out_bed,
 
 ################################################################################
 
+def check_convert_chr_id(chr_id):
+    """
+    Check and convert chromosome IDs to format:
+    chr1, chr2, chrX, ...
+    If chromosome IDs like 1,2,X, .. given, convert to chr1, chr2, chrX ..
+    Return False if given chr_id not standard and not convertable.
+
+    Filter out scaffold IDs like:
+    GL000009.2, KI270442.1, chr14_GL000009v2_random
+    chrUn_KI270442v1 ...
+
+    >>> chr_id = "chrX"
+    >>> check_convert_chr_id(chr_id)
+    'chrX'
+    >>> chr_id = "4"
+    >>> check_convert_chr_id(chr_id)
+    'chr4'
+    >>> chr_id = "MT"
+    >>> check_convert_chr_id(chr_id)
+    'chrM'
+    >>> chr_id = "GL000009.2"
+    >>> check_convert_chr_id(chr_id)
+    False
+    >>> chr_id = "chrUn_KI270442v1"
+    >>> check_convert_chr_id(chr_id)
+    False
+
+    """
+    assert chr_id, "given chr_id empty"
+
+    if re.search("^chr", chr_id):
+        if not re.search("^chr[\dMXY]+$", chr_id):
+            chr_id = False
+    else:
+        # Convert to "chr" IDs.
+        if chr_id == "MT":
+            chr_id = "M"
+        if re.search("^[\dMXY]+$", chr_id):
+            chr_id = "chr" + chr_id
+        else:
+            chr_id = False
+    return chr_id
+
+
+################################################################################
+
 def bed_get_chromosome_ids(bed_file,
+                           std_chr_filter=False,
                            ids_dic=False):
     """
     Read in .bed file, return chromosome IDs (column 1 IDs).
     Return dic with chromosome ID -> count mapping.
 
     ids_dic:
-    A non-empty ids_dic can be supplied, resulting in chromosome IDs
-    to be added to the existing ids_dic dictionary.
+        A non-empty ids_dic can be supplied, resulting in chromosome IDs
+        to be added to the existing ids_dic dictionary.
+    std_chr_filter:
+        Filter / convert chromosome IDs with function check_convert_chr_id(),
+        removing non-standard chromosomes, and convert IDs like 1,2,X,MT ..
+        to chr1, chr2, chrX, chrM.
 
     >>> test_file = "test_data/test6.bed"
     >>> bed_get_chromosome_ids(test_file)
@@ -4328,12 +4498,20 @@ def bed_get_chromosome_ids(bed_file,
             row = line.strip()
             cols = line.strip().split("\t")
             chr_id = cols[0]
+            # Check ID.
+            if std_chr_filter:
+                new_chr_id = check_convert_chr_id(chr_id)
+                # If not standard chromosome ID or conversion failed, skip entry.
+                if not new_chr_id:
+                    continue
+                else:
+                    chr_id = new_chr_id
             if chr_id in ids_dic:
                 ids_dic[chr_id] += 1
             else:
                 ids_dic[chr_id] = 1
     f.closed
-    assert ids_dic, "No chromosome IDs read into dictionary (input file \"%s\" empty or malformatted?)" % (bed_file)
+    assert ids_dic, "No chromosome IDs read into dictionary (input file \"%s\" empty or malformatted? Chromosome IDs filter activated?)" % (bed_file)
     return ids_dic
 
 
@@ -4416,16 +4594,11 @@ def gtf_extract_exon_numbers(in_gtf,
             continue
 
         # Restrict to standard chromosomes.
-        if re.search("^chr", chr_id):
-            if not re.search("^chr[\dMXY]", chr_id):
-                continue
+        new_chr_id = check_convert_chr_id(chr_id)
+        if not new_chr_id:
+            continue
         else:
-            # Convert to "chr" IDs.
-            if not re.search("^[\dMXY]", chr_id):
-                continue
-            if chr_id == "MT":
-                chr_id = "M"
-            chr_id = "chr" + chr_id
+            chr_id = new_chr_id
 
         # Extract transcript ID.
         m = re.search('transcript_id "(.+?)"', infos)
@@ -4763,13 +4936,11 @@ def gtf_extract_most_prominent_transcripts(in_gtf, out_file,
             continue
 
         # Restrict to standard chromosomes.
-        if re.search("^chr", chr_id):
-            if not re.search("^chr[\dMXY]", chr_id):
-                continue
+        new_chr_id = check_convert_chr_id(chr_id)
+        if not new_chr_id:
+            continue
         else:
-            # Convert to "chr" IDs.
-            if not re.search("^[\dMXY]", chr_id):
-                continue
+            chr_id = new_chr_id
 
         # Extract gene ID.
         m = re.search('gene_id "(.+?)"', infos)
@@ -5008,7 +5179,7 @@ def shuffle_difreq(seq):
 
     while len(shuff_seq) < len(seq):
         # each following base is based of the frequency of the previous base
-        # and their co-occurence in the original sequence.
+        # and their co-occurrence in the original sequence.
         try:
             shuff_seq.append(weighted_choice(freqs[shuff_seq[-1]].items()))
         except KeyError:
@@ -6175,16 +6346,11 @@ def get_transcript_border_annotations(tr_ids_dic, in_gtf, out_bed,
         exc = tr_exc_dic[tr_id]
 
         # Restrict to standard chromosomes.
-        if re.search("^chr", chr_id):
-            if not re.search("^chr[\dMXY]", chr_id):
-                continue
+        new_chr_id = check_convert_chr_id(chr_id)
+        if not new_chr_id:
+            continue
         else:
-            # Convert to "chr" IDs.
-            if not re.search("^[\dMXY]", chr_id):
-                continue
-            if chr_id == "MT":
-                chr_id = "M"
-            chr_id = "chr" + chr_id
+            chr_id = new_chr_id
 
         # Make start coordinate 0-base (BED standard).
         feat_s = feat_s - 1
@@ -6369,16 +6535,11 @@ def gtf_write_transcript_annotations_to_bed(tr_ids_dic, in_gtf, out_bed,
             continue
 
         # Restrict to standard chromosomes.
-        if re.search("^chr", chr_id):
-            if not re.search("^chr[\dMXY]", chr_id):
-                continue
+        new_chr_id = check_convert_chr_id(chr_id)
+        if not new_chr_id:
+            continue
         else:
-            # Convert to "chr" IDs.
-            if not re.search("^[\dMXY]", chr_id):
-                continue
-            if chr_id == "MT":
-                chr_id = "M"
-            chr_id = "chr" + chr_id
+            chr_id = new_chr_id
 
         # Make start coordinate 0-base (BED standard).
         feat_s = feat_s - 1
@@ -7243,10 +7404,860 @@ def create_str_elem_grouped_bar_plot(pos_str_stats_dic, neg_str_stats_dic, out_p
 
 ################################################################################
 
+def create_eval_model_comp_scatter_plot(model1_scores, model2_scores, out_plot,
+                                        x_label="Score model 1",
+                                        y_label="Score model 2",
+                                        theme=1):
+    """
+    Create graphprot2 eval scatter plot, to compare scores produced by
+    two models on same dataset. Also calculates and plots R2 (coefficient
+    of determination) value for two datasets.
+
+    """
+    assert model1_scores, "model1_scores empty"
+    assert model2_scores, "model2_scores empty"
+    set1_c = len(model1_scores)
+    set2_c = len(model2_scores)
+    assert set1_c == set2_c, "differing set sizes for set1_c and set2_c (%i != %i)" %(set1_c, set2_c)
+    data = {'m1_score': [], 'm2_score': []}
+    for i,sc in enumerate(model1_scores):
+        data['m1_score'].append(sc)
+        data['m2_score'].append(model2_scores[i])
+    df = pd.DataFrame (data, columns = ['m1_score','m2_score'])
+
+    # Calculate R2.
+    correlation_matrix = np.corrcoef(model1_scores, model2_scores)
+    correlation_xy = correlation_matrix[0,1]
+    r_squared = correlation_xy**2
+    r2str = "R2 = %.6f" %(r_squared)
+    # R2 text coordinates.
+    max_x = max(model1_scores)
+    min_y = min(model2_scores)
+
+    if theme == 1:
+        # Make plot.
+        sns.set(style="darkgrid")
+        fig, ax = plt.subplots()
+        sns.scatterplot(x="m1_score", y="m2_score", data=df, color='#69e9f6', s=3)
+        plt.text(max_x , min_y, r2str, color='black', horizontalalignment='right', size=10)
+        fig.set_figwidth(5)
+        fig.set_figheight(4)
+        ax.set(xlabel=x_label)
+        ax.set_ylabel(y_label)
+        #ax.tick_params(axis='x', labelsize=18)
+        #ax.tick_params(axis='y', labelsize=14)
+        fig.savefig(out_plot, dpi=150, bbox_inches='tight')
+
+    elif theme == 2:
+        text_color = "#fcc826"
+        plot_color = "#fd3b9d"
+        box_color = "#2f19f3"
+        # Make plot.
+        sns.set(style="darkgrid", rc={ "axes.labelcolor": text_color, "text.color": text_color, "xtick.color": text_color, "ytick.color": text_color, "grid.color": plot_color, "axes.edgecolor": plot_color})
+        fig, ax = plt.subplots()
+        sns.scatterplot(x="m1_score", y="m2_score", data=df, color='blue', s=3)
+        plt.text(max_x , min_y, r2str, color='blue', horizontalalignment='right', size=10)
+        fig.set_figwidth(5)
+        fig.set_figheight(4)
+        ax.set(xlabel=x_label)
+        ax.set_ylabel(y_label)
+        #ax.tick_params(axis='x', labelsize=18)
+        #ax.tick_params(axis='y', labelsize=14)
+        fig.savefig(out_plot, dpi=150, bbox_inches='tight', transparent=True)
+
+
+################################################################################
+
+def get_jaccard_index(list1, list2):
+    """
+    Given two lists of string/numbers, calculate Jaccard index (similarity)
+    between the two sets.
+    J(A,B) = intersection(A,B) / union(A,B)
+    0 <= J(A,B) <= 1
+    1 if sets are identical
+    0 if intersection = 0
+
+    >>> list1 = [1,1,2,3]
+    >>> list2 = [2,3,4]
+    >>> get_jaccard_index(list1,list2)
+    0.5
+    >>> list2 = [1,2,3]
+    >>> get_jaccard_index(list1,list2)
+    1.0
+    >>> list2 = [4]
+    >>> get_jaccard_index(list1,list2)
+    0.0
+
+    """
+    assert list1, "list1 empty"
+    assert list2, "list2 empty"
+    s1 = set(list1)
+    s2 = set(list2)
+    return float(len(s1.intersection(s2)) / len(s1.union(s2)))
+
+
+################################################################################
+
+def create_eval_kmer_score_kde_plot(set_scores, out_plot,
+                                    set_label="Positives",
+                                    x_label="k-mer score",
+                                    y_label="Density",
+                                    theme=1):
+    """
+    Create graphprot2 eval kdeplot, plotting density for set of k-mer scores.
+
+    """
+    assert set_scores, "set_scores empty"
+    data = {'score': []}
+    data['score'] += set_scores
+    df = pd.DataFrame (data, columns = ['score'])
+
+    if theme == 1:
+        # Make plot.
+        sns.set(style="darkgrid")
+        fig, ax = plt.subplots()
+        sns.kdeplot(x="score", data=df, color='#69e9f6')
+        fig.set_figwidth(5)
+        fig.set_figheight(4)
+        ax.set(xlabel=x_label)
+        ax.set_ylabel(y_label)
+        #ax.tick_params(axis='x', labelsize=18)
+        #ax.tick_params(axis='y', labelsize=14)
+        fig.savefig(out_plot, dpi=150, bbox_inches='tight')
+
+    elif theme == 2:
+        text_color = "#fcc826"
+        plot_color = "#fd3b9d"
+        box_color = "#2f19f3"
+        # Make plot.
+        sns.set(style="darkgrid", rc={ "axes.labelcolor": text_color, "text.color": text_color, "xtick.color": text_color, "ytick.color": text_color, "grid.color": plot_color, "axes.edgecolor": plot_color})
+        fig, ax = plt.subplots()
+        sns.kdeplot(x="score", data=df, color='blue')
+        fig.set_figwidth(5)
+        fig.set_figheight(4)
+        ax.set(xlabel=x_label)
+        ax.set_ylabel(y_label)
+        #ax.tick_params(axis='x', labelsize=18)
+        #ax.tick_params(axis='y', labelsize=14)
+        fig.savefig(out_plot, dpi=150, bbox_inches='tight', transparent=True)
+
+
+################################################################################
+
+def create_eval_kde_plot(set1_scores, set2_scores, out_plot,
+                         set1_label="Positives",
+                         set2_label="Negatives",
+                         x_label="Whole-site score",
+                         y_label="Density",
+                         theme=1):
+    """
+    Create graphprot2 eval kdeplot, plotting densities for two sets of
+    scores.
+
+    """
+    assert set1_scores, "set1_scores empty"
+    assert set2_scores, "set2_scores empty"
+    set1_c = len(set1_scores)
+    set2_c = len(set2_scores)
+    # assert set1_c == set2_c, "differing set sizes for set1_c and set2_c (%i != %i)" %(set1_c, set2_c)
+    data = {'set': [], 'score': []}
+    data['set'] += set1_c*[set1_label] + set2_c*[set2_label]
+    data['score'] += set1_scores + set2_scores
+    df = pd.DataFrame (data, columns = ['set','score'])
+
+    if theme == 1:
+        # Make plot.
+        sns.set(style="darkgrid")
+        fig, ax = plt.subplots()
+        sns.kdeplot(x="score", data=df, hue="set", palette=["#69e9f6", "#f154b2"])
+        fig.set_figwidth(5)
+        fig.set_figheight(4)
+        ax.set(xlabel=x_label)
+        ax.set_ylabel(y_label)
+        #ax.tick_params(axis='x', labelsize=18)
+        #ax.tick_params(axis='y', labelsize=14)
+        fig.savefig(out_plot, dpi=150, bbox_inches='tight')
+
+    elif theme == 2:
+        text_color = "#fcc826"
+        plot_color = "#fd3b9d"
+        box_color = "#2f19f3"
+        # Make plot.
+        sns.set(style="darkgrid", rc={ "axes.labelcolor": text_color, "text.color": text_color, "xtick.color": text_color, "ytick.color": text_color, "grid.color": plot_color, "axes.edgecolor": plot_color})
+        fig, ax = plt.subplots()
+        # aqua, deepskyblue
+        sns.kdeplot(x="score", data=df, hue="set", palette=["blue", "deepskyblue"])
+        fig.set_figwidth(5)
+        fig.set_figheight(4)
+        ax.set(xlabel=x_label)
+        ax.set_ylabel(y_label)
+        #ax.tick_params(axis='x', labelsize=18)
+        #ax.tick_params(axis='y', labelsize=14)
+        fig.savefig(out_plot, dpi=150, bbox_inches='tight', transparent=True)
+
+
+################################################################################
+
+def gp2_eval_generate_html_report(ws_scores, neg_ws_scores,
+                                  out_folder, gp2lib_path,
+                                  html_report_out="report.graphprot2_eval.html",
+                                  kmer2rank_dic=False,
+                                  kmer2sc_dic=False,
+                                  kmer2c_dic=False,
+                                  kmer2scstdev_dic=False,
+                                  kmer2bestsc_dic=False,
+                                  kmer2scrank_dic=False,
+                                  kmer2avgscrank_dic=False,
+                                  kmer2mm_dic=False,
+                                  kmer_stdev_dic=False,
+                                  kmer2bestmm_dic=False,
+                                  ch_info_dic=False,
+                                  kmer_size=5,
+                                  min_kmer_score=0.1,
+                                  min_jacc_sc=0.1,
+                                  top_motif_file_dic=False,
+                                  bottom_motif_file_dic=False,
+                                  kmer_top_n=25,
+                                  onlyseq=True,
+                                  add_ws_scores=False,
+                                  theme=1,
+                                  lookup_kmer=False,
+                                  jacc_scores_dic=False,
+                                  jacc_stats_dic=False,
+                                  plots_subfolder="html_plots"):
+    """
+    Generate HTML report for graphprot2 eval, showing stats and plots regarding
+    whole site scores and k-mers.
+
+    For onlyseq:
+        - m1m2 scores scatter plot
+        - whole site scores density plot (+ vs -)
+        - kmer scores density plot
+        - top scoring kmer stats table
+        - jaccard index analysis (co-occuring positive top scoring kmers)
+    For additional features:
+        - above and:
+        - extended stats with plots (avg scores vs top scores for each kmer)
+        - avg vs top scores correlation plot (like scatter plot)
+        - jaccard index using top scores for ranking
+
+    """
+    # Checks.
+    assert ws_scores, "ws_scores empty"
+    assert neg_ws_scores, "neg_ws_scores empty"
+    assert os.path.exists(out_folder), "out_folder does not exist"
+    assert os.path.exists(gp2lib_path), "gp2lib_path does not exist"
+    assert kmer2rank_dic, "kmer2rank_dic needed"
+    assert kmer2sc_dic, "kmer2sc_dic needed"
+    assert kmer2c_dic, "kmer2c_dic needed"
+    assert kmer2scrank_dic, "kmer2scrank_dic needed"
+    assert jacc_scores_dic, "jacc_scores_dic needed"
+    assert jacc_stats_dic, "jacc_stats_dic needed"
+    if not onlyseq:
+        assert kmer2bestsc_dic, "kmer2bestsc_dic needed in case of additional features"
+        assert kmer2scstdev_dic, "kmer2scstdev_dic needed in case of additional features"
+        assert kmer2mm_dic, "kmer2mm_dic needed in case of additional features"
+        assert kmer_stdev_dic, "kmer_stdev_dic needed in case of additional features"
+        assert kmer2bestmm_dic, "kmer2bestmm_dic needed in case of additional features"
+        assert ch_info_dic, "ch_info_dic needed in case of additional features"
+        assert kmer2avgscrank_dic, "kmer2avgscrank_dic needed in case of additional features"
+
+    # Import markdown to generate report.
+    from markdown import markdown
+
+    # Output subfolder for plots.
+    plots_folder = plots_subfolder
+    plots_out_folder = out_folder + "/" + plots_folder
+    if not os.path.exists(plots_out_folder):
+        os.makedirs(plots_out_folder)
+    # Output files.
+    html_out = out_folder + "/" + "report.graphprot2_eval.html"
+    if html_report_out:
+        html_out = html_report_out
+    # Plot files.
+    ws_sc_plot = "whole_site_scores_kde_plot.png"
+    kmer_sc_plot = "kmer_scores_kde_plot.png"
+    avg_best_kmer_kde_plot = "avg_best_kmer_scores_kde_plot.png"
+    avg_best_kmer_scatter_plot = "avg_best_kmer_scores_scatter_plot.png"
+    model_comp_plot = "model_comparison_plot.png"
+    ws_sc_plot_out = plots_out_folder + "/" + ws_sc_plot
+    kmer_sc_plot_out = plots_out_folder + "/" + kmer_sc_plot
+    model_comp_plot_out = plots_out_folder + "/" + model_comp_plot
+    avg_best_kmer_kde_plot_out = plots_out_folder + "/" + avg_best_kmer_kde_plot
+    avg_best_kmer_scatter_plot_out = plots_out_folder + "/" + avg_best_kmer_scatter_plot
+
+    # Logo paths.
+    logo1_path = gp2lib_path + "/content/logo1.png"
+    logo2_path = gp2lib_path + "/content/logo2.png"
+    logo3_path = gp2lib_path + "/content/logo3.png"
+    sorttable_js_path = gp2lib_path + "/content/sorttable.js"
+
+    # Create theme-specific HTML header.
+    if theme == 1:
+        mdtext = """
+<head>
+<title>GraphProt2 - Model Evaluation Report</title>
+<script src="%s" type="text/javascript"></script>
+</head>
+
+<img src="%s" alt="gp2_logo"
+	title="gp2_logo" width="600" />
+
+""" %(sorttable_js_path, logo1_path)
+    elif theme == 2:
+        mdtext = """
+<head>
+<title>GraphProt2 - Model Evaluation Report</title>
+<script src="%s" type="text/javascript"></script>
+<style>
+h1 {color:#fd3b9d;}
+h2 {color:#fd3b9d;}
+h3 {color:#fd3b9d;}
+</style>
+</head>
+
+<img src="%s" alt="gp2_logo"
+	title="gp2_logo" width="500" />
+
+<body style="font-family:sans-serif" bgcolor="#190250" text="#fcc826" link="#fd3b9d" vlink="#fd3b9d" alink="#fd3b9d">
+
+""" %(sorttable_js_path, logo2_path)
+    elif theme == 3:
+        mdtext = """
+<head>
+<title>GraphProt2 - Model Evaluation Report</title>
+<script src="%s" type="text/javascript"></script>
+<style>
+h1 {color:#1fcc2c;}
+h2 {color:#1fcc2c;}
+h3 {color:#1fcc2c;}
+</style>
+</head>
+
+<img src="%s" alt="gp2_logo"
+	title="gp2_logo" width="400" />
+
+<body style="font-family:monospace" bgcolor="#1d271e" text="#1fcc2c" link="#1fcc2c" vlink="#1fcc2c" alink="#1fcc2c">
+
+""" %(sorttable_js_path, logo3_path)
+    else:
+        assert False, "invalid theme ID given"
+
+    # Add first section markdown.
+    mdtext += """
+
+# Model Evaluation Report
+
+List of available model evaluation statistics generated
+by GraphProt2 (graphprot2 eval):
+
+- [Whole-site score distribution](#ws-scores-plot)"""
+    if onlyseq:
+        mdtext += "\n"
+        mdtext += "- [k-mer score distribution](#kmer-scores-plot)"
+    else:
+        mdtext += "\n"
+        mdtext += "- [k-mer score distributions](#kmer-scores-plots)"
+    mdtext += "\n"
+    mdtext += "- [k-mer statistics](#kmer-stats)"
+    mdtext += "\n"
+    mdtext += "- [k-mer co-occurrence statistics](#kmer-cooc-stats)"
+    if lookup_kmer:
+        mdtext += "\n"
+        mdtext += "- [Lookup k-mer statistics](#lookup-kmer-stats)\n"
+        mdtext += "- [Lookup k-mer co-occurrence statistics](#lookup-kmer-cooc-stats)"
+    if add_ws_scores:
+        mdtext += "\n"
+        mdtext += "- [Model comparison](#model-comp-plot)"
+    mdtext += "\n&nbsp;\n"
+
+    """
+    Whole-site score distributions for positives and negatives.
+
+    """
+    print("Generate whole-site scores plot .. ")
+    # Make whole-site score distributions for positives and negatives.
+    create_eval_kde_plot(ws_scores, neg_ws_scores, ws_sc_plot_out,
+                         set1_label="Positives",
+                         set2_label="Negatives",
+                         x_label="Whole-site score",
+                         y_label="Density",
+                         theme=theme)
+    plot_path = plots_folder + "/" + ws_sc_plot
+
+    mdtext += """
+## Whole-site score distribution ### {#ws-scores-plot}
+
+Whole-site score distributions for the positive and negative sequence
+set, scored by the trained model. Since the model was trained on these
+two sequence sets, we expect on average higher scores for the positive
+sequences (given a sufficient model performance).
+
+"""
+    mdtext += '<img src="' + plot_path + '" alt="Whole-site score distributions"' + "\n"
+    mdtext += 'title="Whole-site score distributions" width="500" />' + "\n"
+    mdtext += """
+
+**Figure:** Whole-site score distributions for the positive (Positives) and
+negative (Negatives) sequence set, scored by the trained model.
+
+&nbsp;
+
+"""
+
+    """
+    k-mer score distribution(s)
+
+    - If onlyseq, one distribution plot (k-mer scores)
+    - If additional features, plot best scores + average scores,
+      first distribution plot and then scatter plot.
+
+    """
+    kmer_sc_list = []
+    for kmer in kmer2sc_dic:
+        kmer_sc_list.append(kmer2sc_dic[kmer])
+    c_kmers = len(kmer_sc_list)
+    # Get best k-mer scores list.
+    best_kmer_sc_list = []
+    if not onlyseq:
+        for kmer in kmer2bestsc_dic:
+            best_kmer_sc_list.append(kmer2bestsc_dic[kmer])
+
+    if onlyseq:
+
+        print("Generate sequence k-mer stats and plots ... ")
+
+        set_label = "Positive %i-mers" %(kmer_size)
+        x_label = "%i-mer score" %(kmer_size)
+        create_eval_kmer_score_kde_plot(kmer_sc_list, kmer_sc_plot_out,
+                                        set_label=set_label,
+                                        x_label=x_label,
+                                        y_label="Density",
+                                        theme=theme)
+        plot_path = plots_folder + "/" + kmer_sc_plot
+
+        mdtext += """
+## k-mer score distribution ### {#kmer-scores-plot}
+
+Score distribution of sequence k-mers (k = %i) found in the positive training set.
+k-mers are scored by the model, using the subgraph encompassing the k-mer.
+
+""" %(kmer_size)
+        mdtext += '<img src="' + plot_path + '" alt="k-mer score distribution"' + "\n"
+        mdtext += 'title="k-mer score distribution" width="500" />' + "\n"
+        mdtext += """
+
+**Figure:** Score distribution of k-mers found in the positive training sequence set.
+
+&nbsp;
+
+"""
+
+        # k-mer stats table for onlyseq.
+        mdtext += """
+## k-mer statistics ### {#kmer-stats}
+
+**Table:** Sequence k-mer statistics (score (sc) rank, k-mer score, k-mer count,
+count rank) for the top %i scoring sequence %i-mers (ranked by k-mer score).
+
+""" %(kmer_top_n, kmer_size)
+
+        mdtext += "| sc rank | &nbsp; k-mer &nbsp; | &nbsp; k-mer sc &nbsp; | k-mer count | k-mer count rank | \n"
+        mdtext += "| :-: | :-: | :-: | :-: | :-: |\n"
+        sc_rank = 0
+        for kmer, sc in sorted(kmer2sc_dic.items(), key=lambda item: item[1], reverse=True):
+            sc_rank += 1
+            if sc_rank > kmer_top_n:
+                break
+            kmer_count_rank = kmer2rank_dic[kmer]
+            kmer_count = kmer2c_dic[kmer]
+            mdtext += "| %i | %s | %.6f | %i | %i |\n" %(sc_rank, kmer, sc, kmer_count, kmer_count_rank)
+        mdtext += "\n&nbsp;\n&nbsp;\n"
+
+        # k-mer co-occurrence statistics table for onlyseq.
+        mdtext += """
+## k-mer co-occurrence statistics ### {#kmer-cooc-stats}
+
+**Table:** sequence k-mer co-occurrence statistics (Jaccard index (JI) rank, k-mer 1,
+k-mer 2, Jaccard index, k-mer 1 score (sc), k-mer 2 score, mean minimum distance
+of k-mers on sequences containing both k-mers with standard deviation, number
+of intersections (sequences containing both k-mers), size of union of sequences
+containing the two k-mers).
+Entries are sorted by the Jaccard index of the two k-mers (where set is defined
+as the set of sequences containing the k-mer). Only the top %i k-mer pairs
+are shown, with a minimum Jaccard index of %s, a minimum k-mer score of
+%s, and a minimum # of intersections of 10, and a minimum mean minimum distance
+(yes!) of %i. An empty table means that no pairs have met the filtering criteria.
+
+""" %(kmer_top_n, str(min_jacc_sc), str(min_kmer_score), kmer_size)
+
+        mdtext += "| JI rank | &nbsp; k-mer 1 &nbsp; |  &nbsp; k-mer 2 &nbsp; | JI | k-mer 1 sc | k-mer 2 sc | mean min dist (+- stdev) | # intersect | # union | \n"
+        mdtext += "| :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | \n"
+        jacc_rank = 0
+        kmers2sumsc_dic = {}
+        for kmers, jacc_idx in sorted(jacc_scores_dic.items(), key=lambda item: item[1], reverse=True):
+            min_dist_mean = jacc_stats_dic[kmers][5]
+            c_intersects = jacc_stats_dic[kmers][7]
+            if min_dist_mean < kmer_size:
+                continue
+            if c_intersects < 10:
+                continue
+            jacc_rank += 1
+            if jacc_rank > kmer_top_n:
+                break
+            kmer1 = jacc_stats_dic[kmers][0]
+            kmer2 = jacc_stats_dic[kmers][1]
+            kmer1_sc = jacc_stats_dic[kmers][2]
+            kmer2_sc = jacc_stats_dic[kmers][3]
+            sum_sc = kmer1_sc + kmer2_sc
+            kmers2sumsc_dic[kmers] = sum_sc
+            min_dist_stdev = jacc_stats_dic[kmers][6]
+            c_union = jacc_stats_dic[kmers][8]
+            mdtext += "| %i | %s | %s | %.6f | %.6f | %.6f | %.6f (+- %.6f) | %i | %i |\n" %(jacc_rank, kmer1, kmer2, jacc_idx, kmer1_sc, kmer2_sc, min_dist_mean, min_dist_stdev, c_intersects, c_union)
+        mdtext += "\n&nbsp;\n&nbsp;\n"
+
+        if lookup_kmer:
+            # Lookup k-mer stats table for onlyseq.
+            print("Generate --lookup-kmer stats and plots ... ")
+            mdtext += """
+## Lookup k-mer statistics ### {#lookup-kmer-stats}
+
+**Table:** lookup k-mer statistics (score (sc) rank, k-mer score, k-mer count,
+count rank) for lookup k-mer %s.
+
+""" %(lookup_kmer)
+
+            mdtext += "| sc rank | &nbsp; k-mer &nbsp; | &nbsp; k-mer sc &nbsp; | k-mer count | k-mer count rank | \n"
+            mdtext += "| :-: | :-: | :-: | :-: | :-: |\n"
+            lk_sc_rank = kmer2scrank_dic[lookup_kmer]
+            lk_sc = kmer2sc_dic[lookup_kmer]
+            lk_count_rank = kmer2rank_dic[lookup_kmer]
+            lk_count = kmer2c_dic[lookup_kmer]
+            mdtext += "| %i | %s | %.6f | %i | %i |\n" %(lk_sc_rank, lookup_kmer, lk_sc, lk_count, lk_count_rank)
+            mdtext += "\n&nbsp;\n&nbsp;\n"
+
+            # Lookup k-mer co-occurrence statistics table for onlyseq.
+            mdtext += """
+## Lookup k-mer co-occurrence statistics ### {#lookup-kmer-cooc-stats}
+
+**Table:** Lookup sequence k-mer co-occurrence statistics.
+Entries are sorted by the Jaccard index (JI) of the two k-mers.
+Only the top %i k-mer pairs are shown, with a minimum Jaccard index
+of %s, a minimum k-mer score (sc) of %s, and a minimum # of intersections of 10.
+
+""" %(kmer_top_n, str(min_jacc_sc), str(min_kmer_score))
+
+            mdtext += "| JI rank | &nbsp; k-mer 1 &nbsp; |  &nbsp; k-mer 2 &nbsp; | JI | k-mer 1 sc | k-mer 2 sc | mean min dist (+- stdev) | # intersect | # union | \n"
+            mdtext += "| :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | \n"
+            jacc_rank = 0
+            kmers2sumsc_dic = {}
+            for kmers, jacc_idx in sorted(jacc_scores_dic.items(), key=lambda item: item[1], reverse=True):
+                jacc_rank += 1
+                kmer1 = jacc_stats_dic[kmers][0]
+                kmer2 = jacc_stats_dic[kmers][1]
+                if kmer1 != lookup_kmer and kmer2 != lookup_kmer:
+                    continue
+                kmer1_sc = jacc_stats_dic[kmers][2]
+                kmer2_sc = jacc_stats_dic[kmers][3]
+                sum_sc = kmer1_sc + kmer2_sc
+                kmers2sumsc_dic[kmers] = sum_sc
+                min_dist_mean = jacc_stats_dic[kmers][5]
+                min_dist_stdev = jacc_stats_dic[kmers][6]
+                c_intersects = jacc_stats_dic[kmers][7]
+                c_union = jacc_stats_dic[kmers][8]
+                mdtext += "| %i | %s | %s | %.6f | %.6f | %.6f | %.6f (+- %.6f) | %i | %i |\n" %(jacc_rank, kmer1, kmer2, jacc_idx, kmer1_sc, kmer2_sc, min_dist_mean, min_dist_stdev, c_intersects, c_union)
+            mdtext += "\n&nbsp;\n&nbsp;\n"
+
+    else:
+
+        print("Generate additional feature k-mer stats and plots ... ")
+
+        set1_label = "Average %i-mer scores" %(kmer_size)
+        set2_label = "Best %i-mer scores" %(kmer_size)
+        x_label = "%i-mer score" %(kmer_size)
+        create_eval_kde_plot(kmer_sc_list, best_kmer_sc_list, avg_best_kmer_kde_plot_out,
+                             set1_label=set1_label,
+                             set2_label=set2_label,
+                             x_label=x_label,
+                             y_label="Density",
+                             theme=theme)
+        plot_path1 = plots_folder + "/" + avg_best_kmer_kde_plot
+
+        x_label = "Average %i-mer score" %(kmer_size)
+        y_label = "Best %i-mer score" %(kmer_size)
+        create_eval_model_comp_scatter_plot(kmer_sc_list, best_kmer_sc_list,
+                                            avg_best_kmer_scatter_plot_out,
+                                            x_label=x_label,
+                                            y_label=y_label,
+                                            theme=theme)
+        plot_path2 = plots_folder + "/" + avg_best_kmer_scatter_plot
+
+        mdtext += """
+## k-mer score distributions ### {#kmer-scores-plots}
+
+Average and best score distribution of all k-mers (k = %i) found in the
+positive training set (with additional features).
+As additional features vary, the same sequence k-mer can have different
+scores, depending on the underlying additional feature values at a certain
+sequence position. It is therefore possible to select the best score or
+calculate the average score for each sequence k-mer from all k-mer
+occurences in a positive set with additional features.
+
+""" %(kmer_size)
+        mdtext += '<img src="' + plot_path1 + '" alt="average vs best k-mer score distribution"' + "\n"
+        mdtext += 'title="average vs best k-mer score distribution" width="500" />' + "\n"
+        mdtext += """
+
+**Figure:** Average and best score distribution of all k-mers found in the
+positive training set (with additional features).
+&nbsp;
+
+"""
+
+        mdtext += '<img src="' + plot_path2 + '" alt="average vs best k-mer scores scatter plot"' + "\n"
+        mdtext += 'title="average vs best k-mer scores scatter plot" width="500" />' + "\n"
+        mdtext += """
+
+**Figure:** Average vs. best k-mer scores scatter plot for all k-mers found in the
+positive training set (with additional features). The more the best score of each k-mer
+deviates from its average score, the more scattered the points should be above the
+diagonal line (y = x) in the upper-left area. No points should be located below
+the diagonal (lower right), since the best score is always >= the average score.
+Points on the diagonal are likely k-mers with an occurence = 1, i.e., best score ==
+average score. Points near the diagonal are k-mers that feature similar annotated
+additional feature values across the positive dataset.
+
+&nbsp;
+
+"""
+
+        # k-mer stats table for additional features.
+        mdtext += """
+## k-mer statistics ### {#kmer-stats}
+
+**Table:** Sequence k-mer statistics with additional features (best score (sc) rank,
+best k-mer score, average (avg) k-mer score + standard deviation, average k-mer rank,
+total k-mer count, and total count rank) for the top %i scoring %i-mers
+(ranked by best k-mer score). Best scoring motif + average scoring motif are
+also shown.
+
+""" %(kmer_top_n, kmer_size)
+
+        # Motif plots output folders.
+        avg_motif_plots_folder = plots_out_folder + "/" + "avg_motif_plots"
+        best_motif_plots_folder = plots_out_folder + "/" + "best_motif_plots"
+        if not os.path.exists(avg_motif_plots_folder):
+            os.makedirs(avg_motif_plots_folder)
+        if not os.path.exists(best_motif_plots_folder):
+            os.makedirs(best_motif_plots_folder)
+
+        kmer_i = 10 ** len(str(c_kmers))
+        sc_rank = 0
+
+        mdtext += "| best sc rank | &nbsp; k-mer &nbsp; | best k-mer sc | best sc motif | avg k-mer rank | avg k-mer sc | avg sc stdev | avg sc motif | avg + best sc | diff(avg sc, best sc) | k-mer count | k-mer count rank |\n"
+        mdtext += "| :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |\n"
+
+        for kmer, best_sc in sorted(kmer2bestsc_dic.items(), key=lambda item: item[1], reverse=True):
+            sc_rank += 1
+            kmer_i += 1
+            if sc_rank > kmer_top_n:
+                break
+            kmer_count_rank = kmer2rank_dic[kmer]
+            kmer_count = kmer2c_dic[kmer]
+            avg_sc = kmer2sc_dic[kmer]
+            avg_sc_stdev = kmer2scstdev_dic[kmer]
+            avg_sc_rank = kmer2avgscrank_dic[kmer]
+            sc_sum = best_sc + avg_sc
+            sc_diff = abs(best_sc-avg_sc)
+            # Generate average score motif.
+            avg_sc_plot_file = avg_motif_plots_folder + "/" + str(kmer_i)[1:] + "_" + kmer + ".avg_sc.png"
+            make_motif_plot(kmer2mm_dic[kmer], ch_info_dic, avg_sc_plot_file,
+                            fid2stdev_dic=kmer_stdev_dic[kmer])
+            pp1 = plots_folder + "/avg_motif_plots/" + str(kmer_i)[1:] + "_" + kmer + ".avg_sc.png"
+            # Generate best score motif.
+            best_sc_plot_file = best_motif_plots_folder + "/" + str(kmer_i)[1:] + "_" + kmer + ".best_sc.png"
+            make_motif_plot(kmer2bestmm_dic[kmer], ch_info_dic, best_sc_plot_file,
+                            fid2stdev_dic=False)
+            pp2 = plots_folder + "/best_motif_plots/" + str(kmer_i)[1:] + "_" + kmer + ".best_sc.png"
+            mdtext += '| %i | %s | %.6f | <image src = "%s" width="150px"></image> | %i | %.6f | %.6f | <image src = "%s" width="150px"></image> | %.6f | %.6f | %i | %i |\n' %(sc_rank, kmer, best_sc, pp2, avg_sc_rank, avg_sc, avg_sc_stdev, pp1, sc_sum, sc_diff, kmer_count, kmer_count_rank)
+        mdtext += "\n&nbsp;\n&nbsp;\n"
+
+        # k-mer co-occurrence statistics table for additional features.
+        mdtext += """
+## k-mer co-occurrence statistics ### {#kmer-cooc-stats}
+
+**Table:** sequence k-mer co-occurrence statistics with additional features
+(Jaccard index (JI) rank, k-mer 1, k-mer 2, Jaccard index, best k-mer 1 score (sc),
+best k-mer 2 score, mean minimum distance of k-mers on sequences containing both
+k-mers with standard deviation, number of intersections (sequences containing
+both k-mers), size of union of sequences containing the two k-mers).
+Entries are sorted by the Jaccard index of the two k-mers (where set is defined
+as the set of sequences containing the k-mer). Only the top %i k-mer pairs
+are shown, with a minimum Jaccard index of %s a minimum k-mer score of
+%s, a minimum # of intersections of 10, , and a minimum mean minimum distance
+(yes!) of %i. An empty table means that no pairs have met the filtering criteria.
+
+""" %(kmer_top_n, str(min_jacc_sc), str(min_kmer_score), kmer_size)
+
+        mdtext += "| JI rank | &nbsp; k-mer 1 &nbsp; |  &nbsp; k-mer 2 &nbsp; | JI | k-mer 1 sc | k-mer 2 sc | mean min dist | dist stdev | # intersect | # union | \n"
+        mdtext += "| :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | \n"
+        jacc_rank = 0
+        kmers2sumsc_dic = {}
+        for kmers, jacc_idx in sorted(jacc_scores_dic.items(), key=lambda item: item[1], reverse=True):
+            min_dist_mean = jacc_stats_dic[kmers][5]
+            c_intersects = jacc_stats_dic[kmers][7]
+            if c_intersects < 10:
+                continue
+            if min_dist_mean < kmer_size:
+                continue
+            jacc_rank += 1
+            if jacc_rank > kmer_top_n:
+                break
+            kmer1 = jacc_stats_dic[kmers][0]
+            kmer2 = jacc_stats_dic[kmers][1]
+            kmer1_sc = jacc_stats_dic[kmers][2]
+            kmer2_sc = jacc_stats_dic[kmers][3]
+            sum_sc = kmer1_sc + kmer2_sc
+            kmers2sumsc_dic[kmers] = sum_sc
+            min_dist_stdev = jacc_stats_dic[kmers][6]
+            c_union = jacc_stats_dic[kmers][8]
+            mdtext += "| %i | %s | %s | %.6f | %.6f | %.6f | %.3f | %.3f | %i | %i |\n" %(jacc_rank, kmer1, kmer2, jacc_idx, kmer1_sc, kmer2_sc, min_dist_mean, min_dist_stdev, c_intersects, c_union)
+        mdtext += "\n&nbsp;\n&nbsp;\n"
+
+        if lookup_kmer:
+            # Lookup k-mer stats table for additional features.
+            print("Generate --lookup-kmer stats and plots ... ")
+            mdtext += """
+## Lookup k-mer statistics ### {#lookup-kmer-stats}
+
+**Table:** lookup k-mer statistics (best score (sc) rank, average (avg) score rank,
+k-mer score, k-mer count,
+count rank) for lookup k-mer %s and training data with additional features.
+
+""" %(lookup_kmer)
+
+            mdtext += "| best sc rank | avg sc rank | &nbsp; k-mer &nbsp; | best k-mer sc | avg k-mer sc | avg sc stdev | best sc motif | avg sc motif | k-mer count | k-mer count rank | \n"
+            mdtext += "| :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | \n"
+            lk_best_sc_rank = kmer2scrank_dic[lookup_kmer]
+            lk_avg_sc_rank = kmer2avgscrank_dic[lookup_kmer]
+            lk_best_sc = kmer2bestsc_dic[lookup_kmer]
+            lk_avg_sc = kmer2sc_dic[lookup_kmer]
+            lk_avg_sc_stdev = kmer2scstdev_dic[lookup_kmer]
+            lk_count_rank = kmer2rank_dic[lookup_kmer]
+            lk_count = kmer2c_dic[lookup_kmer]
+            lk_avg_plot_file = plots_out_folder + "/lookup_kmer_%s.avg_sc.png" %(lookup_kmer)
+            make_motif_plot(kmer2mm_dic[lookup_kmer], ch_info_dic, lk_avg_plot_file,
+                            fid2stdev_dic=kmer_stdev_dic[lookup_kmer])
+            pp1 = plots_folder + "/lookup_kmer_%s.avg_sc.png" %(lookup_kmer)
+
+            lk_best_plot_file = plots_out_folder + "/lookup_kmer_%s.best_sc.png" %(lookup_kmer)
+            make_motif_plot(kmer2bestmm_dic[lookup_kmer], ch_info_dic, lk_best_plot_file,
+                            fid2stdev_dic=False)
+            pp2 = plots_folder + "/lookup_kmer_%s.best_sc.png" %(lookup_kmer)
+            mdtext += '| %i | %i | %s | %.6f | %.6f | %.6f | <image src = "%s" width="150px"></image> | <image src = "%s" width="150px"></image> | %i | %i |\n' %(lk_best_sc_rank, lk_avg_sc_rank, kmer, lk_best_sc, lk_avg_sc, lk_avg_sc_stdev, pp2, pp1, kmer_count, kmer_count_rank)
+            mdtext += "\n&nbsp;\n&nbsp;\n"
+
+            # Lookup k-mer co-occurrence statistics table for additional features.
+            mdtext += """
+## Lookup k-mer co-occurrence statistics ### {#lookup-kmer-cooc-stats}
+
+**Table:** Lookup k-mer co-occurrence statistics for for lookup k-mer %s and
+training data with additional features.
+Entries are sorted by the Jaccard index (JI) of the two k-mers. The Jaccard index of
+two k-mers is calculated based on the two sequence sets that contain the
+two k-mers, with each sequence ID being a set member. Scores are best k-mer scores.
+Only the top %i k-mer pairs including %s are shown, with a minimum Jaccard index
+of %s and a minimum k-mer score of %s.
+
+""" %(lookup_kmer, kmer_top_n, lookup_kmer, str(min_jacc_sc), str(min_kmer_score))
+
+            mdtext += "| JI rank | &nbsp; k-mer 1 &nbsp; |  &nbsp; k-mer 2 &nbsp; | JI | k-mer 1 score | k-mer 2 score | mean min dist (+- stdev) | # intersect | # union | \n"
+            mdtext += "| :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | \n"
+            jacc_rank = 0
+            kmers2sumsc_dic = {}
+            for kmers, jacc_idx in sorted(jacc_scores_dic.items(), key=lambda item: item[1], reverse=True):
+                kmer1 = jacc_stats_dic[kmers][0]
+                kmer2 = jacc_stats_dic[kmers][1]
+                if kmer1 != lookup_kmer and kmer2 != lookup_kmer:
+                    continue
+                jacc_rank += 1
+                if jacc_rank > kmer_top_n:
+                    break
+                kmer1_sc = jacc_stats_dic[kmers][2]
+                kmer2_sc = jacc_stats_dic[kmers][3]
+                sum_sc = kmer1_sc + kmer2_sc
+                kmers2sumsc_dic[kmers] = sum_sc
+                min_dist_mean = jacc_stats_dic[kmers][5]
+                min_dist_stdev = jacc_stats_dic[kmers][6]
+                c_intersects = jacc_stats_dic[kmers][7]
+                c_union = jacc_stats_dic[kmers][8]
+                mdtext += "| %i | %s | %s | %.6f | %.6f | %.6f | %.6f (+- %.6f) | %i | %i |\n" %(jacc_rank, kmer1, kmer2, jacc_idx, kmer1_sc, kmer2_sc, min_dist_mean, min_dist_stdev, c_intersects, c_union)
+            mdtext += "\n&nbsp;\n&nbsp;\n"
+
+    """
+    Model comparison plot.
+
+    """
+
+    if add_ws_scores:
+
+        x_label = "Model 1 score"
+        y_label = "Model 2 score"
+        print("Generate --train-in vs --add-train-in model comparison plot ... ")
+        create_eval_model_comp_scatter_plot(ws_scores, add_ws_scores,
+                                            model_comp_plot_out,
+                                            x_label=x_label,
+                                            y_label=y_label,
+                                            theme=theme)
+        plot_path = plots_folder + "/" + model_comp_plot
+
+        mdtext += """
+## Model comparison ### {#model-comp-plot}
+
+To compare two models, the postive training set is scored with two models
+and the two model scores are displayed as a scatter plot. More similar
+models should show higher correlation, resulting in a higher R2 score
+(coeffient of determination).
+
+"""
+        mdtext += '<img src="' + plot_path + '" alt="model comparison plot"' + "\n"
+        mdtext += 'title="model comparison plot" width="500" />' + "\n"
+        mdtext += """
+
+**Figure:** Model comparison scatter plot, comparing whole-site model scores
+on the positive training set for the two input models. Model 1: model from
+--train-in folder. Model 2: model from --add-train-in.
+&nbsp;
+
+"""
+
+    print("Generate HTML report ... ")
+
+    # Convert mdtext to html.
+    md2html = markdown(mdtext, extensions=['attr_list', 'tables'])
+
+    #OUTMD = open(md_out,"w")
+    #OUTMD.write("%s\n" %(mdtext))
+    #OUTMD.close()
+    OUTHTML = open(html_out,"w")
+    OUTHTML.write("%s\n" %(md2html))
+    OUTHTML.close()
+
+    # change <table> to sortable.
+    check_cmd = "sed -i 's/<table>/<table class=" + '"sortable"' + ">/g' " + html_out
+    output = subprocess.getoutput(check_cmd)
+    error = False
+    if output:
+        error = True
+    assert error == False, "sed command returned error:\n%s" %(output)
+
+
+################################################################################
+
 def gp2_gt_generate_html_report(pos_seqs_dic, neg_seqs_dic, out_folder,
                                 dataset_type, gp2lib_path,
                                 html_report_out=False,
-                                plots_subfolder="plots_graphprot2_gt",
+                                plots_subfolder=False,
                                 id2ucr_dic=False,
                                 pos_str_stats_dic=False,
                                 neg_str_stats_dic=False,
@@ -7260,6 +8271,7 @@ def gp2_gt_generate_html_report(pos_seqs_dic, neg_seqs_dic, out_folder,
                                 neg_tra_stats_dic=False,
                                 pos_rra_stats_dic=False,
                                 neg_rra_stats_dic=False,
+                                add_feat_dic_list=False,
                                 target_gbtc_dic=False,
                                 all_gbtc_dic=False,
                                 t2hc_dic=False,
@@ -7292,6 +8304,10 @@ def gp2_gt_generate_html_report(pos_seqs_dic, neg_seqs_dic, out_folder,
         Positive set phastcons scores statistics dictionary
     neg_phastcons_stats_dic:
         Negative set phastcons scores statistics dictionary
+    add_feat_dic_list:
+        List of dictionaries with additional BED feature statistics,
+        where positive and corresponding negative set are stored together,
+        so indices 1,2 3,4 5,6 ... belong together (positive stats dic first).
     out_folder:
         graphprot2 gt results output folder, to store report in.
     rna:
@@ -7321,6 +8337,11 @@ def gp2_gt_generate_html_report(pos_seqs_dic, neg_seqs_dic, out_folder,
     assert dataset_type in ds_types, "invalid dataset type given (expected g, s, or t)"
     # Import markdown to generate report.
     from markdown import markdown
+
+    # Checks.
+    if add_feat_dic_list:
+        if len(add_feat_dic_list) % 2:
+            assert False, "even number of dictionaries expected for given add_feat_dic_list"
 
     # Output subfolder for plots.
     plots_folder = plots_subfolder
@@ -7515,12 +8536,10 @@ by GraphProt2 (graphprot2 gt):
         mdtext += "- [Conservation scores distribution](#con-plot)\n"
         mdtext += "- [Conservation scores statistics](#con-stats)"
     if pos_eia_stats_dic and neg_eia_stats_dic:
-        occ_labels = ["F", "T"]
         mdtext += "\n"
-        mdtext += "- [Exon intron region distribution](#eia-plot)\n"
-        mdtext += "- [Exon intron region statistics](#eia-stats)"
+        mdtext += "- [Exon-intron region distribution](#eia-plot)\n"
+        mdtext += "- [Exon-intron region statistics](#eia-stats)"
     if pos_tra_stats_dic and neg_tra_stats_dic:
-        occ_labels = ["S", "E", "A", "Z", "B"]
         mdtext += "\n"
         mdtext += "- [Transcript region distribution](#tra-plot)\n"
         mdtext += "- [Transcript region statistics](#tra-stats)"
@@ -7534,6 +8553,10 @@ by GraphProt2 (graphprot2 gt):
     if t2hc_dic and t2i_dic:
         mdtext += "\n"
         mdtext += "- [Target region overlap statistics](#tro-stats)"
+    if add_feat_dic_list:
+        mdtext += "\n"
+        mdtext += "- [BED feature statistics](#bed-stats)\n"
+        mdtext += "- [BED feature coverage distribution](#bed-plot)"
     mdtext += "\n&nbsp;\n"
 
     # Make general stats table.
@@ -7817,10 +8840,10 @@ calculated before normalization (normalizing values to -1 .. 1).
             mdtext += "| mean score | %.3f (+-%.3f) | %.3f (+-%.3f) |\n" %(pos_phylop_stats_dic['mean'], pos_phylop_stats_dic['stdev'], neg_phylop_stats_dic['mean'], neg_phylop_stats_dic['stdev'])
         mdtext += "\n&nbsp;\n&nbsp;\n"
 
-    # Exon intron region plots and stats.
+    # Exon-intron region plots and stats.
     if pos_eia_stats_dic and neg_eia_stats_dic:
         mdtext += """
-## Exon intron region distribution ### {#eia-plot}
+## Exon-intron region distribution ### {#eia-plot}
 
 Distribution of exon and intron regions for the positive and negative set.
 
@@ -7830,17 +8853,17 @@ Distribution of exon and intron regions for the positive and negative set.
                                           ["E", "I", "N"],
                                           perc=True, theme=theme)
         eia_plot_path = plots_folder + "/" + eia_plot
-        mdtext += '<img src="' + eia_plot_path + '" alt="Exon intron region distribution"' + "\n"
-        mdtext += 'title="Exon intron region distribution" width="550" />' + "\n"
+        mdtext += '<img src="' + eia_plot_path + '" alt="Exon-intron region distribution"' + "\n"
+        mdtext += 'title="Exon-intron region distribution" width="550" />' + "\n"
         mdtext += """
 **Figure:** Percentages of exon (E) and intron (I) regions for the positive and negative set.
 If --eia-n is set, also include regions not covered by introns or exons (N).
 
 &nbsp;
 
-## Exon intron region statistics ### {#eia-stats}
+## Exon-intron region statistics ### {#eia-stats}
 
-**Table:** Exon intron region statistics for the positive and negative set.
+**Table:** Exon-intron region statistics for the positive and negative set.
 If --eia-ib is set, also include statistics for sites containing intron
 5' (F) and intron 3' (T) ends.
 
@@ -8038,6 +9061,123 @@ overlapping with the region.
             mdtext += "| ... | &nbsp; | &nbsp; |  &nbsp; |\n"
             mdtext += "\n&nbsp;\n&nbsp;\n"
 
+    # Additional BED annotations.
+    if add_feat_dic_list:
+        mdtext += """
+## BED feature statistics ### {#bed-stats}
+
+Additional BED annotation feature statistics (from --feat-in table) for the
+positive and negative dataset.
+
+"""
+        pos_cov_dic = {}
+        neg_cov_dic = {}
+        for i in range(0, len(add_feat_dic_list) - 1, 2):
+            pos_stats_dic = add_feat_dic_list[i]
+            neg_stats_dic = add_feat_dic_list[i+1]
+            feat_id = pos_stats_dic["feat_id"]
+            feat_type = pos_stats_dic["feat_type"]
+            pos_total_pos = pos_stats_dic["total_pos"]
+            neg_total_pos = neg_stats_dic["total_pos"]
+            pos_perc_zero_sites = "%.2f" % ((pos_stats_dic['zero_sites'] / pos_stats_dic['total_sites'])*100) + " %"
+            neg_perc_zero_sites = "%.2f" % ((neg_stats_dic['zero_sites'] / neg_stats_dic['total_sites'])*100) + " %"
+            if feat_type == "C":
+                pos_c_0 = pos_stats_dic["0"]
+                pos_c_1 = pos_stats_dic["1"]
+                neg_c_0 = neg_stats_dic["0"]
+                neg_c_1 = neg_stats_dic["1"]
+                pos_perc_0 = "%.2f" % ((pos_c_0 / pos_total_pos)*100) + " %"
+                pos_perc_1 = "%.2f" % ((pos_c_1 / pos_total_pos)*100) + " %"
+                neg_perc_0 = "%.2f" % ((neg_c_0 / neg_total_pos)*100) + " %"
+                neg_perc_1 = "%.2f" % ((neg_c_1 / neg_total_pos)*100) + " %"
+            else:
+                pos_mean = pos_stats_dic["mean"]
+                pos_stdev = pos_stats_dic["stdev"]
+                neg_mean = neg_stats_dic["mean"]
+                neg_stdev = neg_stats_dic["stdev"]
+                pos_c_0 = pos_stats_dic["zero_pos"]
+                neg_c_0 = neg_stats_dic["zero_pos"]
+                pos_c_1 = pos_total_pos - pos_c_0
+                neg_c_1 = neg_total_pos - neg_c_0
+                pos_perc_0 = "%.2f" % ((pos_c_0 / pos_total_pos)*100) + " %"
+                pos_perc_1 = "%.2f" % ((pos_c_1 / pos_total_pos)*100) + " %"
+                neg_perc_0 = "%.2f" % ((neg_c_0 / neg_total_pos)*100) + " %"
+                neg_perc_1 = "%.2f" % ((neg_c_1 / neg_total_pos)*100) + " %"
+
+            # Store feature coverage (percentage of positions overlapping).
+            pos_feat_cov = (pos_c_1 / pos_total_pos) * 100
+            neg_feat_cov = (neg_c_1 / neg_total_pos) * 100
+            pos_cov_dic[feat_id] = pos_feat_cov
+            neg_cov_dic[feat_id] = neg_feat_cov
+
+            mdtext += """
+### BED annotation file feature \"%s\" statistics
+
+""" %(feat_id)
+
+            if feat_type == "C":
+                mdtext += """
+
+**Table:** BED feature region length + score statistics for the
+positive and negative set.
+Feature type is one-hot encoding, i.e., every overlapping position
+gets a 1 assigned, every not overlapping position a 0.
+
+"""
+            else:
+                mdtext += """
+
+**Table:** BED feature region length + score statistics for the
+positive and negative set.
+Feature type is numerical, i.e., every position gets the score of the
+overlapping feature region assigned. In case of no feature region overlap,
+the position gets a score of 0.
+
+"""
+            mdtext += "| &nbsp; Attribute &nbsp; | &nbsp; Positives &nbsp; | &nbsp; Negatives &nbsp; |\n"
+            mdtext += "| :-: | :-: | :-: |\n"
+            mdtext += "| mean length | %.2f (+-%.2f) | %.2f (+-%.2f) |\n" %(pos_stats_dic["mean_l"], pos_stats_dic["stdev_l"], neg_stats_dic["mean_l"], neg_stats_dic["stdev_l"])
+            mdtext += "| median length | %i | %i |\n" %(pos_stats_dic["median_l"], neg_stats_dic["median_l"])
+            mdtext += "| min length | %i | %i |\n" %(pos_stats_dic["min_l"], neg_stats_dic["min_l"])
+            mdtext += "| max length | %i | %i |\n" %(pos_stats_dic["max_l"], neg_stats_dic["max_l"])
+            if feat_type == "C":
+                mdtext += "| # total positions | %i | %i |\n" %(pos_total_pos, neg_total_pos)
+                mdtext += "| # 0 positions | %i (%s) | %i (%s) |\n" %(pos_c_0, pos_perc_0, neg_c_0, neg_perc_0)
+                mdtext += "| # 1 positions | %i (%s) | %i (%s) |\n" %(pos_c_1, pos_perc_1, neg_c_1, neg_perc_1)
+                mdtext += '| % all-zero sites |' + " %s | %s |\n" %(pos_perc_zero_sites, neg_perc_zero_sites)
+            else:
+                mdtext += "| # total positions | %i | %i |\n" %(pos_total_pos, neg_total_pos)
+                mdtext += "| # 0 positions | %i (%s) | %i (%s) |\n" %(pos_c_0, pos_perc_0, neg_c_0, neg_perc_0)
+                mdtext += "| # non-0 positions | %i (%s) | %i (%s) |\n" %(pos_c_1, pos_perc_1, neg_c_1, neg_perc_1)
+                mdtext += '| % all-zero sites |' + " %s | %s |\n" %(pos_perc_zero_sites, neg_perc_zero_sites)
+                mdtext += "| mean score | %.3f (+-%.3f) | %.3f (+-%.3f) |\n" %(pos_mean, pos_stdev, neg_mean, neg_stdev)
+            mdtext += "\n&nbsp;\n&nbsp;\n"
+
+        # Create additional BED features coverage plot.
+        mdtext += """
+## BED feature coverage distribution ### {#bed-plot}
+
+Additional BED feature coverage distributions for the
+positive and negative dataset.
+
+"""
+        create_train_set_bed_feat_cov_plot(pos_cov_dic, neg_cov_dic,
+                                           bed_cov_plot_out,
+                                           theme=args.theme)
+        bed_cov_plot_path = plots_folder + "/" + bed_cov_plot
+        mdtext += '<img src="' + bed_cov_plot_path + '" alt="BED feature coverage distribution"' + "\n"
+        mdtext += 'title="BED feature coverage distribution" width="800" />' + "\n"
+        mdtext += """
+**Figure:** Additional BED feature coverage distributions for the
+positive and negative dataset. Feature coverage means how much
+percent of the positive or negative regions are covered by the
+respective BED feature (i.e., overlap with it). The BED feature
+IDs from --feat-in are given on the y-axis, their coverage on the
+x-axis.
+
+&nbsp;
+
+"""
 
     print("Generate HTML report ... ")
 
@@ -8051,6 +9191,91 @@ overlapping with the region.
     OUTHTML = open(html_out,"w")
     OUTHTML.write("%s\n" %(md2html))
     OUTHTML.close()
+
+
+################################################################################
+
+def create_train_set_bed_feat_cov_plot(pos_cov_dic, neg_cov_dic, out_plot,
+                                       theme=1):
+    """
+    Create a grouped bar plot, showing the coverage for each BED feature
+    from --feat-in over the positive and negative set. Coverage means
+    how much percentage of the positive or negative regions are covered
+    by the BED feature (== overlap with it).
+    Input dictionaries for positives (pos_cov_dic) and negatives
+    (neg_cov_dic) store for each feature ID (key) the coverage of
+    the feature in percent (value).
+    Create a dataframe using Pandas, and use seaborn for plotting.
+    Store plot in out_plot.
+
+    MV colors:
+    #69e9f6, #f154b2
+
+    """
+
+    # Checker.
+    assert pos_cov_dic, "given dictionary pos_cov_dic empty"
+    assert neg_cov_dic, "given dictionary neg_cov_dic empty"
+    # Make pandas dataframe.
+    pos_label = "Positives"
+    neg_label = "Negatives"
+    data = {'set': [], 'feat_id': [], 'perc': []}
+
+    for feat_id in pos_cov_dic:
+        data['set'].append(pos_label)
+        data['feat_id'].append(feat_id)
+        data['perc'].append(pos_cov_dic[feat_id])
+    for feat_id in neg_cov_dic:
+        data['set'].append(neg_label)
+        data['feat_id'].append(feat_id)
+        data['perc'].append(neg_cov_dic[feat_id])
+    df = pd.DataFrame (data, columns = ['set','feat_id', 'perc'])
+
+    # Scale height depending on # of features.
+    c_ids = len(pos_cov_dic)
+    fheight = 1.5 * c_ids
+
+    if theme == 1:
+        # Make plot.
+        sns.set(style="darkgrid")
+        g = sns.catplot(x="perc", y="feat_id", hue="set", data=df,
+                        kind="bar", palette=["#69e9f6", "#f154b2"],
+                        edgecolor="lightgrey",
+                        legend=False)
+        g.fig.set_figwidth(15)
+        g.fig.set_figheight(fheight)
+        # Modify axes.
+        ax = g.axes
+        ax[0,0].set_xlabel("Feature coverage (%)",fontsize=20)
+        ax[0,0].set(ylabel=None)
+        ax[0,0].tick_params(axis='x', labelsize=16)
+        ax[0,0].tick_params(axis='y', labelsize=20)
+        # Add legend at specific position.
+        plt.legend(loc=(1.01, 0.4), fontsize=16)
+        g.savefig(out_plot, dpi=100, bbox_inches='tight')
+
+    elif theme == 2:
+        text_color = "#fcc826"
+        plot_color = "#fd3b9d"
+        box_color = "#2f19f3"
+        # Make plot.
+        sns.set(style="darkgrid", rc={ "axes.labelcolor": text_color, "text.color": text_color, "xtick.color": text_color, "ytick.color": text_color, "grid.color": plot_color, "axes.edgecolor": plot_color})
+
+        g = sns.catplot(x="perc", y="feat_id", hue="set", data=df,
+                        kind="bar", palette=["blue", "darkblue"],
+                        edgecolor="#fcc826",
+                        legend=False)
+        g.fig.set_figwidth(15)
+        g.fig.set_figheight(fheight)
+        # Modify axes.
+        ax = g.axes
+        ax[0,0].set_xlabel("Percentage (%)",fontsize=20)
+        ax[0,0].set(ylabel=None)
+        ax[0,0].tick_params(axis='x', labelsize=16)
+        ax[0,0].tick_params(axis='y', labelsize=20)
+        # Add legend at specific position.
+        plt.legend(loc=(1.01, 0.4), fontsize=16, framealpha=0)
+        g.savefig(out_plot, dpi=100, bbox_inches='tight', transparent=True)
 
 
 ################################################################################
@@ -8362,6 +9587,60 @@ def get_kmer_dic(k,
 
 ################################################################################
 
+def get_min_hit_end_distance(l1, l2):
+    """
+    Given two lists of kmer hit ends on a sequence (from get_kmer_hit_ends()),
+    return the minimum distance between two hit ends in the two lists.
+    In other words, the closest positions in both lists.
+
+    >>> l1 = [2,10,20]
+    >>> l2 = [12,15,30]
+    >>> get_min_hit_end_distance(l1,l2)
+    2
+
+    """
+    assert l1, "l1 empty"
+    assert l2, "l2 empty"
+    min_dist = 1000000
+    for e1 in l1:
+        for e2 in l2:
+            dist_e1e2 = abs(e1-e2)
+            if dist_e1e2 < min_dist:
+                min_dist = dist_e1e2
+    assert min_dist != 1000000, "no min_dist extracted"
+    return min_dist
+
+
+################################################################################
+
+def get_kmer_hit_ends(seq, kmer):
+    """
+    Given a sequence and a k-mer, return match end positions (1-based) of k-mer
+    in sequence. If not hits, return empty list.
+
+    >>> seq = "AACGAAACG"
+    >>> kmer = "ACG"
+    >>> get_kmer_hit_ends(seq, kmer)
+    [4, 9]
+    >>> kmer = "ACC"
+    >>> get_kmer_hit_ends(seq, kmer)
+    []
+
+    """
+    assert seq, "seq empty"
+    assert kmer, "kmer empty"
+    k = len(kmer)
+    hit_list = []
+    for i in range(len(seq)-k+1):
+        end = i+k
+        check_kmer = seq[i:end]
+        if check_kmer == kmer:
+            hit_list.append(end)
+    return hit_list
+
+
+################################################################################
+
 def seqs_dic_count_kmer_freqs(seqs_dic, k,
                               rna=False,
                               perc=False,
@@ -8413,7 +9692,7 @@ def seqs_dic_count_kmer_freqs(seqs_dic, k,
             if kmer in count_dic:
                 count_dic[kmer] += 1
                 total_c += 1
-    assert total_c, "no k-mers counted for given seqs_dic"
+    assert total_c, "no k-mers counted for given seqs_dic (sequence lengths < set k ?)"
 
     # Calculate ratios.
     if return_ratios:
@@ -8613,6 +9892,862 @@ def phylop_norm_train_scores(pos_pp_con_out, neg_pp_con_out,
 
 ################################################################################
 
+def feat_min_max_norm_train_scores(pos_feat_out, neg_feat_out,
+                                   p_values=False,
+                                   dec_round=4,
+                                   int_whole_nr=True):
+    """
+    Read in feature files for positive and negative set, min max normalize
+    values, and overwrite (!) existing feature files.
+    Min max normalization resulting in new scores from 0 to 1.
+
+    p_values:
+        If True, treat scores as p-values, i.e., normalized score
+        == 1 - score
+    int_whole_nr:
+        If True, output whole numbers without decimal places.
+
+    """
+    pos_sc_dic = {}
+    neg_sc_dic = {}
+    site_id = ""
+    sc_max = -1000000
+    sc_min = 1000000
+
+    # Read in positive scores.
+    with open(pos_feat_out) as f:
+        for line in f:
+            if re.search(">.+", line):
+                m = re.search(">(.+)", line)
+                site_id = m.group(1)
+                pos_sc_dic[site_id] = []
+            else:
+                sc = float(line.strip())
+                pos_sc_dic[site_id].append(sc)
+                if sc > sc_max:
+                    sc_max = sc
+                if sc < sc_min:
+                    sc_min = sc
+    f.closed
+    assert pos_sc_dic, "no entries read into pos_sc_dic dictionary"
+
+    # Read in negative scores.
+    with open(neg_feat_out) as f:
+        for line in f:
+            if re.search(">.+", line):
+                m = re.search(">(.+)", line)
+                site_id = m.group(1)
+                neg_sc_dic[site_id] = []
+            else:
+                sc = float(line.strip())
+                neg_sc_dic[site_id].append(sc)
+                if sc > sc_max:
+                    sc_max = sc
+                if sc < sc_min:
+                    sc_min = sc
+    f.closed
+    assert neg_sc_dic, "no entries read into neg_sc_dic dictionary"
+
+    # Min max normalize positive scores and output to original file.
+    OUTP = open(pos_feat_out,"w")
+    for site_id in pos_sc_dic:
+        OUTP.write(">%s\n" %(site_id))
+        for sc in pos_sc_dic[site_id]:
+            if sc == 0:
+                OUTP.write("0\n")
+            else:
+                if p_values:
+                    sc_norm = 1 - sc
+                else:
+                    sc_norm = min_max_normalize(sc, sc_max, sc_min)
+                sc_norm = round(sc_norm, dec_round)
+                if int_whole_nr and not sc_norm % 1:
+                    OUTP.write("%i\n" %(int(sc_norm)))
+                else:
+                    OUTP.write("%s\n" %(str(sc_norm)))
+    OUTP.close()
+
+    # Min max normalize negative scores and output to original file.
+    OUTN = open(neg_feat_out,"w")
+    for site_id in neg_sc_dic:
+        OUTN.write(">%s\n" %(site_id))
+        for sc in neg_sc_dic[site_id]:
+            if sc == 0:
+                OUTN.write("0\n")
+            else:
+                if p_values:
+                    sc_norm = 1 - sc
+                else:
+                    sc_norm = min_max_normalize(sc, sc_max, sc_min)
+                sc_norm = round(sc_norm, dec_round)
+                if int_whole_nr and not sc_norm % 1:
+                    OUTN.write("%i\n" %(int(sc_norm)))
+                else:
+                    OUTN.write("%s\n" %(str(sc_norm)))
+    OUTN.close()
+
+
+################################################################################
+
+def bed_get_feature_annotations(in_bed, feat_bed, feat_out,
+                                feat_type="C",
+                                stats_dic=None,
+                                disable_pol=False):
+
+    """
+    Overlap in_bed with feat_bed, and annotate overlapping regions
+    depending on set feat_type (C, N).
+    C: categorical, one-hot, store 1 for overlapping position and
+    0 for not overlapping position.
+    N: numerical, i.e., use column 5 feat_bed score to store as score
+    for each overlapping position, and 0 for not overlapping position.
+    Store feature file to feat_out.
+
+    Format of feat_out file depends on feat_type:
+    if "C":
+    id1<tab>00000111111 ...
+    if "N":
+    >id1
+    value1
+    value2
+    ...
+
+    in_bed:
+        Input BED regions, annotate each position.
+    feat_bed:
+        Feature BED regions, use for annotating in_bed positions.
+    feat_out:
+        Output feature annotation file. Format depends on feat_type.
+    feat_type:
+        "C" for categorical, or "N" for numerical output annotations.
+    disable_pol:
+        If yes, disable strandedness (== do not set -s in intersectBed),
+        i.e., do not differentiate between strands when adding
+        annotations.
+
+    >>> in_bed = "test_data/feat_in.bed"
+    >>> feat_bed_old_nick = "test_data/feat_old_nick.bed"
+    >>> feat_bed_feat_666 = "test_data/feat_666.bed"
+    >>> old_nick_exp1 = "test_data/feat_old_nick_1.exp.out"
+    >>> old_nick_exp2 = "test_data/feat_old_nick_2.exp.out"
+    >>> feat_666_exp1 = "test_data/feat_666_1.exp.out"
+    >>> feat_666_exp2 = "test_data/feat_666_2.exp.out"
+    >>> old_nick_out = "test_data/test.tmp.old_nick"
+    >>> feat_666_out = "test_data/test.tmp.feat_666"
+    >>> bed_get_feature_annotations(in_bed, feat_bed_old_nick, old_nick_out, feat_type="C", disable_pol=True)
+    >>> diff_two_files_identical(old_nick_out, old_nick_exp1)
+    True
+    >>> bed_get_feature_annotations(in_bed, feat_bed_feat_666, feat_666_out, feat_type="N", disable_pol=True)
+    >>> diff_two_files_identical(feat_666_out, feat_666_exp1)
+    True
+    >>> bed_get_feature_annotations(in_bed, feat_bed_old_nick, old_nick_out, feat_type="C", disable_pol=False)
+    >>> diff_two_files_identical(old_nick_out, old_nick_exp2)
+    True
+    >>> bed_get_feature_annotations(in_bed, feat_bed_feat_666, feat_666_out, feat_type="N", disable_pol=False)
+    >>> diff_two_files_identical(feat_666_out, feat_666_exp2)
+    True
+
+    """
+    # Checks.
+    ftl = ["C", "N"]
+    assert feat_type in ftl, "invalid feat_type given (allowed: C,N)"
+
+    # Temp overlap results file.
+    random_id = uuid.uuid1()
+    tmp_out = str(random_id) + ".tmp.out"
+
+    if stats_dic is not None:
+        stats_dic["total_pos"] = 0
+        stats_dic["feat_type"] = feat_type
+        stats_dic["zero_sites"] = 0
+        stats_dic["total_sites"] = 0
+        stats_dic["mean_l"] = 0
+        stats_dic["median_l"] = 0
+        stats_dic["min_l"] = 0
+        stats_dic["max_l"] = 0
+        stats_dic["stdev_l"] = 0
+        if feat_type == "C":
+            stats_dic["0"] = 0
+            stats_dic["1"] = 0
+        else:
+            stats_dic["mean"] = 0
+            stats_dic["stdev"] = 0
+            stats_dic["zero_pos"] = 0
+            # Value list.
+            v_list = []
+        # BED region lengths list.
+        len_list = []
+
+    # Read in in_bed, store start + end coordinates.
+    id2s_dic = {}
+    id2e_dic = {}
+    # Store positional values list for each site in dic.
+    id2vl_dic = {}
+    with open(in_bed) as f:
+        for line in f:
+            row = line.strip()
+            cols = line.strip().split("\t")
+            site_s = int(cols[1])
+            site_e = int(cols[2])
+            site_id = cols[3]
+            assert site_id not in id2s_dic, "non-unique site ID \"%s\" in in_bed" %(site_id)
+            id2s_dic[site_id] = site_s
+            id2e_dic[site_id] = site_e
+            site_l = site_e - site_s
+            id2vl_dic[site_id] = ["0"]*site_l
+    f.closed
+    assert id2s_dic, "given in_bed \"%s\" empty?" %(in_bed)
+
+    # Store feature region lengths.
+    if stats_dic:
+        with open(feat_bed) as f:
+            for line in f:
+                row = line.strip()
+                cols = line.strip().split("\t")
+                site_s = int(cols[1])
+                site_e = int(cols[2])
+                site_l = site_e - site_s
+                len_list.append(site_l)
+        f.closed
+
+    # Run overlap calculation to get overlapping regions.
+    intersect_params = "-s -wb"
+    if disable_pol:
+        intersect_params = "-wb"
+    intersect_bed_files(in_bed, feat_bed, intersect_params, tmp_out)
+
+    # Get annotations.
+    with open(tmp_out) as f:
+        for line in f:
+            row = line.strip()
+            cols = line.strip().split("\t")
+            s = int(cols[1]) + 1 # Make one-based.
+            e = int(cols[2])
+            site_id = cols[3]
+            site_s = id2s_dic[site_id] + 1 # Make one-based.
+            site_e = id2e_dic[site_id]
+            site_pol = cols[5]
+            score = cols[10]
+            # + case.
+            if site_pol == "+" or disable_pol:
+                for i in range(site_s, site_e+1):
+                    if i >= s and i <= e:
+                        # Get list index.
+                        li = i - site_s
+                        if feat_type == "C":
+                            id2vl_dic[site_id][li] = "1"
+                        else:
+                            id2vl_dic[site_id][li] = score
+            else:
+                for i in range(site_s, site_e+1):
+                    if i >= s and i <= e:
+                        # Get list index.
+                        li = site_e - i
+                        if feat_type == "C":
+                            id2vl_dic[site_id][li] = "1"
+                        else:
+                            id2vl_dic[site_id][li] = score
+    f.closed
+
+    # Output annotations to file.
+    OUTLAB = open(feat_out,"w")
+
+    # Output labels for each site.
+    for site_id in id2vl_dic:
+        if feat_type == "C":
+            # List to string.
+            label_str = "".join(id2vl_dic[site_id])
+            OUTLAB.write("%s\t%s\n" %(site_id, label_str))
+            if stats_dic:
+                stats_dic["total_sites"] += 1
+                site_0 = True
+                for v in id2vl_dic[site_id]:
+                    stats_dic[v] += 1
+                    if v == "1":
+                        site_0 = False
+                    stats_dic["total_pos"] += 1
+                if site_0:
+                    stats_dic["zero_sites"] += 1
+        else:
+            OUTLAB.write(">%s\n" %(site_id))
+            site_0 = True
+            for v in id2vl_dic[site_id]:
+                OUTLAB.write("%s\n" %(v))
+                if stats_dic:
+                    v_list.append(float(v))
+                    if v == "0":
+                        stats_dic["zero_pos"] += 1
+                    else:
+                        site_0 = False
+            if stats_dic:
+                stats_dic["total_sites"] += 1
+                if site_0:
+                    stats_dic["zero_sites"] += 1
+    OUTLAB.close()
+
+    # Additional stats if feat_type numerical.
+    if stats_dic:
+        if feat_type == "N":
+            assert v_list, "no values stored in v_list"
+            stats_dic["mean"] = statistics.mean(v_list)
+            stats_dic["stdev"] = statistics.stdev(v_list)
+            stats_dic["total_pos"] = len(v_list)
+
+        assert len_list, "no lengths stored in length list"
+        stats_dic["mean_l"] = statistics.mean(len_list)
+        stats_dic["median_l"] = statistics.median(len_list)
+        stats_dic["stdev_l"] = statistics.stdev(len_list)
+        stats_dic["max_l"] = max(len_list)
+        stats_dic["min_l"] = min(len_list)
+
+    # Take out the trash.
+    litter_street = True
+    if litter_street:
+        if os.path.exists(tmp_out):
+            os.remove(tmp_out)
+
+
+################################################################################
+
+def get_valid_file_ending(s):
+    """
+    Modified after:
+    https://stackoverflow.com/questions/295135/turn-a-string-into-a-valid-filename
+
+    def get_valid_filename(s):
+        s = str(s).strip().replace(' ', '_')
+        return re.sub(r'(?u)[^-\w.]', '', s)
+
+    In addition, start and end of file ending should start with word or
+    number.
+
+    >>> s = "___.hallole123.so_hallole123.___"
+    >>> get_valid_file_ending(s)
+    'hallole123.so_hallole123'
+    >>> get_valid_file_ending("john's new arctic warfare")
+    'johns_new_arctic_warfare'
+
+    """
+    assert s, "given s empty"
+    # Strip and replace spaces with _.
+    s = str(s).strip().replace(' ', '_')
+    # Remove non-word characters from start and end.
+    m = re.search('\W*([a-zA-Z0-9].+[a-zA-Z0-9])\W*', s)
+    if m:
+        return re.sub(r'(?u)[^-\w.]', '', m.group(1))
+    else:
+        return re.sub(r'(?u)[^-\w.]', '', s)
+
+
+################################################################################
+
+def load_eval_data(args,
+                   load_negatives=False,
+                   return_graphs=False,
+                   train_folder=False,
+                   num_features=4,
+                   undirected=True,
+                   str_elem_1h=False):
+
+    """
+    Load training data for graphprot2 eval, to generate motifs and profiles.
+
+    """
+
+    # Checks.
+    assert os.path.isdir(args.in_gt_folder), "--gt-in folder does not exist"
+    # Feature file containing info for features used for model training.
+    if train_folder:
+        assert os.path.isdir(train_folder), "model training folder %s does not exist" %(train_folder)
+        feat_file = train_folder + "/" + "features.out"
+    else:
+        assert os.path.isdir(args.in_train_folder), "--train-in folder does not exist"
+        feat_file = args.in_train_folder + "/" + "features.out"
+    assert os.path.exists(feat_file), "%s features file expected but not does not exist" %(feat_file)
+
+    # graphprot2 predict output folder.
+    out_folder = args.out_folder
+    if not os.path.exists(out_folder):
+        os.makedirs(out_folder)
+
+    # Channel info output file.
+    channel_infos_out = out_folder + "/" + "channel_infos.out"
+    channel_info_list = []
+    channel_nr = 0
+
+    # Read in feature info.
+    fid2type_dic = {}
+    fid2cat_dic = {} # Store category labels or numerical score IDs in list.
+    fid2norm_dic = {}
+    fid2row_dic = {}
+    print("Read in feature infos from %s ... " %(feat_file))
+    with open(feat_file) as f:
+        for line in f:
+            row = line.strip()
+            cols = line.strip().split("\t")
+            feat_id = cols[0]
+            feat_type = cols[1]
+            feat_cat_list = cols[2].split(",")
+            feat_cat_list.sort()
+            feat_norm = cols[3]
+            fid2row_dic[feat_id] = row
+            assert feat_id not in fid2type_dic, "feature ID \"%s\" found twice in feature file" %(feat_id)
+            fid2type_dic[feat_id] = feat_type
+            fid2cat_dic[feat_id] = feat_cat_list
+            fid2norm_dic[feat_id] = feat_norm
+    f.closed
+    assert fid2type_dic, "no feature infos read in from graphprot2 train feature file %s" %(feat_file)
+    # Check for base pair model.
+    assert "bpp.str" not in fid2type_dic, "--train-in model was trained with base pair information, but graphprot2 eval so far does not support the visualization of base pair information"
+
+    # Read in features.out from graphprot2 gt and check.
+    gt_feat_file = args.in_gt_folder + "/" + "features.out"
+    assert os.path.exists(gt_feat_file), "%s features file expected but not does not exist" %(gt_feat_file)
+    gt_fid2row_dic = {}
+    print("Read in feature infos from %s ... " %(gt_feat_file))
+    with open(gt_feat_file) as f:
+        for line in f:
+            row = line.strip()
+            cols = line.strip().split("\t")
+            feat_id = cols[0]
+            gt_fid2row_dic[feat_id] = row
+    f.closed
+    assert gt_fid2row_dic, "no feature infos found in --gt-in feature file %s" %(gt_feat_file)
+    # Compare gt+train features.
+    for fid in fid2row_dic:
+        assert fid in gt_fid2row_dic, "graphprot2 train feature ID \"%s\" not found in %s" %(fid, gt_feat_file)
+
+    # Context + bp settings.
+    seqs_all_uc = True
+    bps_mode = 1
+
+    # Check sequence feature.
+    assert "fa" in fid2type_dic, "feature ID \"fa\" not in feature file"
+    assert fid2cat_dic["fa"] == ["A", "C", "G", "U"], "sequence feature alphabet != A,C,G,U"
+
+    # Read in FASTA sequences.
+    pos_fa_in = args.in_gt_folder + "/" + "positives.fa"
+    if load_negatives:
+        pos_fa_in = args.in_gt_folder + "/" + "negatives.fa"
+    assert os.path.exists(pos_fa_in), "--gt-in folder does not contain %s"  %(pos_fa_in)
+    seqs_dic = read_fasta_into_dic(pos_fa_in, all_uc=seqs_all_uc)
+    assert seqs_dic, "no sequences read in from FASTA file \"%s\"" %(pos_fa_in)
+
+    # Get uppercase (viewpoint) region start and ends for each sequence.
+    vp_dic = extract_uc_region_coords_from_fasta(seqs_dic)
+
+    # Data dictionaries.
+    bpp_dic = {}
+    feat_dic = {}
+
+    # Init feat_dic (storing node feature vector data) with sequence one-hot encodings.
+    for seq_id in seqs_dic:
+        seq = seqs_dic[seq_id]
+        feat_dic[seq_id] = string_vectorizer(seq, custom_alphabet=fid2cat_dic["fa"])
+
+    # Channel info dictionary.
+    ch_info_dic = {}
+
+    # Add sequence one-hot channels.
+    ch_info_dic["fa"] = ["C", [], [], "-"]
+    for c in fid2cat_dic["fa"]:
+        channel_nr += 1
+        channel_id = c
+        channel_info = "%i\t%s\tfa\tC\tone_hot" %(channel_nr, channel_id)
+        channel_info_list.append(channel_info)
+        ch_info_dic["fa"][1].append(channel_nr-1)
+        ch_info_dic["fa"][2].append(channel_id)
+
+    # Check and read in more data.
+    for fid, ftype in sorted(fid2type_dic.items()): # fid e.g. fa, ftype: C,N.
+        if fid == "fa": # already added to feat_dic (first item).
+            continue
+        # base pairs not supported by eval so far, so do not load.
+        #if fid == "bpp.str":
+        #    test_bpp_in = args.in_folder + "/" + "test.bpp.str"
+        #    assert os.path.exists(test_bpp_in), "--in folder does not contain %s"  %(test_bpp_in)
+        #    print("Read in base pair data ... ")
+        #    bpp_dic = read_bpp_into_dic(test_bpp_in, vp_dic,
+        #                                bps_mode=args.bps_mode)
+        #    assert bpp_dic, "no base pair information read in (bpp_dic empty)"
+
+        # All features (additional to .fa) like .elem_p.str, .con, .eia, .tra, .rra, or user defined.
+        feat_alphabet = fid2cat_dic[fid]
+        pos_feat_in = args.in_gt_folder + "/positives." + fid
+        if load_negatives:
+            pos_feat_in = args.in_gt_folder + "/negatives." + fid
+        assert os.path.exists(pos_feat_in), "--in folder does not contain %s"  %(pos_feat_in)
+        print("Read in .%s annotations ... " %(fid))
+        n_to_1h = False
+        # Special case: convert elem_p.str probabilities to 1-hot encoding.
+        if fid == "elem_p.str" and str_elem_1h:
+            n_to_1h = True
+        feat_dic = read_feat_into_dic(pos_feat_in, ftype,
+                                      feat_dic=feat_dic,
+                                      n_to_1h=n_to_1h,
+                                      label_list=feat_alphabet)
+        assert feat_dic, "no .%s information read in (feat_dic empty)" %(fid)
+        if fid == "elem_p.str" and str_elem_1h:
+            ftype = "C"
+        ch_info_dic[fid] = [ftype, [], [], "-"]
+        if ftype == "N":
+            for c in feat_alphabet:
+                channel_nr += 1
+                channel_id = c
+                encoding = fid2norm_dic[fid]
+                channel_info = "%i\t%s\t%s\tN\t%s" %(channel_nr, channel_id, fid, encoding)
+                channel_info_list.append(channel_info)
+                ch_info_dic[fid][1].append(channel_nr-1)
+                ch_info_dic[fid][2].append(channel_id)
+                ch_info_dic[fid][3] = encoding
+        elif ftype == "C":
+            for c in feat_alphabet:
+                channel_nr += 1
+                #channel_id = fid + "_" + c
+                channel_id = c
+                channel_info = "%i\t%s\t%s\tC\tone_hot" %(channel_nr, channel_id, fid)
+                channel_info_list.append(channel_info)
+                ch_info_dic[fid][1].append(channel_nr-1)
+                ch_info_dic[fid][2].append(channel_id)
+                ch_info_dic[fid][3] = "-"
+        else:
+            assert False, "invalid feature type given (%s) for feature %s" %(ftype,fid)
+
+    # Output channel infos.
+    CIOUT = open(channel_infos_out, "w")
+    CIOUT.write("ch\tch_id\tfeat_id\tfeat_type\tencoding\n")
+    for ch_info in channel_info_list:
+        CIOUT.write("%s\n" %(ch_info))
+    CIOUT.close()
+
+    """
+    Generate feature+edges lists or graph list (if return_graphs=True)
+    to return.
+
+    """
+    # Sequence ID list + label list.
+    seq_ids_list = []
+    label_list = []
+    idx2id_dic = {}
+    id2idx_dic = {}
+    i = 0
+    for seq_id,seq in sorted(seqs_dic.items()):
+        seq_ids_list.append(seq_id)
+        label_list.append(i)
+        id2idx_dic[seq_id] = i
+        idx2id_dic[i] = seq_id
+        i += 1
+
+    # Store node data in list of 2d lists.
+    all_features = []
+    # if return_graphs=True.
+    all_graphs = []
+
+    for idx, label in enumerate(label_list):
+        seq_id = seq_ids_list[idx]
+        seq = seqs_dic[seq_id]
+        l_seq = len(seq)
+
+        # Checks.
+        check_num_feat = len(feat_dic[seq_id][0])
+        assert num_features == check_num_feat, "# features (num_features) from model parameter file != loaded number of node features (%i != %i)" %(model_num_feat, check_num_feat)
+
+        if return_graphs:
+            edge_index_1 = []
+            edge_index_2 = []
+            for ni in range(l_seq - 1):
+                edge_index_1.append(ni)
+                edge_index_2.append(ni+1)
+                if undirected:
+                    edge_index_1.append(ni+1)
+                    edge_index_2.append(ni)
+            edge_index = torch.tensor([edge_index_1, edge_index_2], dtype=torch.long)
+            x = torch.tensor(feat_dic[seq_id], dtype=torch.float)
+            data = Data(x=x, edge_index=edge_index, y=label)
+            all_graphs.append(data)
+        else:
+            # Appendo.
+            all_features.append(feat_dic[seq_id])
+
+    # Return some double talking jive data.
+    if return_graphs:
+        assert all_graphs, "all_graphs empty"
+        return seqs_dic, idx2id_dic, all_graphs, ch_info_dic
+    else:
+        assert all_features, "all_features empty"
+        return seqs_dic, idx2id_dic, all_features, ch_info_dic
+
+
+################################################################################
+
+def load_predict_data(args,
+                      return_graphs=False):
+
+    """
+    Load prediction data from GraphProt2 predict output folder
+    and return either as list of graphs or list of feature lists.
+
+    """
+
+    # Checks.
+    assert os.path.isdir(args.in_folder), "--in folder does not exist"
+    assert os.path.isdir(args.train_in_folder), "--train-in model folder does not exist"
+
+    # Feature file containing info for features used for model training.
+    feat_file = args.train_in_folder + "/" + "features.out"
+    assert os.path.exists(feat_file), "%s features file expected but not does not exist" %(feat_file)
+
+    # Read in model parameters.
+    params_file = args.train_in_folder + "/final.params"
+    assert os.path.isfile(params_file), "missing model training parameter file %s" %(params_file)
+    params_dic = read_settings_into_dic(params_file)
+    assert "num_features" in params_dic, "num_features info missing in model parameter file %s" %(params_file)
+    model_num_feat = int(params_dic["num_features"])
+
+    # graphprot2 predict output folder.
+    out_folder = args.out_folder
+    if not os.path.exists(out_folder):
+        os.makedirs(out_folder)
+
+    # Channel info output file.
+    channel_infos_out = out_folder + "/" + "channel_infos.out"
+    channel_info_list = []
+    channel_nr = 0
+
+    # Read in feature info.
+    fid2type_dic = {}
+    fid2cat_dic = {} # Store category labels or numerical score IDs in list.
+    fid2norm_dic = {}
+    fid2row_dic = {}
+    print("Read in feature infos from %s ... " %(feat_file))
+    with open(feat_file) as f:
+        for line in f:
+            row = line.strip()
+            cols = line.strip().split("\t")
+            feat_id = cols[0]
+            feat_type = cols[1]
+            feat_cat_list = cols[2].split(",")
+            feat_cat_list.sort()
+            feat_norm = cols[3]
+            fid2row_dic[feat_id] = row
+            assert feat_id not in fid2type_dic, "feature ID \"%s\" found twice in feature file" %(feat_id)
+            fid2type_dic[feat_id] = feat_type
+            fid2cat_dic[feat_id] = feat_cat_list
+            fid2norm_dic[feat_id] = feat_norm
+    f.closed
+    assert fid2type_dic, "no feature infos read in from graphprot2 train feature file %s" %(feat_file)
+    # Check sequence feature.
+    assert "fa" in fid2type_dic, "feature ID \"fa\" not in feature file"
+    assert fid2cat_dic["fa"] == ["A", "C", "G", "U"], "sequence feature alphabet != A,C,G,U"
+
+    # args.mode == 2 (predict position-wise scoring profiles) check.
+    if args.mode == 2:
+        assert "bpp.str" not in fid2type_dic, "--model-in model was trained with base pair information, but profile prediction mode (--mode 2) so far does not support base pair information. Use --mode 1 or train models without base pair information"
+
+    # Read in features.out from graphprot2 gp and check.
+    gp_feat_file = args.in_folder + "/" + "features.out"
+    assert os.path.exists(gp_feat_file), "%s features file expected but not does not exist" %(gp_feat_file)
+    gp_fid2row_dic = {}
+    print("Read in feature infos from %s ... " %(gp_feat_file))
+    with open(gp_feat_file) as f:
+        for line in f:
+            row = line.strip()
+            cols = line.strip().split("\t")
+            feat_id = cols[0]
+            gp_fid2row_dic[feat_id] = row
+    f.closed
+    assert gp_fid2row_dic, "no feature infos found in graphprot2 gp feature file %s" %(gp_feat_file)
+    #assert len(fid2row_dic) == len(gp_fid2row_dic), "# features in gp + train feature files differ"
+    for fid in fid2row_dic:
+        assert fid in gp_fid2row_dic, "graphprot2 train feature ID \"%s\" not found in %s" %(fid, gp_feat_file)
+        # If predict_profiles, "fa" feature between gp + train can differ.
+        if not (args.mode == 2 and fid == "fa"):
+            assert gp_fid2row_dic[fid] == fid2row_dic[fid], "feature infos for feature ID \"%s\" differ between gp + train feature files (train: \"%s\", gp: \"%s\")" %(fid, gp_fid2row_dic[fid], fid2row_dic[fid])
+
+    # Get base pair cutoff from train.
+    bps_cutoff = False
+    gp2_train_param_file = args.train_in_folder + "/settings.graphprot2_train.out"
+    assert os.path.isfile(gp2_train_param_file), "missing graphprot2 train parameter file %s" %(gp2_train_param_file)
+    gp2_train_param_dic = read_settings_into_dic(gp2_train_param_file)
+    if "bpp.str" in fid2type_dic:
+        assert "bps_cutoff" in gp2_train_param_dic, "bps_cutoff info missing in graphprot2 train parameter file %s" %(gp2_train_param_file)
+        bps_cutoff = float(cols[1])
+    # Get str_elem_1h info.
+    str_elem_1h = False
+    assert "str_elem_1h" in gp2_train_param_dic, "str_elem_1h info missing in graphprot2 train parameter file %s" %(gp2_train_param_file)
+    if gp2_train_param_dic["str_elem_1h"] == "True":
+        str_elem_1h = True
+
+    # Read in FASTA sequences.
+    test_fa_in = args.in_folder + "/" + "test.fa"
+    assert os.path.exists(test_fa_in), "--in folder does not contain %s"  %(test_fa_in)
+    test_seqs_dic = read_fasta_into_dic(test_fa_in, all_uc=True)
+    assert test_seqs_dic, "no sequences read in from FASTA file \"%s\"" %(test_fa_in)
+
+    # Get uppercase (viewpoint) region start and ends for each sequence.
+    vp_dic = extract_uc_region_coords_from_fasta(test_seqs_dic)
+
+    # Data dictionaries.
+    bpp_dic = {}
+    feat_dic = {}
+
+    # Init feat_dic (storing node feature vector data) with sequence one-hot encodings.
+    for seq_id in test_seqs_dic:
+        seq = test_seqs_dic[seq_id]
+        feat_dic[seq_id] = string_vectorizer(seq, custom_alphabet=fid2cat_dic["fa"])
+
+    # Check and read in more data.
+    for fid, ftype in sorted(fid2type_dic.items()): # fid e.g. fa, ftype: C,N.
+        if fid == "fa":
+            # Add sequence one-hot channels.
+            for c in fid2cat_dic["fa"]:
+                channel_nr += 1
+                channel_id = c
+                channel_info = "%i\t%s\tfa\tC\tone_hot" %(channel_nr, channel_id)
+                channel_info_list.append(channel_info)
+            continue
+        if fid == "bpp.str":
+            test_bpp_in = args.in_folder + "/" + "test.bpp.str"
+            assert os.path.exists(test_bpp_in), "--in folder does not contain %s"  %(test_bpp_in)
+            print("Read in base pair data ... ")
+            bpp_dic = read_bpp_into_dic(test_bpp_in, vp_dic,
+                                        bps_mode=args.bps_mode)
+            assert bpp_dic, "no base pair information read in (bpp_dic empty)"
+        else:
+            # All features (additional to .fa) like .elem_p.str, .con, .eia, .tra, .rra, or user defined.
+            feat_alphabet = fid2cat_dic[fid]
+            test_feat_in = args.in_folder + "/test." + fid
+
+            assert os.path.exists(test_feat_in), "--in folder does not contain %s"  %(test_feat_in)
+            print("Read in .%s annotations ... " %(fid))
+            n_to_1h = False
+            # Special case: convert elem_p.str probabilities to 1-hot encoding.
+            if fid == "elem_p.str" and str_elem_1h:
+                n_to_1h = True
+            feat_dic = read_feat_into_dic(test_feat_in, ftype,
+                                          feat_dic=feat_dic,
+                                          n_to_1h=n_to_1h,
+                                          label_list=feat_alphabet)
+            assert feat_dic, "no .%s information read in (feat_dic empty)" %(fid)
+            if fid == "elem_p.str" and str_elem_1h:
+                ftype = "C"
+            if ftype == "N":
+                for c in feat_alphabet:
+                    channel_nr += 1
+                    channel_id = c
+                    encoding = fid2norm_dic[fid]
+                    channel_info = "%i\t%s\t%s\tN\t%s" %(channel_nr, channel_id, fid, encoding)
+                    channel_info_list.append(channel_info)
+            elif ftype == "C":
+                for c in feat_alphabet:
+                    channel_nr += 1
+                    #channel_id = fid + "_" + c
+                    channel_id = c
+                    channel_info = "%i\t%s\t%s\tC\tone_hot" %(channel_nr, channel_id, fid)
+                    channel_info_list.append(channel_info)
+            else:
+                assert False, "invalid feature type given (%s) for feature %s" %(ftype,fid)
+
+    # Output channel infos.
+    CIOUT = open(channel_infos_out, "w")
+    CIOUT.write("ch\tch_id\tfeat_id\tfeat_type\tencoding\n")
+    for ch_info in channel_info_list:
+        CIOUT.write("%s\n" %(ch_info))
+    CIOUT.close()
+
+    """
+    Generate feature+edges lists or graph list (if return_graphs=True)
+    to return.
+
+    """
+    # Sequence ID list + label list.
+    seq_ids_list = []
+    label_list = []
+    idx2id_dic = {}
+    id2idx_dic = {}
+    i = 0
+    for seq_id,seq in sorted(test_seqs_dic.items()):
+        seq_ids_list.append(seq_id)
+        label_list.append(i)
+        id2idx_dic[seq_id] = i
+        idx2id_dic[i] = seq_id
+        i += 1
+
+    # If return_graphs=False.
+    all_features = []
+    # if return_graphs=True.
+    all_graphs = []
+
+    for idx, label in enumerate(label_list):
+        seq_id = seq_ids_list[idx]
+        seq = test_seqs_dic[seq_id]
+        l_seq = len(seq)
+
+        # Make edge indices for backbone.
+        edge_index_1 = []
+        edge_index_2 = []
+        # Edge indices 0-based!
+        for n_idx in range(l_seq - 1):
+            edge_index_1.append(n_idx)
+            edge_index_2.append(n_idx+1)
+            # In case of undirected graphs, add backward edges too.
+            if args.undirected:
+                edge_index_1.append(n_idx+1)
+                edge_index_2.append(n_idx)
+
+        # Add base pair edges.
+        if bpp_dic:
+            vp_s = vp_dic[seq_id][0] # 1-based.
+            vp_e = vp_dic[seq_id][1] # 1-based.
+            # Entry e.g. 'CLIP_01': ['130-150,0.33', '160-200,0.44', '240-260,0.55']
+            for entry in bpp_dic[seq_id]:
+                m = re.search("(\d+)-(\d+),(.+)", entry)
+                p1 = int(m.group(1)) # 1-based.
+                p2 = int(m.group(2)) # 1-based.
+                bpp_value = float(m.group(3))
+                g_p1 = p1 - 1 # 0-based base pair index.
+                g_p2 = p2 - 1 # 0-based base pair index.
+                # Filter.
+                if bpp_value < args.bps_cutoff: continue
+                # Add base pair depending on set mode.
+                add_edge = False
+                if args.bps_mode == 1:
+                    if (p1 >= vp_s and p1 <= vp_e) or (p2 >= vp_s and p2 <= vp_e):
+                        add_edge = True
+                elif args.bps_mode == 2:
+                    if p1 >= vp_s and p2 <= vp_e:
+                        add_edge = True
+                if add_edge:
+                    edge_index_1.append(g_p1)
+                    edge_index_1.append(g_p2)
+                    if args.undirected:
+                        edge_index_1.append(g_p2)
+                        edge_index_2.append(g_p1)
+
+        # Checks.
+        check_num_feat = len(feat_dic[seq_id][0])
+        assert model_num_feat == check_num_feat, "# features (num_features) from model parameter file != loaded number of node features (%i != %i)" %(model_num_feat, check_num_feat)
+
+        if return_graphs:
+            edge_index = torch.tensor([edge_index_1, edge_index_2], dtype=torch.long)
+            x = torch.tensor(feat_dic[seq_id], dtype=torch.float)
+            data = Data(x=x, edge_index=edge_index, y=label)
+            all_graphs.append(data)
+        else:
+            #all_edges.append([edge_index_1, edge_index_2])
+            all_features.append(feat_dic[seq_id])
+
+    # Return some double talking jive data.
+    if return_graphs:
+        assert all_graphs, "no graphs constructed (all_graphs empty)"
+        return test_seqs_dic, idx2id_dic, all_graphs
+    else:
+        assert all_features, "no graphs constructed (all_features empty)"
+        return test_seqs_dic, bpp_dic, idx2id_dic, all_features
+
+
+################################################################################
+
 def load_ws_predict_data(args,
                          data_id="data",
                          predict_con_ext=False,
@@ -8628,10 +10763,10 @@ def load_ws_predict_data(args,
 
     # Checks.
     assert os.path.isdir(args.in_folder), "--in folder does not exist"
-    assert os.path.isdir(args.model_in_folder), "--model-in folder does not exist"
+    assert os.path.isdir(args.train_in_folder), "--train-in model folder does not exist"
 
     # Feature file containing info for features used for model training.
-    feat_file = args.model_in_folder + "/" + "features.out"
+    feat_file = args.train_in_folder + "/" + "features.out"
     assert os.path.exists(feat_file), "%s features file expected but not does not exist" %(feat_file)
 
     # Data ID.
@@ -8737,7 +10872,7 @@ def load_ws_predict_data(args,
     bps_mode = 1
     bps_cutoff = 0.5
     con_ext_train = False
-    train_settings_file = args.model_in_folder + "/settings.graphprot2_train.out"
+    train_settings_file = args.train_in_folder + "/settings.graphprot2_train.out"
     if os.path.exists(train_settings_file):
         with open(train_settings_file) as f:
             for line in f:
@@ -8837,7 +10972,7 @@ def load_ws_predict_data(args,
             feat_id = "eia"
             eia_alphabet = fid2cat_dic[feat_id]
             assert os.path.exists(test_eia_in), "--in folder does not contain %s"  %(test_eia_in)
-            print("Read in exon intron annotations ... ")
+            print("Read in exon-intron annotations ... ")
             test_eia_dic = read_feat_into_dic(test_eia_in, "C",
                                              label_list=eia_alphabet)
             for c in fid2cat_dic[feat_id]:
@@ -8979,6 +11114,450 @@ def make_seqs_dic_uc(seqs_dic):
     for seq_id in seqs_dic:
         seq = seqs_dic[seq_id].upper()
         seqs_dic[seq_id] = seq
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+################################################################################
+
+def load_training_data(args,
+                       li2label_dic=None):
+
+    """
+    Load training data from data folder generated by GraphProt2 gt and
+    return training data as:
+    seqs_dic, idx2id_dic, label_list, all_graphs
+
+    li2label_dic:
+        Class label to RBP label/name dictionary. For associating the
+        positive class label to the RBP name in generic model cross
+        validation (if --gm-cv is set).
+
+    """
+
+    # Checks.
+    assert os.path.exists(args.in_folder), "--in folder does not exist"
+
+    # Feature file containing info for features inside --in folder.
+    feat_file = args.in_folder + "/" + "features.out"
+    assert os.path.exists(feat_file), "%s features file expected but not does not exist" %(feat_file)
+
+    # graphprot2 train output folder.
+    if not os.path.exists(args.out_folder):
+        os.makedirs(args.out_folder)
+
+    # Channel info output file.
+    channel_infos_out = args.out_folder + "/" + "channel_infos.out"
+    channel_info_list = []
+    channel_nr = 0
+
+    """
+    Read in feature info.
+
+    features.out example content:
+    fa	C	A,C,G,U	-
+    bpp.str	N	bp_prob	prob
+    elem_p.str	N	p_u,p_e,p_h,p_i,p_m,p_s	prob
+    pc.con	N	phastcons_score	prob
+    pp.con	N	phylop_score	mean
+    tra	C	A,B,C,E,F,S,T,Z	-
+    rra	C	N,R	-
+
+    """
+    fid2type_dic = {}
+    fid2cat_dic = {} # Store category labels or numerical score IDs in list.
+    fid2norm_dic = {}
+    print("Read in feature infos from %s ... " %(feat_file))
+    with open(feat_file) as f:
+        for line in f:
+            row = line.strip()
+            cols = line.strip().split("\t")
+            feat_id = cols[0]
+            feat_type = cols[1] # C,N
+            feat_cat_list = cols[2].split(",")
+            feat_cat_list.sort()
+            feat_norm = cols[3]
+            assert feat_id not in fid2type_dic, "feature ID \"%s\" found twice in feature file" %(feat_id)
+            fid2type_dic[feat_id] = feat_type
+            fid2cat_dic[feat_id] = feat_cat_list
+            fid2norm_dic[feat_id] = feat_norm
+    f.closed
+    assert fid2type_dic, "no feature IDs read in from feature file %s" %(feat_file)
+
+    # Read in FASTA sequences.
+    pos_fa_in = args.in_folder + "/" + "positives.fa"
+    neg_fa_in = args.in_folder + "/" + "negatives.fa"
+    assert os.path.exists(pos_fa_in), "--in folder does not contain %s"  %(pos_fa_in)
+    assert os.path.exists(neg_fa_in), "--in folder does not contain %s"  %(neg_fa_in)
+
+    # Check sequence feature.
+    assert "fa" in fid2type_dic, "feature ID \"fa\" not in feature file"
+    seqs_all_uc = False
+    if fid2cat_dic["fa"] == ["A", "C", "G", "U"]:
+        seqs_all_uc = True
+    elif fid2cat_dic["fa"] == ["A", "C", "G", "U", "a", "c", "g", "u"]:
+        if args.uc_context:
+            seqs_all_uc = True
+    else:
+        assert False, "sequence feature alphabet != A,C,G,U(,a,c,g,u)"
+
+    # Read in sequences.
+    seqs_dic = read_fasta_into_dic(pos_fa_in, all_uc=seqs_all_uc)
+    pos_ids_dic = {}
+    for seq_id in seqs_dic:
+        pos_ids_dic[seq_id] = 1
+    seqs_dic = read_fasta_into_dic(neg_fa_in, all_uc=seqs_all_uc,
+                                   seqs_dic=seqs_dic)
+    assert seqs_dic, "no sequences read from FASTA files"
+    neg_ids_dic = {}
+    for seq_id in seqs_dic:
+        if seq_id not in pos_ids_dic:
+            neg_ids_dic[seq_id] = 1
+
+    # Check for 4 (8) distinct nucleotides.
+    cc_dic = seqs_dic_count_chars(seqs_dic)
+    allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1}
+    c_nts = 4
+    if not seqs_all_uc:
+        allowed_nt_dic = {'A': 1, 'C': 1, 'G': 1, 'U': 1, 'a': 1, 'c': 1, 'g': 1, 'u': 1}
+        c_nts = 8
+    for nt in cc_dic:
+        if nt not in allowed_nt_dic:
+            assert False, "sequences with invalid character \"%s\" encountered (allowed characters: ACGU(acgu)" %(nt)
+    assert len(cc_dic) == c_nts, "# of distinct nucleotide characters in sequences != expected # (%i != %i)" %(len(cc_dic), c_nts)
+
+    # Get con_ext info used to create dataset.
+    con_ext_str = "False"
+    gt_settings_file = args.in_folder + "/settings.graphprot2_gt.out"
+    assert os.path.exists(gt_settings_file), "graphprot2 gt settings file %s not found" %(gt_settings_file)
+    with open(gt_settings_file) as f:
+        for line in f:
+            cols = line.strip().split("\t")
+            if cols[0] == "con_ext":
+                if cols[1] != "False":
+                    con_ext_str = cols[1]
+    f.closed
+    if seqs_all_uc:
+        con_ext_str = "False"
+    # Add info to train settings file.
+    train_settings_file = args.out_folder + "/settings.graphprot2_train.out"
+    SETOUT = open(train_settings_file, "a")
+    SETOUT.write("con_ext\t%s\n" %(con_ext_str))
+    SETOUT.close()
+
+    # Get uppercase (viewpoint) region start and ends for each sequence.
+    vp_dic = extract_uc_region_coords_from_fasta(seqs_dic)
+
+    # Check for individually selected features.
+    indiv_feat_dic = {}
+    if args.use_pc_con:
+        indiv_feat_dic["pc.con"] = 1
+    if args.use_pp_con:
+        indiv_feat_dic["pp.con"] = 1
+    if args.use_eia:
+        indiv_feat_dic["eia"] = 1
+    if args.use_tra:
+        indiv_feat_dic["tra"] = 1
+    if args.use_rra:
+        indiv_feat_dic["rra"] = 1
+    if args.use_str_elem_p:
+        indiv_feat_dic["elem_p.str"] = 1
+    if args.use_bps:
+        indiv_feat_dic["bpp.str"] = 1
+
+    # Looking for additional features.
+    std_fid_dic = {"pc.con" : 1,
+                    "pp.con" : 1,
+                    "eia" : 1,
+                    "tra" : 1,
+                    "rra" : 1,
+                    "fa" : 1,
+                    "elem_p.str" : 1,
+                    "bpp.str" : 1}
+    add_fid_dic = {}
+    for fid in fid2type_dic:
+        if fid not in std_fid_dic:
+            add_fid_dic[fid] = 1
+    if args.use_add_feat:
+        for fid in add_fid_dic:
+            indiv_feat_dic[fid] = 1
+
+    # Remove features from fid2type_dic.
+    if indiv_feat_dic:
+        del_feat_list = []
+        for fid in fid2type_dic:
+            if fid == "fa":
+                continue
+            if fid not in indiv_feat_dic:
+                del_feat_list.append(fid)
+        for fid in del_feat_list:
+            del fid2type_dic[fid]
+    # If only_seq, remove all other found features.
+    if args.only_seq:
+        fid2type_dic = {}
+        fid2type_dic["fa"] = "C"
+
+    # Data dictionaries.
+    bpp_dic = {}
+    feat_dic = {}
+
+    # Init feat_dic (storing node feature vector data) with sequence one-hot encodings.
+    for seq_id in seqs_dic:
+        seq = seqs_dic[seq_id]
+        feat_dic[seq_id] = string_vectorizer(seq, custom_alphabet=fid2cat_dic["fa"])
+    # Add sequence one-hot channels.
+    for c in fid2cat_dic["fa"]:
+        channel_nr += 1
+        channel_id = c
+        channel_info = "%i\t%s\tfa\tC\tone_hot" %(channel_nr, channel_id)
+        channel_info_list.append(channel_info)
+
+    # Check and read in more data.
+    for fid, ftype in sorted(fid2type_dic.items()): # fid e.g. fa, ftype: C,N.
+        if fid == "fa": # already added to feat_dic (first item).
+            continue
+        if fid == "bpp.str":
+            pos_bpp_in = args.in_folder + "/" + "positives.bpp.str"
+            neg_bpp_in = args.in_folder + "/" + "negatives.bpp.str"
+            assert os.path.exists(pos_bpp_in), "--in folder does not contain %s"  %(pos_bpp_in)
+            assert os.path.exists(neg_bpp_in), "--in folder does not contain %s"  %(neg_bpp_in)
+            print("Read in base pair data ... ")
+            bpp_dic = read_bpp_into_dic(pos_bpp_in, vp_dic,
+                                        bps_mode=args.bps_mode)
+            bpp_dic = read_bpp_into_dic(neg_bpp_in, vp_dic,
+                                        bpp_dic=bpp_dic,
+                                        bps_mode=args.bps_mode)
+            assert bpp_dic, "no base pair information read in (bpp_dic empty)"
+
+        else:
+            # All features (additional to .fa) like .elem_p.str, .con, .eia, .tra, .rra, or user defined.
+            feat_alphabet = fid2cat_dic[fid]
+            pos_feat_in = args.in_folder + "/positives." + fid
+            neg_feat_in = args.in_folder + "/negatives." + fid
+            assert os.path.exists(pos_feat_in), "--in folder does not contain %s"  %(pos_feat_in)
+            assert os.path.exists(neg_feat_in), "--in folder does not contain %s"  %(neg_feat_in)
+            print("Read in .%s annotations ... " %(fid))
+            n_to_1h = False
+            # Special case: convert elem_p.str probabilities to 1-hot encoding.
+            if fid == "elem_p.str" and args.str_elem_1h:
+                n_to_1h = True
+            feat_dic = read_feat_into_dic(pos_feat_in, ftype,
+                                          feat_dic=feat_dic,
+                                          n_to_1h=n_to_1h,
+                                          label_list=feat_alphabet)
+            feat_dic = read_feat_into_dic(neg_feat_in, ftype,
+                                          feat_dic=feat_dic,
+                                          n_to_1h=n_to_1h,
+                                          label_list=feat_alphabet)
+            assert feat_dic, "no .%s information read in (feat_dic empty)" %(fid)
+            if fid == "elem_p.str" and args.str_elem_1h:
+                ftype = "C"
+            if ftype == "N":
+                for c in feat_alphabet:
+                    channel_nr += 1
+                    channel_id = c
+                    encoding = fid2norm_dic[fid]
+                    channel_info = "%i\t%s\t%s\tN\t%s" %(channel_nr, channel_id, fid, encoding)
+                    channel_info_list.append(channel_info)
+            elif ftype == "C":
+                for c in feat_alphabet:
+                    channel_nr += 1
+                    #channel_id = fid + "_" + c
+                    channel_id = c
+                    channel_info = "%i\t%s\t%s\tC\tone_hot" %(channel_nr, channel_id, fid)
+                    channel_info_list.append(channel_info)
+            else:
+                assert False, "invalid feature type given (%s) for feature %s" %(ftype,fid)
+
+    # Check for same feature vector lengths.
+    fvl_dic = {}
+    for seq_id in feat_dic:
+        fvl_dic[len(feat_dic[seq_id][0])] = 1
+    len_fvl_dic = len(fvl_dic)
+    assert len_fvl_dic == 1, "Various feature vector lengths (%i) encountered in feat_dic" %(len_fvl_dic)
+
+    # Write used features.out file to graphprot2 train output folder.
+    feat_table_out = args.out_folder + "/" + "features.out"
+    FEATOUT = open(feat_table_out, "w")
+    with open(feat_file) as f:
+        for line in f:
+            row = line.strip()
+            cols = line.strip().split("\t")
+            feat_id = cols[0]
+            if feat_id in fid2type_dic:
+                if feat_id == "fa":
+                    if seqs_all_uc:
+                        FEATOUT.write("fa\tC\tA,C,G,U\t-\n")
+                    else:
+                        FEATOUT.write("fa\tC\tA,C,G,U,a,c,g,u\t-\n")
+                elif feat_id == "elem_p.str" and args.str_elem_1h:
+                    FEATOUT.write("elem_p.str\tC\tE,H,I,M,S\t-\n")
+                else:
+                    FEATOUT.write("%s\n" %(row))
+    f.closed
+    FEATOUT.close()
+
+    # Output channel infos.
+    CIOUT = open(channel_infos_out, "w")
+    CIOUT.write("ch\tch_id\tfeat_id\tfeat_type\tencoding\n")
+    for ch_info in channel_info_list:
+        CIOUT.write("%s\n" %(ch_info))
+    CIOUT.close()
+
+    """
+    Generate graphs.
+
+    """
+    # Sequence ID list + label list.
+    seq_ids_list = []
+    sorted_pos_ids_list = []
+    label_list = []
+    idx2id_dic = {}
+    id2idx_dic = {}
+    i = 0
+    for seq_id,c in sorted(pos_ids_dic.items()):
+        seq_ids_list.append(seq_id)
+        sorted_pos_ids_list.append(seq_id)
+        label_list.append(1)
+        id2idx_dic[seq_id] = i
+        idx2id_dic[i] = seq_id
+        i += 1
+    for seq_id,c in sorted(neg_ids_dic.items()):
+        seq_ids_list.append(seq_id)
+        label_list.append(0)
+        id2idx_dic[seq_id] = i
+        idx2id_dic[i] = seq_id
+        i += 1
+
+    """
+    In case of generic model cross validation (--gm-cv), create new label_list.
+    Use n labels for n RBPs + + "0" label for negatives.
+
+    """
+    if args.gm_cv:
+        # Seen labels (== RBP names) dictionary.
+        label_dic = {}
+        # Site ID to label dictionary.
+        id2l_dic = {}
+        # Label index.
+        li = 0
+        for seq_id in sorted_pos_ids_list:
+            m = re.search("(.+?)_", seq_id)
+            if m:
+                label = m.group(1)
+                if not label in label_dic:
+                    li += 1
+                label_dic[label] = li
+                id2l_dic[seq_id] = li
+                if li2label_dic is not None:
+                    li2label_dic[li] = label
+            else:
+                assert False, "Generic data RBP label extraction failed for \"%s\"" % (seq_id)
+        # Construct label list for positives.
+        label_list = []
+        for seq_id in sorted_pos_ids_list:
+            label = id2l_dic[seq_id]
+            labels.append(label)
+        # Add negatives to label vector.
+        label_list = label_list + [0]*len(neg_ids_dic)
+        assert len(label_list) == len(seqs_dic), "len(label_list) != len(seqs_dic)"
+
+    # Construct graphs list.
+    all_graphs = []
+
+    for idx, label in enumerate(label_list):
+        seq_id = seq_ids_list[idx]
+        seq = seqs_dic[seq_id]
+        l_seq = len(seq)
+
+        # Make edge indices for backbone.
+        edge_index_1 = []
+        edge_index_2 = []
+        # Edge indices 0-based!
+        for n_idx in range(l_seq - 1):
+            edge_index_1.append(n_idx)
+            edge_index_2.append(n_idx+1)
+            # In case of undirected graphs, add backward edges too.
+            if args.undirected:
+                edge_index_1.append(n_idx+1)
+                edge_index_2.append(n_idx)
+
+        # Add base pair edges.
+        if bpp_dic:
+            vp_s = vp_dic[seq_id][0] # 1-based.
+            vp_e = vp_dic[seq_id][1] # 1-based.
+            # Entry e.g. 'CLIP_01': ['130-150,0.33', '160-200,0.44', '240-260,0.55']
+            for entry in bpp_dic[seq_id]:
+                m = re.search("(\d+)-(\d+),(.+)", entry)
+                p1 = int(m.group(1)) # 1-based.
+                p2 = int(m.group(2)) # 1-based.
+                bpp_value = float(m.group(3))
+                g_p1 = p1 - 1 # 0-based base pair index.
+                g_p2 = p2 - 1 # 0-based base pair index.
+                # Filter.
+                if bpp_value < args.bps_cutoff: continue
+                # Add base pair depending on set mode.
+                add_edge = False
+                if args.bps_mode == 1:
+                    if (p1 >= vp_s and p1 <= vp_e) or (p2 >= vp_s and p2 <= vp_e):
+                        add_edge = True
+                elif args.bps_mode == 2:
+                    if p1 >= vp_s and p2 <= vp_e:
+                        add_edge = True
+                if add_edge:
+                    edge_index_1.append(g_p1)
+                    edge_index_2.append(g_p2)
+                    if args.undirected:
+                        edge_index_1.append(g_p2)
+                        edge_index_2.append(g_p1)
+
+        # Merge edge indices.
+        edge_index = torch.tensor([edge_index_1, edge_index_2], dtype=torch.long)
+        # x: node feature matrix with shape [num_nodes, num_node_features].
+        x = torch.tensor(feat_dic[seq_id], dtype=torch.float)
+        # Make a PyG Data object / graph from features and edges.
+        # Data class description:
+        # A plain old python object modeling a single graph with various (optional) attributes:
+        # x, edge_index, edge_attr, y (Graph or node targets with arbitrary shape)
+        # https://pytorch-geometric.readthedocs.io/en/latest/modules/data.html
+        data = Data(x=x, edge_index=edge_index, y=label)
+        all_graphs.append(data)
+
+    assert all_graphs, "no graphs constructed (all_graphs empty)"
+
+    """
+    ~~~ RETURNS ~~~
+
+    seqs_dic:
+        Sequences dictionary.
+    idx2id_dic:
+        list index (label_list and all_graphs list) to sequence ID
+        mapping.
+    label_list:
+        Class label list (indices correspond to all_graphs list)
+    all_graphs:
+        List of PyG dataset graphs (indices correspond to label_list)
+
+    """
+    return seqs_dic, idx2id_dic, label_list, all_graphs
 
 
 ################################################################################
@@ -9220,7 +11799,7 @@ def load_geo_training_data(args,
             eia_alphabet = fid2cat_dic[feat_id]
             assert os.path.exists(pos_eia_in), "--in folder does not contain %s"  %(pos_eia_in)
             assert os.path.exists(neg_eia_in), "--in folder does not contain %s"  %(neg_eia_in)
-            print("Read in exon intron annotations ... ")
+            print("Read in exon-intron annotations ... ")
             pos_eia_dic = read_feat_into_dic(pos_eia_in, "C",
                                              label_list=eia_alphabet)
             neg_eia_dic = read_feat_into_dic(neg_eia_in, "C",
@@ -9700,7 +12279,8 @@ def read_settings_into_dic(settings_file):
 ################################################################################
 
 def read_feat_into_dic(feat_file, feat_type,
-                       single_n_feat=False,
+                       feat_dic=False,
+                       n_to_1h=False,
                        label_list=False):
     """
     Read in feature data from feat_file into dictionary of lists.
@@ -9708,11 +12288,11 @@ def read_feat_into_dic(feat_file, feat_type,
 
     feat_type:
         Type of feature, set "C" for categorical and "N" for numerical
-    single_n_feat:
-        Store N values (expects one per input row) as dictionary of 1d lists
-        instead of dictionary of 2d lists (even if one value per row)
     label_list:
         Needed for C feature, supply label_list to do one-hot encoding
+    n_to_1h:
+        For structural elements probabilities, to convert them into
+        one-hot encodings.
 
     1) Categorical data (C)
     Categorical (feat_type == C) data example, with label_list = ['E', 'I']:
@@ -9738,45 +12318,89 @@ def read_feat_into_dic(feat_file, feat_type,
     Generated dictionary:
     {'CLIP_1': [[0.1], [-0.2]], 'CLIP_2': [[0.4], [0.2]]}
 
+    test.pp.con:
+    >CLIP_01
+    0.1
+    0.2
+    >CLIP_02
+    0.4
+    0.5
+
+    test2.pp.con:
+    >CLIP_01
+    0.1	0.2
+    0.3	0.4
+    >CLIP_02
+    0.5	0.6
+    0.7	0.8
+
     >>> num_test_in = "test_data/test.pp.con"
     >>> read_feat_into_dic(num_test_in, "N")
     {'CLIP_01': [[0.1], [0.2]], 'CLIP_02': [[0.4], [0.5]]}
-    >>> read_feat_into_dic(num_test_in, "N", single_n_feat=True)
-    {'CLIP_01': [0.1, 0.2], 'CLIP_02': [0.4, 0.5]}
+    >>> num_test_in = "test_data/test2.pp.con"
+    >>> read_feat_into_dic(num_test_in, "N")
+    {'CLIP_01': [[0.1, 0.2], [0.3, 0.4]], 'CLIP_02': [[0.5, 0.6], [0.7, 0.8]]}
+    >>> add_feat_dic = {'CLIP_01': [[0.1], [0.2]], 'CLIP_02': [[0.4], [0.5]]}
+    >>> num_test_in = "test_data/test.pp.con"
+    >>> read_feat_into_dic(num_test_in, "N", feat_dic=add_feat_dic)
+    {'CLIP_01': [[0.1, 0.1], [0.2, 0.2]], 'CLIP_02': [[0.4, 0.4], [0.5, 0.5]]}
     >>> cat_test_in = "test_data/test.tra"
     >>> tra_labels = ['C', 'F', 'N', 'T']
     >>> read_feat_into_dic(cat_test_in, "C", label_list=tra_labels)
     {'site1': [[0, 1, 0, 0], [0, 0, 0, 1]], 'site2': [[1, 0, 0, 0], [0, 0, 1, 0]]}
 
     """
+    feat_dic_given = False
+    if not feat_dic:
+        feat_dic = {}
+    else:
+        feat_dic_given = True
     types = ['C', 'N']
     assert feat_type in types, "invalid feature type given (expects C or N)"
-    feat_dic = {}
     if feat_type == 'C':
         assert label_list, "label_list needed if feat_type == C"
         with open(feat_file) as f:
             for line in f:
                 cols = line.strip().split("\t")
                 seq_id = cols[0]
-                feat_dic[seq_id] = string_vectorizer(cols[1], custom_alphabet=label_list)
+                if seq_id not in feat_dic:
+                    feat_dic[seq_id] = string_vectorizer(cols[1], custom_alphabet=label_list)
+                else:
+                    # feat_dic already populated / initialized.
+                    add_list = string_vectorizer(cols[1], custom_alphabet=label_list)
+                    assert add_list, "add_list empty (feat_file: %s, seq_id: %s)" %(feat_file, seq_id)
+                    # Check.
+                    l_old = len(feat_dic[seq_id])
+                    l_add = len(add_list)
+                    assert l_old == l_add, "existing list length in feat_dic != list length from feat_file to add (feat_file: %s, seq_id: %s)" %(feat_file, seq_id)
+                    for i in range(l_old):
+                        feat_dic[seq_id][i] += add_list[i]
         f.closed
     else:
         seq_id = ""
+        pos_i = 0
         with open(feat_file) as f:
             for line in f:
                 if re.search(">.+", line):
                     m = re.search(">(.+)", line)
                     seq_id = m.group(1)
-                    feat_dic[seq_id] = []
+                    # Init only necessary if no populated / initialized feat_dic given.
+                    if not feat_dic_given:
+                        feat_dic[seq_id] = []
+                    pos_i = 0
                 else:
-                    if single_n_feat:
-                        v = float(line.strip())
-                        feat_dic[seq_id].append(v)
+                    vl = line.strip().split('\t')
+                    for i,v in enumerate(vl):
+                        vl[i] = float(v)
+                    if n_to_1h:
+                        vl_1h = convert_prob_list_to_1h(vl)
+                        vl = vl_1h
+                    if feat_dic_given:
+                        for v in vl:
+                            feat_dic[seq_id][pos_i].append(v)
                     else:
-                        vl = line.strip().split('\t')
-                        for i,v in enumerate(vl):
-                            vl[i] = float(v)
                         feat_dic[seq_id].append(vl)
+                    pos_i += 1
         f.closed
     assert feat_dic, "feat_dic empty"
     return feat_dic
@@ -9862,9 +12486,10 @@ def revise_in_sites(in_bed, out_bed,
 
 def process_test_sites(in_bed, out_bed, chr_len_dic,
                        id2pl_dic, args,
+                       check_ids=False,
                        transcript_regions=False,
                        count_dic=None,
-                       id_prefix="CLIP"):
+                       id_prefix=False):
     """
     Process --in sites from graphprot2 gp.
 
@@ -9900,18 +12525,12 @@ def process_test_sites(in_bed, out_bed, chr_len_dic,
             c_in += 1
             # Restrict to standard chromosomes.
             if not transcript_regions:
-                if re.search("^chr", chr_id):
-                    if not re.search("^chr[\dMXY]", chr_id):
-                        c_filt_ref += 1
-                        continue
+                new_chr_id = check_convert_chr_id(chr_id)
+                if not new_chr_id:
+                    c_filt_ref += 1
+                    continue
                 else:
-                    # Convert to "chr" IDs.
-                    if not re.search("^[\dMXY]", chr_id):
-                        c_filt_ref += 1
-                        continue
-                    if chr_id == "MT":
-                        chr_id = "M"
-                    chr_id = "chr" + chr_id
+                    chr_id = new_chr_id
             # Make site polarities "+" for transcript sites.
             if transcript_regions:
                 site_pol = "+"
@@ -9920,8 +12539,13 @@ def process_test_sites(in_bed, out_bed, chr_len_dic,
 
             # IDs.
             c_out += 1
-            new_site_id = id_prefix + "_" + str(c_out)
-            if args.keep_ids:
+            # Remove white spaces from IDs.
+            if check_ids:
+                site_id = site_id.strip().replace(" ", "_")
+            # New IDs.
+            if id_prefix:
+                new_site_id = id_prefix + "_" + str(c_out)
+            else:
                 new_site_id = site_id
 
             # Store future uppercase region length.
@@ -10038,18 +12662,12 @@ def process_in_sites(in_bed, out_bed, chr_len_dic, args,
                         continue
             # Restrict to standard chromosomes.
             if not transcript_regions:
-                if re.search("^chr", chr_id):
-                    if not re.search("^chr[\dMXY]", chr_id):
-                        c_filt_ref += 1
-                        continue
+                new_chr_id = check_convert_chr_id(chr_id)
+                if not new_chr_id:
+                    c_filt_ref += 1
+                    continue
                 else:
-                    # Convert to "chr" IDs.
-                    if not re.search("^[\dMXY]", chr_id):
-                        c_filt_ref += 1
-                        continue
-                    if chr_id == "MT":
-                        chr_id = "M"
-                    chr_id = "chr" + chr_id
+                    chr_id = new_chr_id
             # Make site polarities "+" for transcript sites.
             if transcript_regions:
                 site_pol = "+"
@@ -10137,7 +12755,8 @@ def process_in_sites(in_bed, out_bed, chr_len_dic, args,
 
 ################################################################################
 
-def scores_to_plot_df(scores):
+def scores_to_plot_df(scores,
+                      stdev=False):
     """
     Given a list of scores, generate a dataframe with positions from 1 to
     length(scores_list) and scores list.
@@ -10147,14 +12766,50 @@ def scores_to_plot_df(scores):
     Then create dataframe with
     pd.DataFrame (data, columns = ['pos', 'scores'])
 
+    stdev:
+        Vector of standard deviations belonging to scores.
+
     """
     assert scores, "given scores list empty"
-    data = {'pos': [], 'score': []}
+    if stdev:
+        assert len(scores) == len(stdev), "len(scores) != len(stdev)"
+        data = {'pos': [], 'score': [], 'stdev': []}
+    else:
+        data = {'pos': [], 'score': []}
     for i,s in enumerate(scores):
         data['pos'].append(i+1)
         data['score'].append(s)
-    plot_df = pd.DataFrame(data, columns = ['pos', 'score'])
+        if stdev:
+            data['stdev'].append(stdev[i])
+    if stdev:
+        plot_df = pd.DataFrame(data, columns = ['pos', 'score', 'stdev'])
+    else:
+        plot_df = pd.DataFrame(data, columns = ['pos', 'score'])
     return plot_df
+
+
+################################################################################
+
+def convert_prob_list_to_1h(lst):
+    """
+    Convert list of probabilities or score values into one-hot encoding list,
+    where element with highest prob./score gets 1, others 0.
+
+    >>> lst = [0.3, 0.5, 0.2, 0.1, 0.1]
+    >>> convert_prob_list_to_1h(lst)
+    [0, 1, 0, 0, 0]
+
+    """
+    assert lst, "given lst empty"
+    new_lst = [0]*len(lst)
+    max_i = 0
+    max_e = 0
+    for i,e in enumerate(lst):
+        if e > max_e:
+            max_e = e
+            max_i = i
+    new_lst[max_i] = 1
+    return new_lst
 
 
 ################################################################################
@@ -10266,6 +12921,69 @@ def add_label_plot(df, fig, gs, i,
 
 ################################################################################
 
+def make_motif_label_plot_df(feat_id, ch_info_dic, motif_matrix):
+    """
+    Make a feature dataframe for label data motif plotting.
+    Label data: sequence, eia, tra, rra, elem_p.str,
+                and additional categorical features
+
+    """
+    data = {}
+    assert feat_id in ch_info_dic, "feat_id %s not in ch_info_dic" %(feat_id)
+    feat_data = ch_info_dic[feat_id]
+    feat_idxs = feat_data[1]
+    feat_alphabet = feat_data[2]
+    for c in feat_alphabet:
+        data[c] = []
+    for fv in motif_matrix:
+        for i,fi in enumerate(feat_idxs):
+            data[feat_alphabet[i]].append(fv[fi])
+
+    feat_plot_df = pd.DataFrame(data, columns = feat_alphabet)
+    feat_plot_df.index.name = "pos"
+    return feat_plot_df
+
+
+################################################################################
+
+def make_motif_scores_plot_df(feat_id, ch_info_dic, motif_matrix,
+                              stdev=False):
+    """
+    Make a feature dataframe for scores data motif plotting.
+    Scores data: pc.con, pp.con, additional numerical features
+
+    """
+    assert feat_id in ch_info_dic, "feat_id %s not in ch_info_dic" %(feat_id)
+    assert motif_matrix, "motif_matrix empty"
+    scores = []
+    feat_data = ch_info_dic[feat_id]
+    feat_idxs = feat_data[1]
+    assert len(feat_idxs) == 1, "len(feat_idxs) != 1 for feature %s" %(feat_id)
+    feat_idx = feat_idxs[0]
+    # Get scores list.
+    for fv in motif_matrix:
+        scores.append(fv[feat_idx])
+    # Make dataframe.
+    data = {}
+    if stdev:
+        assert len(scores) == len(stdev), "len(scores) != len(stdev) for feature ID %s" %(feat_id)
+        data = {'pos': [], 'score': [], 'stdev': []}
+    else:
+        data = {'pos': [], 'score': []}
+    for i,s in enumerate(scores):
+        data['pos'].append(i+1)
+        data['score'].append(s)
+        if stdev:
+            data['stdev'].append(stdev[i])
+    if stdev:
+        plot_df = pd.DataFrame(data, columns = ['pos', 'score', 'stdev'])
+    else:
+        plot_df = pd.DataFrame(data, columns = ['pos', 'score'])
+    return plot_df
+
+
+################################################################################
+
 def add_motif_label_plot(df, fig, gs, i,
                          color_dict=False,
                          y_label_size=9,
@@ -10296,6 +13014,7 @@ def add_motif_label_plot(df, fig, gs, i,
 def add_phastcons_scores_plot(df, fig, gs, i,
                               stdev=False,
                               y_label_size=9,
+                              disable_y_labels=False,
                               ylabel="phastCons score"):
     """
     Make phastCons conservation scores plot.
@@ -10330,9 +13049,10 @@ def add_phastcons_scores_plot(df, fig, gs, i,
     #nn_logo.ax.set_xlim([20, 115])
     #ax.set_xticks([]) # no x-ticks.
     #nn_logo.ax.set_ylim([-.6, .75])
-    ax.set_ylim([0, 1])
-    ax.set_yticks([0, 1])
-    ax.set_yticklabels(['0', '1'])
+    if not disable_y_labels:
+        ax.set_ylim([0, 1])
+        ax.set_yticks([0, 1])
+        ax.set_yticklabels(['0', '1'])
     ax.set_xticks([])
     ax.set_xticklabels([])
     plt.yticks(fontsize=7)
@@ -10394,7 +13114,151 @@ def add_phylop_scores_plot(df, fig, gs, i,
 
 ################################################################################
 
-def make_feature_attribution_plot(seq, profile_scores, plot_out_file,
+def make_feature_attribution_plot(seq, profile_scores, feat_list,
+                                  ch_info_dic, plot_out_file,
+                                  seq_label_plot=False):
+    """
+    Make a feature attribution plot, showing for each sequence position
+    the importance score, as well as additional features in subplots.
+    logomaker (pip install logomaker) is used for plotting.
+
+    Dependencies:
+    import numpy as np
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    import matplotlib.gridspec as gridspec
+    import logomaker
+
+    """
+
+    # Checks.
+    assert seq, "given seq empty"
+    assert profile_scores, "given profile_scores list empty"
+    assert feat_list, "given feat_list list empty"
+    assert ch_info_dic, "given ch_info_dic list empty"
+    assert plot_out_file, "given plot_out_file empty"
+
+    # Dataframe for importance scores.
+    seq_alphabet = ch_info_dic["fa"][2]
+    is_df = seq_to_plot_df(seq, seq_alphabet, scores=profile_scores)
+    # Number of plots.
+    n_subplots = 1
+    height_ratios = [2]
+
+    # Optional sequence label plot.
+    if seq_label_plot:
+        sl_df = seq_to_plot_df(seq, seq_alphabet)
+        n_subplots += 1
+        height_ratios.append(1)
+
+    # Heights and number of additional plots.
+    for fid in ch_info_dic:
+        if fid == "fa":
+            continue
+        n_subplots += 1
+        height_ratios.append(1)
+
+    # Init plot.
+    fig_width = 8
+    fig_height = 0.8 * n_subplots
+    fig = plt.figure(figsize=(fig_width, fig_height))
+    gs = gridspec.GridSpec(nrows=n_subplots, ncols=1, height_ratios=height_ratios)
+
+    # Plot subplots.
+    i_plot = 0
+    color_dict = {'A' : '#008000', 'C': '#0000ff',  'G': '#ffa600',  'U': '#ff0000'}
+    add_importance_scores_plot(is_df, fig, gs, i_plot,
+                               color_dict=color_dict,
+                               y_label_size=5.5)
+
+    # Plot optional sequence label plot.
+    if seq_label_plot:
+        i_plot += 1
+        color_dict = {'A' : '#008000', 'C': '#0000ff',  'G': '#ffa600',  'U': '#ff0000'}
+        add_label_plot(sl_df, fig, gs, i_plot, color_dict=color_dict, y_label="sequence",
+                       y_label_size=4)
+
+    # Plot additional plots.
+    for fid, fdt in sorted(ch_info_dic.items()):
+        if fid == "fa":
+            continue
+        feat_type = fdt[0]
+        feat_idxs = fdt[1]
+        feat_alphabet = fdt[2]
+        feat_encoding = fdt[3]
+        l_idxs = len(feat_idxs)
+        # Plot index.
+        i_plot += 1
+        if feat_type == "C":
+            # Categorical data.
+            feat_str = ""
+            for fv in feat_list:
+                for i,fi in enumerate(feat_idxs):
+                    if fv[fi] == 1:
+                        feat_str += feat_alphabet[i]
+                        break
+            c_df = seq_to_plot_df(feat_str, feat_alphabet)
+            color_dict = False
+            add_label_plot(c_df, fig, gs, i_plot, color_dict=color_dict, y_label=fid,
+                           y_label_size=4)
+        elif feat_type == "N":
+            # Numerical data.
+            data = {}
+            color_dict = False
+            # Check.
+            for c in feat_alphabet:
+                data[c] = []
+            for fv in feat_list:
+                for i,fi in enumerate(feat_idxs):
+                    data[feat_alphabet[i]].append(fv[fi])
+            #plot_df = pd.DataFrame(data, columns = feat_alphabet)
+            #plot_df.index.name = "pos"
+            if fid == "pc.con":
+                assert l_idxs == 1, "len(feat_idxs) != 1 for pc.con feature (instead: %i)" %(l_idxs)
+                pc_con_df = scores_to_plot_df(data[feat_alphabet[0]])
+                add_phastcons_scores_plot(pc_con_df, fig, gs, i_plot,
+                                          y_label_size=4)
+            elif fid == "pp.con":
+                assert l_idxs == 1, "len(feat_idxs) != 1 for pp.con feature (instead: %i)" %(l_idxs)
+                pp_con_df = scores_to_plot_df(data[feat_alphabet[0]])
+                add_phylop_scores_plot(pp_con_df, fig, gs, i_plot,
+                                       y_label_size=4)
+            elif fid == "elem_p.str":
+                assert l_idxs == 5, "len(feat_idxs) != 5 for elem_p.str feature (instead: %i)" %(l_idxs)
+                elem_plot_df = pd.DataFrame(data, columns = feat_alphabet)
+                elem_plot_df.index.name = "pos"
+                add_label_plot(elem_plot_df, fig, gs, i_plot,
+                               color_dict=color_dict,
+                               y_label=fid,
+                               y_label_size=4)
+            else:
+                # All other numerical values.
+                assert l_idxs == 1, "len(feat_idxs) != 1 for additional numerical %s feature (instead: %i)" %(fid, l_idxs)
+                add_n_df = scores_to_plot_df(data[feat_alphabet[0]])
+                if feat_encoding == "-":
+                    add_phastcons_scores_plot(add_n_df, fig, gs, i_plot,
+                                              disable_y_labels=True,
+                                              ylabel=fid,
+                                              y_label_size=4)
+                elif feat_encoding == "prob": # 0..1
+                    add_phastcons_scores_plot(add_n_df, fig, gs, i_plot,
+                                              ylabel=fid,
+                                              y_label_size=4)
+                elif feat_encoding == "minmax_norm": # 0..1
+                    add_phastcons_scores_plot(add_n_df, fig, gs, i_plot,
+                                              ylabel=fid,
+                                              y_label_size=4)
+                else:
+                    assert False, "invalid feature normalization string given for additional numerical %s feature (got: %s)" %(fid, feat_encoding)
+
+    # Store plot.
+    fig.savefig(plot_out_file, dpi=150, transparent=False)
+    plt.close(fig)
+
+
+################################################################################
+
+def make_feature_attribution_plot_old(seq, profile_scores, plot_out_file,
                                   seq_alphabet=["A","C","G","U"],
                                   eia_alphabet=["E", "I"],
                                   rra_alphabet=["N", "R"],
@@ -10647,10 +13511,129 @@ def motif_scores_to_plot_df(motif_sc_ll):
     plot_df = pd.DataFrame(data, columns = ['pos', 'score', 'stdev'])
     return plot_df
 
+################################################################################
+
+def make_motif_plot(motif_matrix, ch_info_dic, motif_out_file,
+                    fid2stdev_dic=False):
+    """
+    Plot motif using a 2D list with size motif_size*num_features, which
+    stores the average values for all feature channels.
+
+    fid2stdev_dic:
+        Feature ID to list of standard deviations (list length == motif size).
+        Store score stdev at each motif position. For one-channel numerical
+        features (pc.con, pp.con, additional numerical features).
+
+    """
+
+    # First make sequence plot, then alphabetically rest of features.
+    seq_df = make_motif_label_plot_df("fa", ch_info_dic, motif_matrix)
+
+    # Number of plots.
+    n_subplots = 1
+    height_ratios = [2.5]
+
+    # Heights and number of additional plots.
+    for fid in ch_info_dic:
+        if fid == "fa":
+            continue
+        n_subplots += 1
+        height_ratios.append(1)
+
+    # Init plot.
+    fig_width = 4.5
+    fig_height = 1.5 * n_subplots
+    if n_subplots == 1:
+        fig_height = 2.5
+    fig = plt.figure(figsize=(fig_width, fig_height))
+    gs = gridspec.GridSpec(nrows=n_subplots, ncols=1, height_ratios=height_ratios)
+
+    # Plot subplots.
+    i_plot = 0
+    # Sequence motif plot.
+    color_dict = {'A' : '#008000', 'C': '#0000ff',  'G': '#ffa600',  'U': '#ff0000'}
+    add_motif_label_plot(seq_df, fig, gs, i_plot, color_dict=color_dict, y_label="sequence")
+
+    # Plot additional plots.
+    for fid, fdt in sorted(ch_info_dic.items()):
+        if fid == "fa":
+            continue
+        feat_type = fdt[0]
+        feat_idxs = fdt[1]
+        feat_alphabet = fdt[2]
+        feat_encoding = fdt[3]
+        l_idxs = len(feat_idxs)
+        color_dict = False
+        stdev = False
+        # Plot index.
+        i_plot += 1
+        # Categorical data.
+        if feat_type == "C":
+            c_df = make_motif_label_plot_df(fid, ch_info_dic, motif_matrix)
+            add_motif_label_plot(c_df, fig, gs, i_plot,
+                                 color_dict=color_dict,
+                                 y_label_size=7,
+                                 y_label=fid)
+        elif feat_type == "N":
+            if fid == "pc.con":
+                if fid2stdev_dic:
+                    assert fid in fid2stdev_dic, "fid2stdev_dic given but missing feature ID %s" %(fid)
+                    stdev = fid2stdev_dic[fid]
+                pc_df = make_motif_scores_plot_df(fid, ch_info_dic, motif_matrix,
+                                                  stdev=stdev)
+                add_phastcons_scores_plot(pc_df, fig, gs, i_plot,
+                                          stdev=stdev,
+                                          y_label_size=4)
+            elif fid == "pp.con":
+                if fid2stdev_dic:
+                    assert fid in fid2stdev_dic, "fid2stdev_dic given but missing feature ID %s" %(fid)
+                    stdev = fid2stdev_dic[fid]
+                pp_df = make_motif_scores_plot_df(fid, ch_info_dic, motif_matrix,
+                                                  stdev=stdev)
+                add_phylop_scores_plot(pp_df, fig, gs, i_plot,
+                                       stdev=stdev,
+                                       y_label_size=4)
+            elif fid == "elem_p.str":
+                elem_df = make_motif_label_plot_df(fid, ch_info_dic, motif_matrix)
+                add_motif_label_plot(elem_df, fig, gs, i_plot,
+                                     color_dict=color_dict,
+                                     y_label_size=7,
+                                     y_label=fid)
+            else:
+                # Additional numerical features, treat like pc.con, pp.con.
+                assert l_idxs == 1, "len(feat_idxs) != 1 for additional numerical %s feature (instead: %i)" %(fid, l_idxs)
+                if fid2stdev_dic:
+                    assert fid in fid2stdev_dic, "fid2stdev_dic given but missing feature ID %s" %(fid)
+                    stdev = fid2stdev_dic[fid]
+                add_n_df = make_motif_scores_plot_df(fid, ch_info_dic, motif_matrix,
+                                                  stdev=stdev)
+                if feat_encoding == "-":
+                    add_phastcons_scores_plot(add_n_df, fig, gs, i_plot,
+                                              stdev=stdev,
+                                              disable_y_labels=True,
+                                              ylabel=fid,
+                                              y_label_size=4)
+                elif feat_encoding == "prob": # 0..1
+                    add_phastcons_scores_plot(add_n_df, fig, gs, i_plot,
+                                              stdev=stdev,
+                                              ylabel=fid,
+                                              y_label_size=4)
+                elif feat_encoding == "minmax_norm": # 0..1
+                    add_phastcons_scores_plot(add_n_df, fig, gs, i_plot,
+                                              stdev=stdev,
+                                              ylabel=fid,
+                                              y_label_size=4)
+                else:
+                    assert False, "invalid feature normalization string given for additional numerical %s feature (got: %s)" %(fid, feat_encoding)
+
+    # Store plot.
+    fig.savefig(motif_out_file, dpi=150, transparent=False)
+    plt.close(fig)
+
 
 ################################################################################
 
-def make_motif_plot(motif_seqs_ll, motif_out_file,
+def make_motif_plot_old(motif_seqs_ll, motif_out_file,
                     motif_eia_ll=False,
                     motif_rra_ll=False,
                     motif_tra_ll=False,
@@ -10670,7 +13653,7 @@ def make_motif_plot(motif_seqs_ll, motif_out_file,
     motif_seqs_ll:
         List of sequence character lists (same lengths)
     motif_eia_ll:
-        List of exon intron character lists (same lengths)
+        List of exon-intron character lists (same lengths)
     motif_rra_ll:
         List of repeat region character lists (same lengths)
     motif_tra_ll:
@@ -10697,7 +13680,7 @@ def make_motif_plot(motif_seqs_ll, motif_out_file,
     # Number of plots.
     n_subplots = 1
     height_ratios = [2.5]
-    # Exon intron motif dataframe.
+    # Exon-intron motif dataframe.
     if motif_eia_ll:
         eia_df = motif_seqs_to_plot_df(motif_eia_ll, alphabet=eia_alphabet)
         n_subplots += 1
@@ -10742,7 +13725,7 @@ def make_motif_plot(motif_seqs_ll, motif_out_file,
     else:
         assert False, "invalid seq_alphabet given"
     add_motif_label_plot(seq_df, fig, gs, i, color_dict=color_dict, y_label="sequence")
-    # Exon intron motif.
+    # Exon-intron motif.
     if motif_eia_ll:
         i += 1
         color_dict = False
@@ -11586,8 +14569,8 @@ by GraphProt2 (graphprot2 gp):
     if test_eia_stats_dic:
         occ_labels = ["F", "T"]
         mdtext += "\n"
-        mdtext += "- [Exon intron region distribution](#eia-plot)\n"
-        mdtext += "- [Exon intron region statistics](#eia-stats)"
+        mdtext += "- [Exon-intron region distribution](#eia-plot)\n"
+        mdtext += "- [Exon-intron region statistics](#eia-stats)"
     if test_tra_stats_dic:
         occ_labels = ["S", "E", "A", "Z", "B"]
         mdtext += "\n"
@@ -11824,10 +14807,10 @@ calculated before normalization (normalizing values to -1 .. 1).
             mdtext += "| mean score | %.3f (+-%.3f) |\n" %(test_phylop_stats_dic['mean'], test_phylop_stats_dic['stdev'])
         mdtext += "\n&nbsp;\n&nbsp;\n"
 
-    # Exon intron region plots and stats.
+    # Exon-intron region plots and stats.
     if test_eia_stats_dic:
         mdtext += """
-## Exon intron region distribution ### {#eia-plot}
+## Exon-intron region distribution ### {#eia-plot}
 
 Distribution of exon and intron regions for the prediction set.
 
@@ -11838,17 +14821,17 @@ Distribution of exon and intron regions for the prediction set.
                                           perc=True, theme=theme)
 
         eia_plot_path = plots_folder + "/" + eia_plot
-        mdtext += '<img src="' + eia_plot_path + '" alt="Exon intron region distribution"' + "\n"
-        mdtext += 'title="Exon intron region distribution" width="550" />' + "\n"
+        mdtext += '<img src="' + eia_plot_path + '" alt="Exon-intron region distribution"' + "\n"
+        mdtext += 'title="Exon-intron region distribution" width="550" />' + "\n"
         mdtext += """
 **Figure:** Percentages of exon (E) and intron (I) regions for the prediction set.
 If --eia-n is set, also include regions not covered by introns or exons (N).
 
 &nbsp;
 
-## Exon intron region statistics ### {#eia-stats}
+## Exon-intron region statistics ### {#eia-stats}
 
-**Table:** Exon intron region statistics for the prediction set.
+**Table:** Exon-intron region statistics for the prediction set.
 If --eia-ib is set, also include statistics for sites containing intron
 5' (F) and intron 3' (T) ends.
 
@@ -12342,8 +15325,8 @@ def calc_ext_str_features(id2bedrow_dic, chr_len_dic,
     BPPOUT.close()
 
     # Remove tmp files.
-    #if os.path.exists(tmp_fa):
-    #    os.remove(tmp_fa)
+    if os.path.exists(tmp_fa):
+        os.remove(tmp_fa)
     if os.path.exists(tmp_bed):
         os.remove(tmp_bed)
     if os.path.exists(tmp_bpp_out):
@@ -12367,8 +15350,9 @@ def polish_fasta_seqs(in_fa, len_dic,
     """
     import random
     assert len_dic, "len_dic empty"
-    # Read in FASTA.
-    seqs_dic = read_fasta_into_dic(in_fa)
+    # Read in FASTA (do not skip N containing extensions here).
+    seqs_dic = read_fasta_into_dic(in_fa,
+                                   skip_n_seqs=False)
     assert len(seqs_dic) == len(len_dic), "len(seqs_dic) != len(len_dic)"
     FAOUT = open(in_fa,"w")
     for seq_id in seqs_dic:
@@ -12453,6 +15437,35 @@ def seq_get_vp_region(seq):
     if m:
         vp_seq = m.group(1)
     return vp_seq
+
+
+################################################################################
+
+def drop_a_line():
+    """
+    Drop a line.
+
+    """
+    lines = []
+    a = """
+       \"Of all the RBP-BSP tools in the world,
+           this is definitely one of them.\"
+"""
+    b = """
+                     \"Let's Party!\"
+"""
+    c = """
+          \"I eat Green Berets for breakfast.\"
+"""
+    d = """
+           \"There's always barber college.\"
+"""
+
+    #lines.append(a)
+    lines.append(b)
+    lines.append(c)
+    lines.append(d)
+    return(random.choice(lines))
 
 
 ################################################################################
